@@ -1,0 +1,50 @@
+name: Download or install problem
+description: Report trouble downloading, installing, opening, or trusting the desktop app.
+title: "[Install]: "
+labels: ["install", "support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for download, install, Gatekeeper, SmartScreen, launch, or first-run problems.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS Apple Silicon
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: "v2.5.0"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      placeholder: Describe the exact error, warning, or unexpected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Downloaded ...
+        2. Opened ...
+        3. Saw ...
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshot or logs
+      description: Drag screenshots or log snippets here if available. Do not paste API keys or secrets.
+    validations:
+      required: false

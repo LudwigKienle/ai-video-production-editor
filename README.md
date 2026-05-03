@@ -15,6 +15,13 @@ review, and export workflows.
 
 ![AI Video Production Editor preview](docs/assets/studio-preview.png)
 
+## Why This Exists
+
+Most AI video tools hide creative work behind isolated prompt boxes. AI Video
+Production Editor is built around a more production-like workflow: keep your
+projects local, bring your own provider keys, compare model outputs, and move
+from planning to generation, editing, review, and export in one desktop app.
+
 ## Download
 
 | Platform | Direct Download | Notes |
@@ -24,6 +31,12 @@ review, and export workflows.
 
 All official files are also available on the
 [latest GitHub Release](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest).
+
+## Start in 30 Seconds
+
+1. Download the installer for your operating system.
+2. Open the app and add the AI provider keys you want to use.
+3. Create a local project, add references or a script, and start producing.
 
 ## What It Does
 
@@ -55,6 +68,13 @@ More videos: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIV
 - Users do not need to build, sign, or notarize the app themselves.
 - Official release files are published only through this repository.
 
+## Roadmap and Feedback
+
+See [ROADMAP.md](ROADMAP.md) for the current product direction.
+
+Use [GitHub Issues](https://github.com/LudwigKienle/ai-video-production-editor/issues)
+for install problems, provider bugs, feature requests, and workflow feedback.
+
 ## Source Code
 
 This public repository is an official download and release repository. It does
@@ -65,6 +85,7 @@ not publish the application source code.
 - Latest release: <https://github.com/LudwigKienle/ai-video-production-editor/releases/latest>
 - All releases: <https://github.com/LudwigKienle/ai-video-production-editor/releases>
 - Feedback and issues: <https://github.com/LudwigKienle/ai-video-production-editor/issues>
+- Roadmap: <https://github.com/LudwigKienle/ai-video-production-editor/blob/main/ROADMAP.md>
 - YouTube: <https://www.youtube.com/@AIVideoProductionEditor>
 - Maintainer: [Ludwig Kienle](https://github.com/LudwigKienle)
 

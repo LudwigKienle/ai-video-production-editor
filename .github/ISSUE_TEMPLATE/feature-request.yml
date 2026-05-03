@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest a workflow, model, provider, export, onboarding, or UX improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What are you trying to do?
+      placeholder: Describe the production workflow or task you want to improve.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested solution
+      placeholder: Describe the feature, control, provider, export, or workflow you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Onboarding
+        - Provider/model support
+        - Image generation
+        - Video generation
+        - Editing/export
+        - Audio
+        - Project workflow
+        - Download/install
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: References or examples
+      placeholder: Add screenshots, links, or examples if useful.
+    validations:
+      required: false
