@@ -32,6 +32,22 @@ All official files are also available on the
 - Keep media, prompts, review notes, and export work in one desktop workflow.
 - Bring your own provider keys and keep project work local-first.
 
+## Watch Tutorials
+
+GitHub opens these tutorial cards on YouTube.
+
+| Quick Overview | Full Mac Walkthrough |
+| --- | --- |
+| [![The AI Video Production Editor](https://i.ytimg.com/vi/-6jo636vRSw/hqdefault.jpg)](https://www.youtube.com/watch?v=-6jo636vRSw) | [![AI Video Production Editor: The Future of Filmmaking on Mac](https://i.ytimg.com/vi/JrgvWCB-EAE/hqdefault.jpg)](https://www.youtube.com/watch?v=JrgvWCB-EAE) |
+| [The AI Video Production Editor](https://www.youtube.com/watch?v=-6jo636vRSw) | [AI Video Production Editor: The Future of Filmmaking on Mac](https://www.youtube.com/watch?v=JrgvWCB-EAE) |
+
+| v2.5 Update | v1.5 Launch Tour |
+| --- | --- |
+| [![I Tested the New AI Editor v2.5](https://i.ytimg.com/vi/cxKKoNJgkgA/hqdefault.jpg)](https://www.youtube.com/watch?v=cxKKoNJgkgA) | [![AI Video Production v1.5 Launch](https://i.ytimg.com/vi/9ELjrnzvpd4/hqdefault.jpg)](https://www.youtube.com/watch?v=9ELjrnzvpd4) |
+| [I Tested the New AI Editor v2.5](https://www.youtube.com/watch?v=cxKKoNJgkgA) | [AI Video Production v1.5 Launch](https://www.youtube.com/watch?v=9ELjrnzvpd4) |
+
+More videos: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIVideoProductionEditor)
+
 ## Trust
 
 - macOS releases are signed and notarized by the official maintainer.
