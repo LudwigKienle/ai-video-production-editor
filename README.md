@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-macOS-arm64.dmg">
-    <img src="https://img.shields.io/badge/Download%20for%20macOS-Signed%20%2B%20Notarized%20DMG-238636?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+    <img src="https://img.shields.io/badge/Download%20for%20macOS-DMG%20Installer-238636?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
   </a>
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-Windows-x64.exe">
     <img src="https://img.shields.io/badge/Download%20for%20Windows-EXE%20Installer-0969DA?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
@@ -26,7 +26,7 @@ from planning to generation, editing, review, and export in one desktop app.
 
 | Platform | Direct Download | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | [Download DMG](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-macOS-arm64.dmg) | Signed and notarized Developer ID build |
+| macOS Apple Silicon | [Download DMG](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-macOS-arm64.dmg) | Official DMG installer |
 | Windows | [Download EXE](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-Windows-x64.exe) | Installer for Windows |
 
 All official files are also available on the
@@ -63,10 +63,10 @@ More videos: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIV
 
 ## Trust
 
-- macOS releases are signed and notarized by the official maintainer.
+- Official desktop installers are published only through GitHub Releases.
+- macOS signing and notarization status is documented per release.
 - Users do not need an Apple Developer account.
 - Users do not need to build, sign, or notarize the app themselves.
-- Official release files are published only through this repository.
 
 ## Roadmap and Feedback
 
