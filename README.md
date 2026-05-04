@@ -22,6 +22,16 @@ Production Editor is built around a more production-like workflow: keep your
 projects local, bring your own provider keys, compare model outputs, and move
 from planning to generation, editing, review, and export in one desktop app.
 
+## Launch 2.6 Social Description
+
+AI Video Production Editor 2.6 is a free, open source desktop workflow for professional AI filmmaking.
+
+This launch focuses on production control rather than prompt-only generation: scene boards, set design, local project context, provider keys, reviews, exports, tutorials, and feedback loops. The roadmap pushes toward ACES / OCIO support, relighting, OpenPose-style control, and node-inspired compositing for AI video workflows.
+
+Download the macOS DMG or Windows EXE, bring your own provider keys, and start a project from the desktop app.
+
+Full launch SEO and social copy: [docs/seo-descriptions.md](docs/seo-descriptions.md)
+
 ## Download
 
 | Platform | Direct Download | Notes |
