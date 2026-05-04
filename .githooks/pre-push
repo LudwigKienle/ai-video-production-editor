@@ -1,0 +1,10 @@
+#!/bin/sh
+blocked="$(git ls-files | grep -E '^(src|electron|server|api|components|workspaces|hooks|utils|packages|conductor)/|^(package.json|package-lock.json|tsconfig\.json|tsconfig\.build\.json|vite\.config\.ts|index\.tsx|constants\.tsx|metadata\.json)$' || true)"
+
+if [ -n "$blocked" ]; then
+  echo "Blocked push: this public repository is download-only and contains source-code paths:" >&2
+  echo "$blocked" >&2
+  exit 1
+fi
+
+exit 0
