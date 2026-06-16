@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Story Project Embed Host Demo</title>
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f1115; color: #e6e6e6; }
+      header { padding: 16px 20px; border-bottom: 1px solid #1f2430; background: #12141b; }
+      main { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; }
+      .panel { background: #151823; border: 1px solid #20263a; border-radius: 10px; padding: 12px; }
+      .panel h2 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa6ff; }
+      button { display: inline-block; margin: 6px 0; padding: 8px 10px; background: #3044ff; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
+      button.secondary { background: #2b2f3d; }
+      iframe { width: 100%; height: calc(100vh - 100px); border: 0; border-radius: 10px; background: #0b0d12; }
+      pre { white-space: pre-wrap; font-size: 12px; line-height: 1.4; color: #c7d2ff; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Story Project Embed Host Demo</strong>
+    </header>
+    <main>
+      <section class="panel">
+        <h2>Controls</h2>
+        <button id="init">Send INIT</button>
+        <button class="secondary" id="request">Request State</button>
+        <button class="secondary" id="set-bible">Set Story Bible</button>
+        <button class="secondary" id="ping">Ping (Ready?)</button>
+        <h2>Events</h2>
+        <pre id="log">Waiting for messages…</pre>
+      </section>
+      <section>
+        <iframe id="story-embed" title="Story Project Embed"></iframe>
+      </section>
+    </main>
+
+    <script type="module" src="/src/embed-host-demo.ts"></script>
+  </body>
+</html>

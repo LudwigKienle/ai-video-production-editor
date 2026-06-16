@@ -1,0 +1,29 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/studio.html",
+      "permanent": false,
+      "has": [
+        {
+          "type": "host",
+          "value": "ai-video-production-editor.example.com"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "destination": "/studio.html",
+      "permanent": false,
+      "has": [
+        {
+          "type": "host",
+          "value": "www.ai-video-production-editor.example.com"
+        }
+      ]
+    }
+  ]
+}

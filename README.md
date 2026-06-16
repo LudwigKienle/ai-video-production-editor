@@ -1,109 +1,265 @@
 # AI Video Production Editor
 
 <p align="center">
-  <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-macOS-arm64.dmg">
-    <img src="https://img.shields.io/badge/Download%20for%20macOS-DMG%20Installer-238636?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest">
+    <img src="https://img.shields.io/badge/Download%20newest%20version-macOS%20DMG%20%7C%20Windows%20EXE-238636?style=for-the-badge&logo=github&logoColor=white" alt="Download newest version: macOS DMG and Windows EXE" />
   </a>
-  <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-Windows-x64.exe">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-EXE%20Installer-0969DA?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/archive/refs/heads/main.zip">
+    <img src="https://img.shields.io/badge/Download%20source%20code-ZIP-0969DA?style=for-the-badge&logo=github&logoColor=white" alt="Download source code ZIP" />
   </a>
+  <br />
+  <strong>Get the newest official desktop build or download the source code.</strong>
+  <br />
+  <sub>End users download the signed/notarized macOS DMG or Windows EXE. Developers can download the full source as ZIP.</sub>
 </p>
 
-Official desktop downloads for **AI Video Production Editor**, a local-first AI
-video production studio for planning, generation, media management, editing,
-review, and export workflows.
+Local-first AI video production studio for orchestrating multi-model image,
+video, audio, editing, review, and export workflows.
 
-![AI Video Production Editor preview](docs/assets/studio-preview.png)
+This project is built around the idea that AI video production should feel more
+like a creative workstation than a locked hosted form: bring your own API keys,
+keep projects local, swap model providers, and extend the workflow with new
+adapters.
 
-## Why This Exists
+## Why this exists
 
-Most AI video tools hide creative work behind isolated prompt boxes. AI Video
-Production Editor is built around a more production-like workflow: keep your
-projects local, bring your own provider keys, compare model outputs, and move
-from planning to generation, editing, review, and export in one desktop app.
+Most AI video tools hide the production process behind a paywall or a single
+provider. AI Video Production Editor is meant to become an open desktop studio
+for creators and developers who want transparent workflows, local project
+ownership, and fast support for new generation models.
 
-## Launch 2.6 Social Description
+The long-term direction is Blender-inspired: a free and open desktop core,
+community-extensible workflows, and optional paid hosted services for teams,
+credits, cloud rendering, support, and convenience.
 
-AI Video Production Editor 2.6 is a free, open source desktop workflow for professional AI filmmaking.
+## What it can do
 
-This launch focuses on production control rather than prompt-only generation: scene boards, set design, local project context, provider keys, reviews, exports, tutorials, and feedback loops. The roadmap pushes toward ACES / OCIO support, relighting, OpenPose-style control, and node-inspired compositing for AI video workflows.
+- Local Electron studio with web preview support.
+- Multi-workspace production flow for imports, generation, editing, audio,
+  review, export, worldbuilding, and asset management.
+- BYOK provider model for Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto,
+  Brave Search, Supabase, Stripe, and related integrations.
+- Video model routing for text-to-video, image-to-video, references, motion
+  guides, audio-conditioned generation, and provider-specific controls.
+- Current image/video model coverage includes GPT Image, Nano Banana, Seedance
+  2.0, Kling 3.0 / v3 Pro, Happy Horse 1.0, Veo, WAN, LTX, Grok, Seedream,
+  Qwen, Flux, and related provider adapters.
+- Local media library, project assets, prompt/context workflows, and export
+  tooling.
+- Optional hosted billing, BYOK proxy, and portal APIs for deployments that want
+  a commercial layer.
 
-Download the macOS DMG or Windows EXE, bring your own provider keys, and start a project from the desktop app.
+## Status
 
-Full launch SEO and social copy: [docs/seo-descriptions.md](docs/seo-descriptions.md)
+This repository is in an open-source transition. The desktop app runs locally,
+but some provider integrations require external API keys, and some hosted
+features require Supabase/Stripe configuration. APIs in the AI video ecosystem
+change quickly; model adapters should be treated as maintained integration
+points rather than permanent contracts.
 
-## Download
+## Screenshots
 
-| Platform | Direct Download | Notes |
-| --- | --- | --- |
-| macOS Apple Silicon | [Download DMG](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-macOS-arm64.dmg) | Official DMG installer |
-| Windows | [Download EXE](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest/download/AI-Video-Production-Editor-Windows-x64.exe) | Installer for Windows |
+![Studio workspace preview](docs/assets/screenshots/studio-open-source-preview.png)
 
-All official files are also available on the
-[latest GitHub Release](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest).
+See the [UI production workflow guide](docs/ui-production-workflow-guide.md)
+for annotated studio screenshots and the full path from script to filming,
+editing, and export.
 
-## Start in 30 Seconds
+For launch copy, GitHub social preview, and LinkedIn-ready assets, see the
+[launch kit](docs/marketing/launch-kit.md).
 
-1. Download the installer for your operating system.
-2. Open the app and add the AI provider keys you want to use.
-3. Create a local project, add references or a script, and start producing.
+More launch screenshots should live in `docs/assets/screenshots/` or
+`docs/assets/ui-guide/` so the README stays useful without committing generated
+release builds or private project media.
 
-## What It Does
+## Video Tutorials
 
-- Plan stories, scenes, shots, references, and production context.
-- Generate and compare AI image, video, audio, and world-model outputs.
-- Keep media, prompts, review notes, and export work in one desktop workflow.
-- Bring your own provider keys and keep project work local-first.
+Official channel: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIVideoProductionEditor)
 
-## Watch Tutorials
+Recommended support path:
 
-GitHub opens these tutorial cards on YouTube.
+- Start with the short product overview if you want the fastest first
+  impression.
+- Watch the full Mac walkthrough for API keys, script writing, storyboards,
+  video generation, editing, grading, and export.
+- Watch the v1.5 launch tour for AI Director, Node Graph, Sound tab, and 3D set
+  design.
+- Watch the v2.5 update for the newest release direction, Scene Wall, and
+  YouTube-oriented workflow tips.
 
-| Quick Overview | Full Mac Walkthrough |
-| --- | --- |
-| [![The AI Video Production Editor](https://i.ytimg.com/vi/-6jo636vRSw/hqdefault.jpg)](https://www.youtube.com/watch?v=-6jo636vRSw) | [![AI Video Production Editor: The Future of Filmmaking on Mac](https://i.ytimg.com/vi/JrgvWCB-EAE/hqdefault.jpg)](https://www.youtube.com/watch?v=JrgvWCB-EAE) |
-| [The AI Video Production Editor](https://www.youtube.com/watch?v=-6jo636vRSw) | [AI Video Production Editor: The Future of Filmmaking on Mac](https://www.youtube.com/watch?v=JrgvWCB-EAE) |
+## Quick start
 
-| v2.5 Update | v1.5 Launch Tour |
-| --- | --- |
-| [![I Tested the New AI Editor v2.5](https://i.ytimg.com/vi/cxKKoNJgkgA/hqdefault.jpg)](https://www.youtube.com/watch?v=cxKKoNJgkgA) | [![AI Video Production v1.5 Launch](https://i.ytimg.com/vi/9ELjrnzvpd4/hqdefault.jpg)](https://www.youtube.com/watch?v=9ELjrnzvpd4) |
-| [I Tested the New AI Editor v2.5](https://www.youtube.com/watch?v=cxKKoNJgkgA) | [AI Video Production v1.5 Launch](https://www.youtube.com/watch?v=9ELjrnzvpd4) |
+If you only want to use the desktop app, download the newest installer from
+[GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest):
 
-More videos: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIVideoProductionEditor)
+- macOS: signed and notarized `.dmg`
+- Windows: `.exe` installer
 
-## Trust
+The build instructions below are for developers and contributors.
 
-- Official desktop installers are published only through GitHub Releases.
-- macOS signing and notarization status is documented per release.
-- Users do not need an Apple Developer account.
-- Users do not need to build, sign, or notarize the app themselves.
+Prerequisites:
 
-## Roadmap and Feedback
+- Node.js 20.19 or newer, or Node.js 22.12 or newer
+- npm
+- Optional provider API keys for the models you want to use
+- Python 3 for optional local audio mastering/remastering tools
 
-See [ROADMAP.md](ROADMAP.md) for the current product direction.
+Install dependencies:
 
-Use [GitHub Issues](https://github.com/LudwigKienle/ai-video-production-editor/issues)
-for install problems, provider bugs, feature requests, and workflow feedback.
+```bash
+npm install
+```
 
-## Source Code
+Create local environment overrides:
 
-This public repository is an official download and release repository. It does
-not publish the application source code.
+```bash
+cp .env.example .env.local
+```
 
-## Links
+Run the browser studio:
 
-- Latest release: <https://github.com/LudwigKienle/ai-video-production-editor/releases/latest>
-- All releases: <https://github.com/LudwigKienle/ai-video-production-editor/releases>
-- Feedback and issues: <https://github.com/LudwigKienle/ai-video-production-editor/issues>
-- Roadmap: <https://github.com/LudwigKienle/ai-video-production-editor/blob/main/ROADMAP.md>
-- YouTube: <https://www.youtube.com/@AIVideoProductionEditor>
-- Maintainer: [Ludwig Kienle](https://github.com/LudwigKienle)
+```bash
+npm run dev
+```
 
-## Copyright and Branding
+Run the Electron app:
+
+```bash
+npm run electron:dev
+```
+
+Build the web app:
+
+```bash
+npm run build:web
+```
+
+Build distributable desktop packages:
+
+```bash
+npm run electron:build
+```
+
+Run public-release checks before changing repository visibility:
+
+```bash
+npm test
+npm run check:public-release
+npm run check:public-release:strict
+npm audit --audit-level=low
+```
+
+Generated output lives in `dist`, `dist-electron`, and `release`. These folders
+are intentionally ignored by git.
+
+## Copyright, license, and branding
 
 Copyright (C) 2026 Ludwig Maximillian Kienle.
 
-AI Video Production Editor, its release branding, and official signed or
-notarized builds are maintained by Ludwig Maximillian Kienle. Do not present
-modified builds or redistributed copies as official releases unless they are
-published by the maintainer through this repository.
+This project is licensed under GPL-3.0-or-later. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE). The original author and maintainer are listed in
+[AUTHORS.md](AUTHORS.md).
+
+Forks and redistributed copies must preserve applicable copyright and license
+notices. The code license does not grant permission to present a fork as the
+official AI Video Production Editor release. See [TRADEMARK.md](TRADEMARK.md)
+for branding and attribution guidance.
+
+## Downloadable desktop builds
+
+End users should download the newest installer from
+[GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest).
+They do not need an Apple Developer account and should not need to build, sign,
+or notarize the app themselves.
+
+The local Electron app should be distributed through GitHub Releases, not by
+committing installer files to the source tree. Pushing a version tag such as
+`v0.1.0-open-source` runs `.github/workflows/desktop-release.yml`, builds a
+signed and notarized macOS `.dmg`, builds a Windows `.exe`, and attaches both
+installers to the GitHub Release.
+
+Public tag releases fail unless Apple signing and notarization secrets are
+configured in GitHub Actions. Manual workflow runs can still produce unsigned
+test artifacts for maintainers, but unsigned `.dmg` files should not be
+published as public releases.
+
+For official macOS releases, maintainers must add these GitHub Actions secrets:
+
+- `MACOS_CERTIFICATE_BASE64`: base64-encoded Developer ID Application `.p12`
+- `MACOS_CERTIFICATE_PASSWORD`: password used when exporting the `.p12`
+- `APPLE_ID`: Apple Developer account email
+- `APPLE_APP_SPECIFIC_PASSWORD`: app-specific Apple ID password
+- `APPLE_TEAM_ID`: Apple Developer Team ID
+
+On macOS, you can encode an exported certificate with:
+
+```bash
+base64 -i cert.p12 | pbcopy
+```
+
+## Configuration
+
+For normal local desktop use, provider API keys can be entered in the app and
+stored locally on your machine. `.env.local` is mainly for development,
+hosted/portal features, and optional build signing.
+
+Important rules:
+
+- Never commit `.env`, `.env.local`, certificates, private keys, release builds,
+  or provider credentials.
+- Use `.env.example` only for placeholder variable names.
+- Hosted billing/proxy features require your own Supabase and Stripe projects.
+- Provider model usage is billed by the provider unless you route it through
+  your own hosted credit system.
+
+## Project map
+
+| Path | Purpose |
+| --- | --- |
+| `src/workspaces` | Main studio workspaces and production surfaces |
+| `src/services` | Provider adapters, project services, and integration logic |
+| `src/components` | Shared React UI components |
+| `electron` | Desktop shell, preload bridge, local runtime handlers |
+| `api` | Vercel-style hosted billing, usage, BYOK, and auth endpoints |
+| `server/byok` | Shared BYOK proxy and pricing helpers |
+| `docs` | Product, build, pricing, and launch documentation |
+| `packages/storyboard-embed-sdk` | Embeddable story/project SDK package |
+
+## Contributing
+
+Contributions are welcome, especially:
+
+- New model adapters
+- Provider fixes when APIs change
+- UI/UX polish
+- Local workflow improvements
+- Export and audio tooling
+- Docs and onboarding improvements
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). For security issues, follow
+[SECURITY.md](SECURITY.md) instead of opening a public issue.
+
+## Support
+
+- Tutorials and walkthroughs: [YouTube channel](https://www.youtube.com/@AIVideoProductionEditor)
+- Bugs and provider API changes: [GitHub Issues](https://github.com/LudwigKienle/ai-video-production-editor/issues)
+- Vulnerabilities: use GitHub private vulnerability reporting when enabled and
+  follow [SECURITY.md](SECURITY.md)
+
+When asking for help, include the workspace, selected model/provider, required
+inputs shown in the UI, the error text, and whether you are running browser dev
+or Electron.
+
+## Open-source model
+
+The desktop/editor core is released under GPL-3.0-or-later. Commercial hosted
+services, managed credits, cloud rendering, team sync, custom deployments, and
+support can be built around the open core without putting the basic local app
+behind a hard paywall.
+
+The package is marked `private` to prevent accidental npm publication. That does
+not make the GitHub repository private.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

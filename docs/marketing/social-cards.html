@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Video Production Editor Marketing Cards</title>
+  <style>
+    :root {
+      --ink: #152033;
+      --muted: #667085;
+      --line: rgba(21, 32, 51, 0.14);
+      --cyan: #19b8f0;
+      --cyan-dark: #0879a8;
+      --paper: #f7f4ee;
+      --white: rgba(255, 255, 255, 0.88);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 48px;
+      background: #d9d4c9;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    }
+
+    .stage {
+      display: grid;
+      gap: 48px;
+      justify-items: start;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+      background: var(--paper);
+      box-shadow: 0 28px 90px rgba(15, 23, 42, 0.22);
+    }
+
+    .github {
+      width: 1280px;
+      height: 640px;
+      border-radius: 0;
+    }
+
+    .linkedin {
+      width: 1200px;
+      height: 627px;
+      border-radius: 0;
+    }
+
+    .square {
+      width: 1080px;
+      height: 1080px;
+      border-radius: 0;
+    }
+
+    .carousel {
+      width: 1080px;
+      height: 1080px;
+      border-radius: 0;
+    }
+
+    .bg {
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.82;
+      filter: saturate(0.96) contrast(1.02);
+    }
+
+    .wash {
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      background:
+        linear-gradient(90deg, rgba(250, 248, 243, 0.98) 0%, rgba(250, 248, 243, 0.88) 42%, rgba(250, 248, 243, 0.2) 100%),
+        radial-gradient(circle at 80% 24%, rgba(25, 184, 240, 0.22), transparent 35%);
+    }
+
+    .topbar {
+      position: absolute;
+      top: 34px;
+      left: 44px;
+      right: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo-mark {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 54px;
+      height: 54px;
+      border-radius: 15px;
+      background: linear-gradient(145deg, #ecfbff, #d4f3ff);
+      border: 1px solid rgba(8, 121, 168, 0.22);
+      box-shadow: 0 14px 34px rgba(8, 121, 168, 0.2);
+    }
+
+    .logo-mark::before {
+      content: "";
+      position: absolute;
+      width: 25px;
+      height: 25px;
+      border: 2px solid #16a8dc;
+      border-radius: 7px;
+      transform: rotate(30deg);
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    .logo-mark::after {
+      content: "";
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #16a8dc;
+      box-shadow:
+        0 -16px 0 rgba(22, 168, 220, 0.55),
+        14px 8px 0 rgba(22, 168, 220, 0.55),
+        -14px 8px 0 rgba(22, 168, 220, 0.55);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(8, 121, 168, 0.22);
+      border-radius: 999px;
+      padding: 10px 17px;
+      color: var(--cyan-dark);
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 15px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+    }
+
+    .copy {
+      position: absolute;
+      left: 58px;
+      top: 135px;
+      width: 520px;
+    }
+
+    .kicker {
+      margin: 0 0 20px;
+      color: var(--cyan-dark);
+      font-size: 18px;
+      font-weight: 850;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: #182233;
+      font-size: 66px;
+      line-height: 0.96;
+      letter-spacing: 0;
+      font-weight: 900;
+    }
+
+    .linkedin h1 { font-size: 60px; }
+    .square h1, .carousel h1 { font-size: 78px; line-height: 0.98; }
+
+    .sub {
+      margin: 28px 0 0;
+      color: #4d5b70;
+      font-size: 25px;
+      line-height: 1.25;
+      font-weight: 520;
+    }
+
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 34px;
+      max-width: 560px;
+    }
+
+    .feature {
+      padding: 12px 15px;
+      border: 1px solid rgba(21, 32, 51, 0.11);
+      border-radius: 17px;
+      background: rgba(255, 255, 255, 0.76);
+      color: #29364a;
+      font-size: 17px;
+      font-weight: 720;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+    }
+
+    .device {
+      position: absolute;
+      right: 48px;
+      bottom: 54px;
+      width: 560px;
+      height: 365px;
+      border-radius: 32px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      box-shadow: 0 34px 100px rgba(15, 23, 42, 0.28);
+      transform: rotate(-2deg);
+    }
+
+    .device img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top left;
+      border-radius: 22px;
+      border: 1px solid rgba(21, 32, 51, 0.1);
+    }
+
+    .device.secondary {
+      display: none;
+      width: 380px;
+      height: 230px;
+      right: 392px;
+      bottom: 34px;
+      z-index: -1;
+      opacity: 0.88;
+      transform: rotate(3deg);
+    }
+
+    .footer-note {
+      position: absolute;
+      left: 58px;
+      bottom: 42px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      color: #5f6b7b;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 0 8px rgba(25, 184, 240, 0.12);
+    }
+
+    .square .copy,
+    .carousel .copy {
+      top: 132px;
+      left: 72px;
+      width: 760px;
+    }
+
+    .square .sub,
+    .carousel .sub {
+      font-size: 33px;
+      max-width: 720px;
+    }
+
+    .square .device {
+      left: 72px;
+      right: auto;
+      bottom: 78px;
+      width: 750px;
+      height: 455px;
+      transform: none;
+    }
+
+    .square .wash {
+      background:
+        linear-gradient(180deg, rgba(250, 248, 243, 0.97) 0%, rgba(250, 248, 243, 0.88) 54%, rgba(250, 248, 243, 0.22) 100%),
+        radial-gradient(circle at 80% 12%, rgba(25, 184, 240, 0.2), transparent 35%);
+    }
+
+    .carousel .wash {
+      background:
+        linear-gradient(180deg, rgba(250, 248, 243, 0.98) 0%, rgba(250, 248, 243, 0.9) 66%, rgba(250, 248, 243, 0.28) 100%),
+        radial-gradient(circle at 76% 18%, rgba(25, 184, 240, 0.2), transparent 34%);
+    }
+
+    .step-number {
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--cyan-dark);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+
+    .steps {
+      position: absolute;
+      left: 72px;
+      right: 72px;
+      bottom: 74px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .step {
+      min-height: 162px;
+      padding: 24px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.77);
+      border: 1px solid rgba(21, 32, 51, 0.12);
+      box-shadow: 0 20px 55px rgba(15, 23, 42, 0.08);
+    }
+
+    .step strong {
+      display: block;
+      font-size: 26px;
+      margin-bottom: 8px;
+      letter-spacing: 0;
+    }
+
+    .step span {
+      display: block;
+      color: var(--muted);
+      font-size: 19px;
+      line-height: 1.28;
+      font-weight: 560;
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="card github" id="github-preview">
+      <img class="bg" src="../assets/marketing/ai-launch-background.png" alt="" />
+      <div class="wash"></div>
+      <div class="topbar">
+        <div class="brand">
+          <span class="logo-mark" aria-hidden="true"></span>
+          <span>AI Video Production Editor</span>
+        </div>
+        <span class="pill">Open Source</span>
+      </div>
+      <div class="copy">
+        <p class="kicker">Desktop studio for AI filmmaking</p>
+        <h1>Script to final cut in one local workspace.</h1>
+        <p class="sub">Plan, generate, edit, review, and export AI video projects with bring-your-own provider keys.</p>
+        <div class="features">
+          <span class="feature">Local-first</span>
+          <span class="feature">BYOK</span>
+          <span class="feature">Multi-model</span>
+          <span class="feature">Electron + React</span>
+        </div>
+      </div>
+      <div class="device secondary">
+        <img src="../assets/ui-guide/04-video-generation-happy-horse.png" alt="" />
+      </div>
+      <div class="device">
+        <img src="../assets/ui-guide/01-production-hub.png" alt="" />
+      </div>
+      <div class="footer-note"><span class="dot"></span><span>Built for creators who want ownership of the workflow.</span></div>
+    </section>
+
+    <section class="card linkedin" id="linkedin-launch">
+      <img class="bg" src="../assets/marketing/ai-launch-background.png" alt="" />
+      <div class="wash"></div>
+      <div class="topbar">
+        <div class="brand">
+          <span class="logo-mark" aria-hidden="true"></span>
+          <span>AI Video Production Editor</span>
+        </div>
+        <span class="pill">GitHub Launch</span>
+      </div>
+      <div class="copy">
+        <p class="kicker">Now opening the desktop core</p>
+        <h1>An open AI video production studio.</h1>
+        <p class="sub">From script and references to generated shots, timeline editing, review, and render.</p>
+        <div class="features">
+          <span class="feature">GPT Image</span>
+          <span class="feature">Nano Banana</span>
+          <span class="feature">Seedance 2.0</span>
+          <span class="feature">Kling 3.0</span>
+          <span class="feature">Happy Horse</span>
+        </div>
+      </div>
+      <div class="device">
+        <img src="../assets/ui-guide/03-image-generation-workspace.png" alt="" />
+      </div>
+    </section>
+
+    <section class="card square" id="linkedin-square">
+      <img class="bg" src="../assets/marketing/ai-launch-background.png" alt="" />
+      <div class="wash"></div>
+      <div class="topbar">
+        <div class="brand">
+          <span class="logo-mark" aria-hidden="true"></span>
+          <span>AI Video Production Editor</span>
+        </div>
+        <span class="pill">Launch asset</span>
+      </div>
+      <div class="copy">
+        <p class="kicker">Open-source AI filmmaking</p>
+        <h1>Bring your own models. Keep your production local.</h1>
+        <p class="sub">A desktop workflow for script, concepts, video generation, editing, and export.</p>
+      </div>
+      <div class="device">
+        <img src="../assets/ui-guide/05-editing-workspace.png" alt="" />
+      </div>
+    </section>
+
+    <section class="card carousel" id="carousel-01">
+      <img class="bg" src="../assets/marketing/ai-launch-background.png" alt="" />
+      <div class="wash"></div>
+      <div class="topbar">
+        <div class="brand">
+          <span class="logo-mark" aria-hidden="true"></span>
+          <span>AI Video Production Editor</span>
+        </div>
+        <span class="pill">How it works</span>
+      </div>
+      <div class="copy">
+        <p class="step-number">Workflow</p>
+        <h1>From idea to rendered AI video.</h1>
+        <p class="sub">The product is built around the production process, not a single prompt box.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><strong>Script</strong><span>Write or import the story base.</span></div>
+        <div class="step"><strong>Look</strong><span>Lock characters, worlds, references, and genre.</span></div>
+        <div class="step"><strong>Film</strong><span>Generate motion clips with model-specific inputs.</span></div>
+        <div class="step"><strong>Render</strong><span>Edit, review, export, and ship.</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

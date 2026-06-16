@@ -1,0 +1,7 @@
+{
+  "name": "Ai Video Production fix",
+  "description": "A modern AI video editor that integrates with Google's Gemini models like Veo and Nano Banana to generate and edit video content. It features a timeline, media bin, effects panel, and a preview player for a comprehensive editing experience.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

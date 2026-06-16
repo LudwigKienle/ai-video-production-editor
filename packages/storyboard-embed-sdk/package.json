@@ -1,0 +1,30 @@
+{
+  "name": "@ai-video-production-editor/storyboard-embed-sdk",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Host-side SDK wrapper for the Story Project embed",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2"
+  }
+}

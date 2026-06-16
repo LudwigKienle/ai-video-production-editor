@@ -1,0 +1,120 @@
+{
+  "name": "ai-video-production-editor",
+  "private": true,
+  "version": "2.5.0",
+  "description": "Local-first open-source AI video production editor for multi-model media workflows.",
+  "author": "Ludwig Kienle",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LudwigKienle/ai-video-production-editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LudwigKienle/ai-video-production-editor/issues"
+  },
+  "homepage": "https://github.com/LudwigKienle/ai-video-production-editor#readme",
+  "keywords": [
+    "ai-video",
+    "electron",
+    "video-editor",
+    "generative-ai",
+    "local-first",
+    "byok",
+    "fal",
+    "replicate",
+    "gemini"
+  ],
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.build.json && vite build && node scripts/build-main.js",
+    "build:web": "tsc -p tsconfig.build.json && vite build",
+    "preview": "vite preview",
+    "electron:dev": "node scripts/build-main.js && concurrently \"npm run dev\" \"wait-on tcp:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "gen:types": "node scripts/generate-supabase-types.mjs > src/types/supabase.ts",
+    "test": "node scripts/run-tests.mjs",
+    "check:icons": "node scripts/check-icons.mjs",
+    "check:public-release": "node scripts/check-public-release.mjs",
+    "check:public-release:strict": "node scripts/check-public-release.mjs --strict-artifacts"
+  },
+  "dependencies": {
+    "@e965/xlsx": "^0.20.3",
+    "@google/genai": "latest",
+    "@hocuspocus/provider": "^3.4.4",
+    "@napi-rs/canvas": "^0.1.92",
+    "@stripe/stripe-js": "^8.7.0",
+    "@supabase/supabase-js": "^2.48.1",
+    "@types/micro": "^7.3.7",
+    "ffmpeg-static": "^5.3.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "font-list": "^1.6.0",
+    "lucide-react": "^1.14.0",
+    "mammoth": "^1.10.0",
+    "micro": "^10.0.1",
+    "pdfjs-dist": "^4.10.38",
+    "playwright-core": "^1.59.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.1",
+    "reactflow": "^11.11.4",
+    "stripe": "^14.25.0",
+    "three": "^0.166.1",
+    "yjs": "^13.6.30"
+  },
+  "devDependencies": {
+    "@electron/notarize": "^2.3.2",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "dotenv": "^17.2.3",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0",
+    "postcss": "^8.5.12",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.2.2",
+    "vite": "^8.0.10",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.aivideoproductioneditor.app",
+    "productName": "AI Video Production Editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "electron/entitlements.mac.plist"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": {
+        "target": "default",
+        "arch": [
+          "universal"
+        ]
+      },
+      "hardenedRuntime": true,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist",
+      "gatekeeperAssess": false,
+      "notarize": false
+    },
+    "afterSign": "scripts/notarize.js",
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "icon": "build/icon.icns"
+  }
+}

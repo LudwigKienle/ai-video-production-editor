@@ -1,11 +1,15 @@
 AI Video Production Editor
 Copyright (C) 2026 Ludwig Maximillian Kienle
 
-This repository hosts official desktop installer downloads and release notes for
-AI Video Production Editor.
+AI Video Production Editor is distributed under the GNU General Public License,
+version 3.0 or later. See LICENSE for the full license text.
+
+This notice identifies the original project and copyright holder. Copies,
+forks, and modified versions must preserve applicable copyright notices and
+license notices as required by the GPL.
+
+Official project repository:
+https://github.com/LudwigKienle/ai-video-production-editor
 
 Official release downloads:
 https://github.com/LudwigKienle/ai-video-production-editor/releases/latest
-
-Official maintainer:
-https://github.com/LudwigKienle
