@@ -40,11 +40,20 @@ provider API keys, `.env.local`, or local virtual environments.
 
 ## Good first contribution areas
 
+Start with the [starter task list](docs/CONTRIBUTOR_STARTER_TASKS.md) if you
+want a small, useful first pull request.
+
 - Fix a provider adapter after an API change.
 - Add a new model option behind an existing provider service.
 - Improve README/docs for a workflow that was confusing.
+- Add screenshots or a short workflow GIF to the documentation.
 - Polish UI states, empty states, or accessibility labels.
 - Add focused tests around pure utility logic.
+
+Good first pull requests usually change one workflow, one document, or one
+small utility at a time. If you want to build a larger feature, please open an
+issue first so the direction can be discussed before you spend serious time on
+it.
 
 ## Adding a model adapter
 

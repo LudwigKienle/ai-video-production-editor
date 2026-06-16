@@ -1,5 +1,9 @@
 # AI Video Production Editor
 
+Open-source desktop studio for AI filmmaking, previs, storyboarding, image/video
+generation, node-based pipelines, editing, audio, review, and creative
+production planning.
+
 <p align="center">
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest">
     <img src="https://img.shields.io/badge/Download%20newest%20version-macOS%20DMG%20%7C%20Windows%20EXE-238636?style=for-the-badge&logo=github&logoColor=white" alt="Download newest version: macOS DMG and Windows EXE" />
@@ -13,13 +17,35 @@
   <sub>End users download the signed/notarized macOS DMG or Windows EXE. Developers can download the full source as ZIP.</sub>
 </p>
 
-Local-first AI video production studio for orchestrating multi-model image,
-video, audio, editing, review, and export workflows.
+<p align="center">
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/stargazers"><img src="https://img.shields.io/github/stars/LudwigKienle/ai-video-production-editor?style=social" alt="GitHub stars" /></a>
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/fork"><img src="https://img.shields.io/github/forks/LudwigKienle/ai-video-production-editor?style=social" alt="GitHub forks" /></a>
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/issues"><img src="https://img.shields.io/github/issues/LudwigKienle/ai-video-production-editor" alt="GitHub issues" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/LudwigKienle/ai-video-production-editor" alt="License" /></a>
+  <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest"><img src="https://img.shields.io/github/v/release/LudwigKienle/ai-video-production-editor" alt="Latest release" /></a>
+</p>
 
-This project is built around the idea that AI video production should feel more
-like a creative workstation than a locked hosted form: bring your own API keys,
-keep projects local, swap model providers, and extend the workflow with new
-adapters.
+AI Video Production Editor is built around the idea that AI video production
+should feel like a creative workstation, not a locked hosted form. Bring your
+own API keys, keep projects local, swap model providers, inspect your workflow,
+and extend the app with new adapters.
+
+If this project is useful, please star the repository. Stars help other
+filmmakers, AI artists, and developers find the project.
+
+![Studio workspace preview](docs/assets/screenshots/studio-open-source-preview.png)
+
+## Why star or fork it?
+
+- Full React + Electron source code, not just installer downloads.
+- Local-first desktop workflows for AI film production and creative iteration.
+- Node-based pipelines for model routing, prompt chains, media processing, and
+  output handoff.
+- Bring-your-own-key integrations for fast-moving AI providers.
+- GPL-3.0-or-later open-source core that contributors can inspect, fork, and
+  improve.
+- Practical project surface for filmmakers, AI artists, creative coders, and
+  developers who want to build new production tools together.
 
 ## Why this exists
 
@@ -34,20 +60,16 @@ credits, cloud rendering, support, and convenience.
 
 ## What it can do
 
-- Local Electron studio with web preview support.
-- Multi-workspace production flow for imports, generation, editing, audio,
-  review, export, worldbuilding, and asset management.
-- BYOK provider model for Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto,
-  Brave Search, Supabase, Stripe, and related integrations.
-- Video model routing for text-to-video, image-to-video, references, motion
-  guides, audio-conditioned generation, and provider-specific controls.
-- Current image/video model coverage includes GPT Image, Nano Banana, Seedance
-  2.0, Kling 3.0 / v3 Pro, Happy Horse 1.0, Veo, WAN, LTX, Grok, Seedream,
-  Qwen, Flux, and related provider adapters.
-- Local media library, project assets, prompt/context workflows, and export
-  tooling.
-- Optional hosted billing, BYOK proxy, and portal APIs for deployments that want
-  a commercial layer.
+| Area | Included |
+| --- | --- |
+| Desktop app | Electron studio with browser preview support |
+| AI generation | Image, video, audio, prompt, reference, and provider routing workflows |
+| Node workflows | Node Space for graph-style creative pipelines and production chains |
+| Film planning | Script, storyboard, previs, worldbuilding, scene wall, and review surfaces |
+| Editing | Timeline, grading, effects, audio, export, and handoff utilities |
+| Providers | Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto, Brave Search, Supabase, Stripe, and related integrations |
+| Models | GPT Image, Nano Banana, Seedance, Kling, Happy Horse, Veo, WAN, LTX, Grok, Seedream, Qwen, Flux, and related adapters |
+| Extensibility | Provider services, workspace components, SDK package, hosted BYOK/proxy APIs |
 
 ## Status
 
@@ -56,10 +78,6 @@ but some provider integrations require external API keys, and some hosted
 features require Supabase/Stripe configuration. APIs in the AI video ecosystem
 change quickly; model adapters should be treated as maintained integration
 points rather than permanent contracts.
-
-## Screenshots
-
-![Studio workspace preview](docs/assets/screenshots/studio-open-source-preview.png)
 
 See the [UI production workflow guide](docs/ui-production-workflow-guide.md)
 for annotated studio screenshots and the full path from script to filming,
@@ -151,6 +169,26 @@ npm audit --audit-level=low
 
 Generated output lives in `dist`, `dist-electron`, and `release`. These folders
 are intentionally ignored by git.
+
+## Start contributing
+
+Good first areas:
+
+- Improve screenshots, GIFs, and workflow examples.
+- Document one complete AI filmmaking workflow from idea to export.
+- Add or repair provider/model adapters as APIs change.
+- Improve Node Space templates and graph documentation.
+- Add focused tests around pure utility logic.
+- Translate or simplify setup documentation.
+
+Useful links:
+
+- [Contributor guide](CONTRIBUTING.md)
+- [Starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md)
+- [Roadmap](ROADMAP.md)
+- [Open issues](https://github.com/LudwigKienle/ai-video-production-editor/issues)
+- [`good first issue`](https://github.com/LudwigKienle/ai-video-production-editor/labels/good%20first%20issue)
+- [`help wanted`](https://github.com/LudwigKienle/ai-video-production-editor/labels/help%20wanted)
 
 ## Copyright, license, and branding
 

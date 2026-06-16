@@ -17,6 +17,8 @@ provider API changes, and release quality.
 - Better first-run onboarding inside the desktop app.
 - Clearer setup flow for bring-your-own-key providers.
 - Example project or guided demo flow.
+- Public demo screenshots, workflow GIFs, and contributor-friendly examples.
+- Node Space documentation with real AI filmmaking graph examples.
 - Improved release notes for each desktop build.
 - More short tutorial videos for common workflows.
 - Windows code signing evaluation to reduce SmartScreen friction.
@@ -55,3 +57,14 @@ Please open an issue if you can provide:
 
 Issues:
 <https://github.com/LudwigKienle/ai-video-production-editor/issues>
+
+## Contributor-Friendly Milestones
+
+These are intentionally small enough for outside contributors to help with:
+
+- Documentation: first-run walkthrough, provider setup, and workflow examples.
+- Node Space: template docs, example graphs, and focused metadata tests.
+- Install support: Windows/macOS troubleshooting notes and screenshots.
+- Provider support: clearer API-key, quota, and model-input error messages.
+- Community: label issues with `good first issue` and `help wanted` when the
+  task has a clear scope.

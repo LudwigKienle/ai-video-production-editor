@@ -1,0 +1,35 @@
+name: Docs or example improvement
+description: Suggest a tutorial, screenshot, workflow example, translation, or onboarding improvement.
+title: "[Docs]: "
+labels: ["documentation", "good first issue"]
+body:
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing or confusing?
+      placeholder: Describe the page, setup step, workspace, or workflow that should be easier to understand.
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Suggested improvement
+      placeholder: Add a screenshot, workflow guide, example project, translation, short GIF, or clearer explanation.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - README
+        - Quick start
+        - Node Space
+        - Provider setup
+        - Desktop install
+        - AI filmmaking workflow
+        - Screenshots/GIFs
+        - Translation
+        - Other
+    validations:
+      required: true
