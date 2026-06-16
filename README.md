@@ -5,6 +5,14 @@ generation, node-based pipelines, editing, audio, review, and creative
 production planning.
 
 <p align="center">
+  <a href="https://youtu.be/-6jo636vRSw?si=v5XSwSIz4WfLtE9z">
+    <img src="https://img.youtube.com/vi/-6jo636vRSw/maxresdefault.jpg" alt="Watch the AI Video Production Editor launch trailer" width="920" />
+  </a>
+  <br />
+  <strong><a href="https://youtu.be/-6jo636vRSw?si=v5XSwSIz4WfLtE9z">Watch the launch trailer</a></strong>
+</p>
+
+<p align="center">
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest">
     <img src="https://img.shields.io/badge/Download%20newest%20version-macOS%20DMG%20%7C%20Windows%20EXE-238636?style=for-the-badge&logo=github&logoColor=white" alt="Download newest version: macOS DMG and Windows EXE" />
   </a>
