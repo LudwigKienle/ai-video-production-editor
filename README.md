@@ -57,8 +57,12 @@ and export/handoff utilities.
 
 - [Capability map](docs/CAPABILITY_MAP.md): code-level overview of what is in
   the app today.
+- [First 10 minutes](docs/FIRST_10_MINUTES.md): fastest path from clone to
+  understanding the production loop.
 - [Demo project walkthrough](examples/demo-project/README.md): a small
   script-to-filming example contributors can use without private media.
+- [Contributor paths](docs/CONTRIBUTOR_PATHS.md): where to start based on your
+  skills.
 - [Open-source launch notes](docs/releases/v0.1.0-open-source-launch.md):
   release copy for GitHub, LinkedIn, Hacker News, Reddit, and launch pages.
 
@@ -220,6 +224,8 @@ Good first areas:
 Useful links:
 
 - [Contributor guide](CONTRIBUTING.md)
+- [First 10 minutes](docs/FIRST_10_MINUTES.md)
+- [Contributor paths](docs/CONTRIBUTOR_PATHS.md)
 - [Starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md)
 - [Roadmap](ROADMAP.md)
 - [Open issues](https://github.com/LudwigKienle/ai-video-production-editor/issues)

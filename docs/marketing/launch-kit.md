@@ -17,6 +17,8 @@ Related launch docs:
 
 - `docs/marketing/visibility-playbook.md`
 - `docs/CAPABILITY_MAP.md`
+- `docs/FIRST_10_MINUTES.md`
+- `docs/CONTRIBUTOR_PATHS.md`
 - `examples/demo-project/README.md`
 - `docs/releases/v0.1.0-open-source-launch.md`
 

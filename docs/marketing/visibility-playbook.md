@@ -34,7 +34,7 @@ project. The stronger category is:
   `generative-ai`, `storyboard`, `text-to-video`, `image-to-video`, `byok`,
   `local-first`, `open-source`, `ai-filmmaking`, `ai-tools`.
 - README top section contains trailer, quick-start commands, capability map,
-  and demo project.
+  first-10-minutes guide, contributor paths, and demo project.
 - The repo has public starter issues with `good first issue`, `docs`,
   `provider-api`, `model-adapter`, and `ui-polish` labels.
 - Releases should use the prepared notes in

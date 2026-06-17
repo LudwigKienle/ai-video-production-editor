@@ -6,6 +6,9 @@ desktop app.
 
 Use it as a quick orientation guide before opening the larger workspaces.
 
+If you are new to the repository, read [First 10 Minutes](FIRST_10_MINUTES.md)
+first, then come back here when you want code pointers.
+
 ## Core Production Loop
 
 | Capability | What it does | Main code areas |

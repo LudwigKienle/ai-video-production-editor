@@ -8,6 +8,7 @@ provider API changes, and release quality.
 
 - Make the first download and first launch feel clear and trustworthy.
 - Improve onboarding for provider API keys and local project setup.
+- Make the first 10 minutes after cloning easier to understand.
 - Keep official macOS builds signed and notarized.
 - Keep Windows installers easy to find and test.
 - Collect focused feedback through GitHub Issues.
@@ -16,7 +17,8 @@ provider API changes, and release quality.
 
 - Better first-run onboarding inside the desktop app.
 - Clearer setup flow for bring-your-own-key providers.
-- Example project or guided demo flow.
+- Expand the public demo project with screenshots and, later, importable project
+  fixtures.
 - Public demo screenshots, workflow GIFs, and contributor-friendly examples.
 - Node Space documentation with real AI filmmaking graph examples.
 - Improved release notes for each desktop build.

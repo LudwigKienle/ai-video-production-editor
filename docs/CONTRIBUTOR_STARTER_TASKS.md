@@ -6,6 +6,9 @@ entire app on day one.
 If you pick one of these, open an issue or comment on an existing issue first so
 people know you are working on it.
 
+New to the repository? Start with [First 10 Minutes](FIRST_10_MINUTES.md), then
+choose a lane in [Contributor Paths](CONTRIBUTOR_PATHS.md).
+
 ## Documentation
 
 - Add a short "first 10 minutes" walkthrough with screenshots.

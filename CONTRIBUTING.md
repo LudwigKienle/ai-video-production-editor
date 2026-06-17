@@ -43,6 +43,9 @@ provider API keys, `.env.local`, or local virtual environments.
 Start with the [starter task list](docs/CONTRIBUTOR_STARTER_TASKS.md) if you
 want a small, useful first pull request.
 
+If you are new to the repository, read [First 10 Minutes](docs/FIRST_10_MINUTES.md)
+and [Contributor Paths](docs/CONTRIBUTOR_PATHS.md) before choosing a task.
+
 - Fix a provider adapter after an API change.
 - Add a new model option behind an existing provider service.
 - Improve README/docs for a workflow that was confusing.
@@ -54,6 +57,20 @@ Good first pull requests usually change one workflow, one document, or one
 small utility at a time. If you want to build a larger feature, please open an
 issue first so the direction can be discussed before you spend serious time on
 it.
+
+## Contributor paths
+
+The project has six practical contribution lanes:
+
+- documentation and onboarding,
+- provider and model adapters,
+- script-to-filming workflow,
+- continuity and review,
+- Node Space and workflow graphs,
+- export, editing, and post.
+
+See [Contributor Paths](docs/CONTRIBUTOR_PATHS.md) for file pointers and checks
+for each lane.
 
 ## Adding a model adapter
 
