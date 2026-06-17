@@ -1,8 +1,8 @@
 # AI Video Production Editor
 
-Open-source desktop studio for AI filmmaking, previs, storyboarding, image/video
-generation, node-based pipelines, editing, audio, review, and creative
-production planning.
+Open-source, local-first AI film production workspace for moving from script to
+director treatment, storyboard, AI filming, continuity review, editing, and
+export.
 
 <p align="center">
   <a href="https://youtu.be/-6jo636vRSw?si=v5XSwSIz4WfLtE9z">
@@ -34,21 +34,44 @@ production planning.
 </p>
 
 AI Video Production Editor is built around the idea that AI video production
-should feel like a creative workstation, not a locked hosted form. Bring your
-own API keys, keep projects local, swap model providers, inspect your workflow,
-and extend the app with new adapters.
+should feel like a real creative workstation, not a locked hosted form. Bring
+your own API keys, keep projects local, route work across model providers,
+inspect the pipeline, and extend the app with new adapters.
 
 If this project is useful, please star the repository. Stars help other
 filmmakers, AI artists, and developers find the project.
 
 ![Studio workspace preview](docs/assets/screenshots/studio-open-source-preview.png)
 
+## 30-second tour
+
+```text
+Script -> Director pass -> Concepts -> Storyboard -> AI filming
+       -> Continuity review -> Re-film queue -> Timeline/edit -> Export
+```
+
+The public source includes the production surfaces behind that flow: Project
+Hub, Director treatment, Scene Wall, Studio Agent tasks, Node Space, media
+generation workspaces, Gemini continuity review, review tasks, timeline tools,
+and export/handoff utilities.
+
+- [Capability map](docs/CAPABILITY_MAP.md): code-level overview of what is in
+  the app today.
+- [Demo project walkthrough](examples/demo-project/README.md): a small
+  script-to-filming example contributors can use without private media.
+- [Open-source launch notes](docs/releases/v0.1.0-open-source-launch.md):
+  release copy for GitHub, LinkedIn, Hacker News, Reddit, and launch pages.
+
 ## Why star or fork it?
 
 - Full React + Electron source code, not just installer downloads.
 - Local-first desktop workflows for AI film production and creative iteration.
+- Script-to-filming workflow with Director pass, storyboard, filming, review,
+  and export surfaces.
 - Node-based pipelines for model routing, prompt chains, media processing, and
   output handoff.
+- Continuity review and re-film queue concepts for making generated shots more
+  production-aware.
 - Bring-your-own-key integrations for fast-moving AI providers.
 - GPL-3.0-or-later open-source core that contributors can inspect, fork, and
   improve.
@@ -71,10 +94,12 @@ credits, cloud rendering, support, and convenience.
 | Area | Included |
 | --- | --- |
 | Desktop app | Electron studio with browser preview support |
+| Script-to-filming | Project Hub, script, Director pass, Director treatment, storyboard, filming, review, and export |
+| AI continuity | Gemini continuity review, drift scoring, continuity prompt refinement, and re-film queue concepts |
 | AI generation | Image, video, audio, prompt, reference, and provider routing workflows |
 | Node workflows | Node Space for graph-style creative pipelines and production chains |
-| Film planning | Script, storyboard, previs, worldbuilding, scene wall, and review surfaces |
-| Editing | Timeline, grading, effects, audio, export, and handoff utilities |
+| Film planning | Story bible, worldbuilding, Scene Wall, set design, moodboards, and production references |
+| Editing | Timeline, grading, effects, audio, export, OpenTimelineIO/FCPXML-style handoff utilities |
 | Providers | Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto, Brave Search, Supabase, Stripe, and related integrations |
 | Models | GPT Image, Nano Banana, Seedance, Kling, Happy Horse, Veo, WAN, LTX, Grok, Seedream, Qwen, Flux, and related adapters |
 | Extensibility | Provider services, workspace components, SDK package, hosted BYOK/proxy APIs |
@@ -93,6 +118,9 @@ editing, and export.
 
 For launch copy, GitHub social preview, and LinkedIn-ready assets, see the
 [launch kit](docs/marketing/launch-kit.md).
+
+For a concise technical feature overview, see the
+[capability map](docs/CAPABILITY_MAP.md).
 
 More launch screenshots should live in `docs/assets/screenshots/` or
 `docs/assets/ui-guide/` so the README stays useful without committing generated

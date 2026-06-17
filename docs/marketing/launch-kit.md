@@ -13,6 +13,13 @@ Visual assets:
 | `docs/assets/marketing/ai-launch-background.png` | Imagegen-created abstract source background. |
 | `docs/marketing/social-cards.html` | Source template for regenerating the social cards. |
 
+Related launch docs:
+
+- `docs/marketing/visibility-playbook.md`
+- `docs/CAPABILITY_MAP.md`
+- `examples/demo-project/README.md`
+- `docs/releases/v0.1.0-open-source-launch.md`
+
 ## Positioning
 
 One-liner:
