@@ -50,6 +50,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [xaiKey, setXaiKey] = useState('');
     const [elevenLabsKey, setElevenLabsKey] = useState('');
     const [sonautoKey, setSonautoKey] = useState('');
+    const [soniloKey, setSoniloKey] = useState('');
     const [falKey, setFalKey] = useState('');
     const [ltxKey, setLtxKey] = useState('');
     const [worldLabsKey, setWorldLabsKey] = useState('');
@@ -64,6 +65,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [xaiSaved, setXaiSaved] = useState(false);
     const [elevenLabsSaved, setElevenLabsSaved] = useState(false);
     const [sonautoSaved, setSonautoSaved] = useState(false);
+    const [soniloSaved, setSoniloSaved] = useState(false);
     const [falSaved, setFalSaved] = useState(false);
     const [ltxSaved, setLtxSaved] = useState(false);
     const [worldLabsSaved, setWorldLabsSaved] = useState(false);
@@ -80,6 +82,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         const storedXai = localStorage.getItem('xai_api_key');
         const storedElevenLabs = localStorage.getItem('elevenlabs_api_key');
         const storedSonauto = localStorage.getItem('sonauto_api_key');
+        const storedSonilo = localStorage.getItem('sonilo_api_key');
         const storedFal = localStorage.getItem('fal_api_key');
         const storedLtx = localStorage.getItem('ltx_api_key');
         const storedWorldLabs = localStorage.getItem('worldlabs_api_key');
@@ -108,6 +111,10 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (storedSonauto) {
             setSonautoKey(storedSonauto);
             setSonautoSaved(true);
+        }
+        if (storedSonilo) {
+            setSoniloKey(storedSonilo);
+            setSoniloSaved(true);
         }
         if (storedFal) {
             setFalKey(storedFal);
@@ -215,7 +222,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         setCloudError('');
 
         const hasCloudConfig = dropboxClientId.trim() || googleDriveClientId.trim();
-        if (!googleKey.trim() && !replicateKey.trim() && !xaiKey.trim() && !elevenLabsKey.trim() && !sonautoKey.trim() && !falKey.trim() && !ltxKey.trim() && !worldLabsKey.trim() && !braveSearchKey.trim() && !unsplashKey.trim() && !hasCloudConfig) {
+        if (!googleKey.trim() && !replicateKey.trim() && !xaiKey.trim() && !elevenLabsKey.trim() && !sonautoKey.trim() && !soniloKey.trim() && !falKey.trim() && !ltxKey.trim() && !worldLabsKey.trim() && !braveSearchKey.trim() && !unsplashKey.trim() && !hasCloudConfig) {
             setError("Please enter at least one API Key to continue.");
             return;
         }
@@ -252,6 +259,12 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             localStorage.setItem('sonauto_api_key', sonautoKey.trim());
         } else {
             localStorage.removeItem('sonauto_api_key');
+        }
+
+        if (soniloKey.trim()) {
+            localStorage.setItem('sonilo_api_key', soniloKey.trim());
+        } else {
+            localStorage.removeItem('sonilo_api_key');
         }
 
         if (falKey.trim()) {
@@ -499,6 +512,38 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                 sonauto.ai/developers
                             </a>
                             . Sonauto notes that user-facing API integrations may require attribution.
+                        </p>
+                    </div>
+
+                    <div className="app-card p-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="block text-xs font-bold app-muted uppercase">Sonilo API</label>
+                            {soniloSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
+                        </div>
+                        <div className="relative">
+                            <input
+                                type="password"
+                                value={soniloKey}
+                                onChange={(e) => { setSoniloKey(e.target.value); setSoniloSaved(false); }}
+                                className="app-input pl-10"
+                                placeholder="sk-..."
+                            />
+                            <div className="absolute left-3 top-3.5 app-muted">
+                                <LockIcon className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <p className="text-[10px] app-muted mt-2">Used for the Music node in Node Space: a licensed track generated from a rendered video.</p>
+                        <p className="text-[10px] app-muted mt-1">
+                            Get a key at{' '}
+                            <a
+                                className="text-indigo-300 hover:text-indigo-200"
+                                href="https://platform.sonilo.com/dashboard/api-keys"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                platform.sonilo.com
+                            </a>
+                            . Create an API key and paste it here.
                         </p>
                     </div>
 
