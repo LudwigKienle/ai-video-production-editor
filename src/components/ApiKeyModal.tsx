@@ -532,7 +532,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                 <LockIcon className="w-4 h-4" />
                             </div>
                         </div>
-                        <p className="text-[10px] app-muted mt-2">Used for the Music node in Node Space: a licensed track generated from a rendered video.</p>
+                        <p className="text-[10px] app-muted mt-2">Used for the Music and SFX nodes in Node Space: a licensed track, or royalty-free sound effects, generated from a rendered video.</p>
                         <p className="text-[10px] app-muted mt-1">
                             Get a key at{' '}
                             <a
