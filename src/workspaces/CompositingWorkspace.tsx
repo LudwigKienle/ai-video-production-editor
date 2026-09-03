@@ -36,6 +36,16 @@ type ReframeGuideFrame = 'none' | 'background' | 'overlay';
 type CorridorKeyVideoSource = 'none' | 'file' | 'media';
 type CorridorKeySourceRole = 'source' | 'alpha';
 
+type CompositeTab = 'layer' | 'key' | 'relight' | 'pose' | 'reframe' | 'kling';
+const COMPOSITE_TABS: Array<{ id: CompositeTab; label: string; hint: string }> = [
+  { id: 'layer', label: 'Layer', hint: 'Blend a foreground over a background' },
+  { id: 'key', label: 'Key', hint: 'Green screen keying with CorridorKey' },
+  { id: 'relight', label: 'Relight', hint: 'Change light direction and mood' },
+  { id: 'pose', label: 'Pose & Replace', hint: 'OpenPose extraction and animate-replace' },
+  { id: 'reframe', label: 'Reframe', hint: 'Adapt shots to other aspect ratios' },
+  { id: 'kling', label: 'Kling bridge', hint: 'Send composites to Kling O3' },
+];
+
 const CORRIDOR_KEY_REPO_STORAGE_KEY = 'ai-video-studio:corridor-key-repo-path';
 
 const loadImage = (url: string): Promise<HTMLImageElement> =>
@@ -150,6 +160,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
   const [klingBridgeResult, setKlingBridgeResult] = useState<MediaItem | null>(null);
   const [isKlingBridgeRunning, setIsKlingBridgeRunning] = useState(false);
   const [compositingView, setCompositingView] = useState<CompositingWorkspaceView>('tools');
+  const [compositeTab, setCompositeTab] = useState<CompositeTab>('layer');
 
   const readyForGeneration = apiKeyReady !== false;
   const hasDesktopCorridorKey = typeof window !== 'undefined' && Boolean(window.electron?.corridorKey);
@@ -653,13 +664,13 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
         <div className="quickstart">
           <div className="quickstart__title">Start with what you want to do</div>
           <div className="quickstart__grid">
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-layer')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('layer'); }}>
               <strong>Layer two clips</strong><span>Blend, screen or multiply a foreground over a background.</span>
             </button>
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-key')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('key'); }}>
               <strong>Key a green screen</strong><span>Corridor-style keyer with a separate alpha pass.</span>
             </button>
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-relight')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('relight'); }}>
               <strong>Relight a shot</strong><span>Change the light direction and mood of a still.</span>
             </button>
             <button type="button" className="quickstart__item" onClick={() => setCompositingView('nodeStudio')}>
@@ -692,13 +703,21 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           <CompositingNodeStudioView mediaItems={mediaItems} onAddGeneratedMedia={onAddGeneratedMedia} />
         ) : (
           <>
-        <div id="composite-relight" />
+        <div className="toolbar-segmented composite-tabs" role="tablist" aria-label="Compositing tools">
+          {COMPOSITE_TABS.map((tab) => (
+            <button key={tab.id} type="button" role="tab" aria-selected={compositeTab === tab.id} className={`toolbar-segmented__item ${compositeTab === tab.id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setCompositeTab(tab.id)} title={tab.hint}>{tab.label}</button>
+          ))}
+        </div>
+
+        {compositeTab === 'relight' && (
         <ArtRelightPanel
           mediaItems={mediaItems}
           onAddGeneratedMedia={onAddGeneratedMedia}
           currentProjectPath={currentProjectPath}
         />
+        )}
 
+        {compositeTab === 'pose' && (
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="app-panel p-5 space-y-4">
             <div className="text-xs uppercase tracking-[0.2em] text-gray-400">OpenPose Extract</div>
@@ -851,7 +870,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             )}
           </section>
         </div>
+        )}
 
+        {compositeTab === 'key' && (
         <section className="app-panel p-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -1133,7 +1154,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             </div>
           )}
         </section>
+        )}
 
+        {compositeTab === 'reframe' && (
         <section className="app-panel p-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -1335,9 +1358,11 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             </div>
           )}
         </section>
+        )}
 
         <NatronCompositorPanel mediaItems={mediaItems} onAddGeneratedMedia={onAddGeneratedMedia} />
 
+        {compositeTab === 'layer' && (
         <section id="composite-layer" className="app-panel p-5 space-y-4">
           <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Layer Composite</div>
           <div className="grid gap-4 lg:grid-cols-2">
@@ -1449,7 +1474,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             </div>
           )}
         </section>
+        )}
 
+        {compositeTab === 'kling' && (
         <section className="app-panel p-5 space-y-4">
           <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Kling O3 Compositing Bridge</div>
           <p className="text-xs text-gray-500">
@@ -1506,6 +1533,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             </div>
           )}
         </section>
+        )}
           </>
         )}
       </div>

@@ -13,6 +13,8 @@ interface PhotoWorkspaceProps {
 }
 
 type ToolMode = 'brush' | 'lasso' | 'stamp' | 'clone' | 'text';
+type PhotoLeftPanel = 'retouch' | 'expand';
+type PhotoRightPanel = 'adjust' | 'neural' | 'crop' | 'layers';
 
 type TextLayer = {
   id: string;
@@ -106,6 +108,8 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
 
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [tool, setTool] = useState<ToolMode>('brush');
+  const [leftPanel, setLeftPanel] = useState<PhotoLeftPanel>('retouch');
+  const [rightPanel, setRightPanel] = useState<PhotoRightPanel>('adjust');
   const [maskMode, setMaskMode] = useState<'paint' | 'erase'>('paint');
   const [brushSize, setBrushSize] = useState(24);
   const [maskHasPaint, setMaskHasPaint] = useState(false);
@@ -131,6 +135,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
 
   const [textLayers, setTextLayers] = useState<TextLayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  useEffect(() => { if (selectedLayerId) setRightPanel('layers'); }, [selectedLayerId]);
 
   const isDrawingRef = useRef(false);
   const activeToolRef = useRef<ToolMode>('brush');
@@ -747,11 +752,11 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
         <div className="flex items-center gap-3 min-w-0">
           <h2 className="text-lg font-bold">Photo</h2>
           <div className="toolbar-segmented" role="toolbar" aria-label="Quick actions">
-            <button type="button" className={`toolbar-segmented__item ${tool === 'brush' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => { setTool('brush'); document.getElementById('photo-inpaint')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }} title="Paint a mask, then describe what to change">Retouch</button>
-            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-expand')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Extend the canvas and fill it in">Expand</button>
-            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-neural')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="One-click neural looks">Neural</button>
-            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-adjust')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Exposure, contrast, colour">Adjust</button>
-            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-crop')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Crop and reframe">Crop</button>
+            <button type="button" className={`toolbar-segmented__item ${leftPanel === 'retouch' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => { setTool('brush'); setLeftPanel('retouch'); }} title="Paint a mask, then describe what to change">Retouch</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => setLeftPanel('expand')} title="Extend the canvas and fill it in">Expand</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => setRightPanel('neural')} title="One-click neural looks">Neural</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => setRightPanel('adjust')} title="Exposure, contrast, colour">Adjust</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => setRightPanel('crop')} title="Crop and reframe">Crop</button>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -807,6 +812,12 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
             <button onClick={clearMask} className="mt-3 text-xs text-red-400 hover:text-red-300">Clear Mask</button>
           </div>
 
+          <div className="toolbar-segmented photo-panels" role="tablist" aria-label="Edit mode">
+            {([['retouch', 'Retouch'], ['expand', 'Expand']] as Array<[PhotoLeftPanel, string]>).map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={leftPanel === id} className={`toolbar-segmented__item ${leftPanel === id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setLeftPanel(id)}>{label}</button>
+            ))}
+          </div>
+          {leftPanel === 'retouch' && (
           <div>
             <h3 id="photo-inpaint" className="text-xs uppercase text-gray-400 font-semibold mb-2">Inpaint</h3>
             <textarea
@@ -870,7 +881,9 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               </button>
             </div>
           </div>
+          )}
 
+          {leftPanel === 'expand' && (
           <div>
             <h3 id="photo-expand" className="text-xs uppercase text-gray-400 font-semibold mb-2">Image Expand</h3>
             <label className="block text-xs text-gray-400 mb-1">Padding (px)</label>
@@ -905,6 +918,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               </button>
             </div>
           </div>
+          )}
 
           {status && <p className="text-xs text-gray-400">{status}</p>}
         </div>
@@ -959,6 +973,12 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
         </div>
 
         <div className="w-72 border-l border-gray-800 p-4 space-y-4 overflow-y-auto">
+          <div className="toolbar-segmented photo-panels" role="tablist" aria-label="Inspector">
+            {([['adjust', 'Adjust'], ['neural', 'Neural'], ['crop', 'Crop'], ['layers', 'Layers']] as Array<[PhotoRightPanel, string]>).map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={rightPanel === id} className={`toolbar-segmented__item ${rightPanel === id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setRightPanel(id)}>{label}</button>
+            ))}
+          </div>
+          {rightPanel === 'layers' && (
           <div>
             <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Layers</h3>
             <div className="space-y-2">
@@ -983,8 +1003,9 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               Add Text Layer
             </button>
           </div>
+          )}
 
-          {selectedLayer && (
+          {rightPanel === 'layers' && selectedLayer && (
             <div>
               <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Text Properties</h3>
               <div className="space-y-2">
@@ -1030,6 +1051,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
             </div>
           )}
 
+          {rightPanel === 'adjust' && (
           <div>
             <h3 id="photo-adjust" className="text-xs uppercase text-gray-400 font-semibold mb-2">Adjustments</h3>
             <div className="space-y-2">
@@ -1061,7 +1083,9 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               </div>
             </div>
           </div>
+          )}
 
+          {rightPanel === 'neural' && (
           <div>
             <h3 id="photo-neural" className="text-xs uppercase text-gray-400 font-semibold mb-2">Neural Filters (Beta)</h3>
             <div className="space-y-3 bg-gray-800/60 border border-gray-700 rounded-lg p-3">
@@ -1156,7 +1180,9 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               </div>
             </div>
           </div>
+          )}
 
+          {rightPanel === 'crop' && (
           <div>
             <h3 id="photo-crop" className="text-xs uppercase text-gray-400 font-semibold mb-2">Crop</h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1199,6 +1225,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
               </button>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>

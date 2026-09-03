@@ -3948,3 +3948,6 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .project-hub--team .project-hub__inner { grid-template-columns: minmax(0, 1fr); }
 .project-hub--team .project-hub__inner > *:not(.project-hub__nav) { grid-column: 1; }
 .project-hub--team .project-hub__scroll { padding-top: 0.5rem; }
+.composite-tabs, .photo-panels { display: inline-flex; flex-wrap: wrap; }
+.photo-panels { width: 100%; }
+.photo-panels .toolbar-segmented__item { flex: 1 1 auto; }
