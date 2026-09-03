@@ -236,7 +236,8 @@ type ProjectHubPhase =
     | 'storyboard'
     | 'filming'
     | 'review'
-    | 'marketing';
+    | 'marketing'
+    | 'team';
 
 const PROJECT_HUB_PHASES: ProjectHubPhase[] = [
     'library',
@@ -249,6 +250,7 @@ const PROJECT_HUB_PHASES: ProjectHubPhase[] = [
     'filming',
     'review',
     'marketing',
+    'team',
 ];
 
 type BillingStatus = {

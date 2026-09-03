@@ -41,7 +41,8 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
+import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
 import { loadProjectFromFolder, selectProjectFolder } from '../services/projectService';
@@ -172,7 +173,7 @@ interface ProjectHubWorkspaceProps {
     onSendWorldMeshToSetDesign?: (asset: SetDesignAsset) => void;
 }
 
-type ProductionPhase = 'library' | 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing';
+type ProductionPhase = 'library' | 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing' | 'team';
 type ConceptEntityTab = 'characters' | 'environments' | 'props' | 'branding';
 type ConceptCharacterSubtab = 'base_ref' | 'angles' | 'outfits';
 type ConceptEnvironmentSubtab = 'base_ref' | 'angles' | 'time_of_day';
@@ -201,6 +202,7 @@ type MoodboardLinkReportEntry = {
     rollback: MoodboardLinkRollback;
 };
 type ReferenceImageModel =
+    | 'auto'
     | 'imagen'
     | 'nano'
     | 'gemini-pro'
@@ -220,6 +222,11 @@ type ReferenceImageModel =
     | 'gpt-image-1.5'
     | 'seedream'
     | 'seedream-v5-lite-fal'
+    | 'seedream-v5-pro-fal'
+    | 'seedream-v5-pro-edit-fal'
+    | 'krea-2-large-fal'
+    | 'krea-2-turbo-fal'
+    | 'ideogram-v4-fal'
     | 'qwen'
     | 'qwen-2512'
     | 'qwen-max-fal'
@@ -227,11 +234,15 @@ type ReferenceImageModel =
     | 'qwen-multiangle-fal';
 type MarketingImageModel = ReferenceImageModel | 'nano-banana-pro';
 type FilmingVideoModel =
+    | 'auto'
     | 'veo-3.1-fast-generate-preview'
     | 'veo-3.1-generate-preview'
     | 'seedance-1.5-pro'
     | 'seedance-2.0-fal'
     | 'seedance-2.0-omni-fal'
+    | 'seedance-2.5-t2v-fal'
+    | 'seedance-2.5-i2v-fal'
+    | 'seedance-2.5-omni-fal'
     | 'wan-2.2-i2v-fast'
     | 'wan-2.7-t2v-fal'
     | 'wan-2.7-i2v-fal'
@@ -557,6 +568,7 @@ const resolveLightingPresetId = (value?: string) => {
     return LIGHTING_PRESETS.some((preset) => preset.id === aliased) ? aliased : undefined;
 };
 const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
+    auto: 'Auto (best for the shot)',
     imagen: 'Imagen 4',
     'gemini-pro': 'Gemini 3 Pro',
     nano: 'Nano Banana 2',
@@ -576,6 +588,11 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'gpt-image-1.5': 'GPT Image 1.5',
     seedream: 'Seedream 4.5',
     'seedream-v5-lite-fal': 'Seedream v5 Lite (FAL)',
+    'seedream-v5-pro-fal': 'Seedream 5.0 Pro (FAL)',
+    'seedream-v5-pro-edit-fal': 'Seedream 5.0 Pro Edit (FAL)',
+    'krea-2-large-fal': 'Krea 2 Large (FAL)',
+    'krea-2-turbo-fal': 'Krea 2 Turbo (FAL)',
+    'ideogram-v4-fal': 'Ideogram 4 (FAL)',
     qwen: 'Qwen 2511',
     'qwen-2512': 'Qwen 2512',
     'qwen-max-fal': 'Qwen Image Max (FAL)',
@@ -588,6 +605,7 @@ const MARKETING_MODEL_LABELS: Record<MarketingImageModel, string> = {
 };
 
 const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; provider: string; icon?: string; goodFor?: string; badge?: string }> = [
+    { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'Picks Nano Banana / GPT Image 2 for people, Krea 2 for creatures and stylised art, Seedream 5 Pro for environments, Ideogram for typography', badge: '✨ Auto' },
     { id: 'imagen', label: 'Imagen 4', provider: 'Google', icon: logoGemini, goodFor: 'Cinematic quality and stylized artistic renders' },
     { id: 'gemini-pro', label: 'Gemini 3 Pro', provider: 'Google', icon: logoGemini, goodFor: 'Prompt adherence and complex reasoning' },
     { id: 'nano', label: 'Nano Banana 2', provider: 'Banana', icon: logoNanabanana, goodFor: 'Speed, photorealism and detailed context', badge: '⭐ Recommended' },
@@ -607,6 +625,11 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'gpt-image-1.5', label: 'GPT Image 1.5', provider: 'OpenAI', icon: logoOpenai, goodFor: 'Versatile and highly detailed artistic styles' },
     { id: 'seedream', label: 'Seedream 4.5', provider: 'Seedream', icon: logoSeedream, goodFor: 'Exceptional cinematic realism and depth' },
     { id: 'seedream-v5-lite-fal', label: 'Seedream v5 Lite (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Fast cinematic realism and detailed environments', badge: '⭐ Recommended' },
+    { id: 'seedream-v5-pro-fal', label: 'Seedream 5.0 Pro (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Flagship realism, dense layouts and native text', badge: '⭐ Recommended' },
+    { id: 'seedream-v5-pro-edit-fal', label: 'Seedream 5.0 Pro Edit (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Reference-aware storyboard continuity, keeps the rest of the frame intact' },
+    { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Aesthetic-first concept art with film-stock looks' },
+    { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick concept passes', badge: '⚡ Fast' },
+    { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters and title cards with clean text' },
     { id: 'qwen', label: 'Qwen 2511', provider: 'Qwen', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
     { id: 'qwen-2512', label: 'Qwen 2512', provider: 'Qwen', icon: logoQwen, goodFor: 'Improved aesthetic logic and detailed composition' },
     { id: 'qwen-max-fal', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation' },
@@ -625,6 +648,7 @@ const ALL_PHASES: Array<{ id: ProductionPhase; label: string; icon: React.Compon
     { id: 'filming', label: 'Filming', icon: FilmIcon },
     { id: 'review', label: 'Review', icon: ClipboardCheckIcon },
     { id: 'marketing', label: 'Marketing', icon: SparklesIcon },
+    { id: 'team', label: 'Team', icon: UserCircleIcon },
 ];
 
 const PHASE_DESCRIPTIONS: Record<ProductionPhase, string> = {
@@ -638,14 +662,19 @@ const PHASE_DESCRIPTIONS: Record<ProductionPhase, string> = {
     filming: 'Generate video shots',
     review: 'Check and approve',
     marketing: 'Create campaign assets',
+    team: 'Sync, chat and meetings',
 };
 
 const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
+    'auto',
     'veo-3.1-fast-generate-preview',
     'veo-3.1-generate-preview',
     'seedance-1.5-pro',
     'seedance-2.0-fal',
     'seedance-2.0-omni-fal',
+    'seedance-2.5-t2v-fal',
+    'seedance-2.5-i2v-fal',
+    'seedance-2.5-omni-fal',
     'wan-2.2-i2v-fast',
     'wan-2.7-t2v-fal',
     'wan-2.7-i2v-fal',
@@ -666,12 +695,16 @@ const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
 ];
 
 const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string; provider: string; icon?: string; goodFor?: string; badge?: string }> = [
+    { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'Veo for dialogue, Kling v3 for human performance, Seedance 2.5 for action, commercial and long takes, Omni engines when references must match', badge: '✨ Auto' },
     { id: 'veo-3.1-fast-generate-preview', label: 'Veo 3.1 Fast', provider: 'Google', icon: logoGemini, goodFor: 'Fast cinematic video with audio generation' },
     { id: 'veo-3.1-generate-preview', label: 'Veo 3.1 (High Quality)', provider: 'Google', icon: logoGemini, goodFor: 'Highest quality cinematic video with audio' },
     { id: 'grok-imagine-video', label: 'Grok Imagine (Text)', provider: 'xAI', icon: logoGrok, goodFor: 'Creative text-to-video generation' },
     { id: 'seedance-1.5-pro', label: 'Seedance 1.5 Pro', provider: 'Bytedance', icon: logoBytedance, goodFor: 'Fluid motion and dance choreography' },
     { id: 'seedance-2.0-fal', label: 'Seedance 2.0 I2V (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Image-to-video with optional end frame and synced audio', badge: '⭐ Recommended' },
     { id: 'seedance-2.0-omni-fal', label: 'Seedance 2.0 Omni (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Native multi-reference video with optional audio/video refs' },
+    { id: 'seedance-2.5-i2v-fal', label: 'Seedance 2.5 I2V (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Newest ByteDance model: 4-30s single shot, synced audio, up to 1080p', badge: '⭐ Recommended' },
+    { id: 'seedance-2.5-omni-fal', label: 'Seedance 2.5 Omni (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Up to 30 image refs plus video and audio cues, 4-30s' },
+    { id: 'seedance-2.5-t2v-fal', label: 'Seedance 2.5 T2V (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Text-only shots with native audio, 4-30s' },
     { id: 'wan-2.2-i2v-fast', label: 'Wan 2.2 I2V Fast', provider: 'Bytedance', icon: logoBytedance, goodFor: 'Fast image-to-video at low cost', badge: '💰 Cheapest' },
     { id: 'wan-2.7-t2v-fal', label: 'WAN 2.7 (FAL) T2V', provider: 'FAL', icon: logoBytedance, goodFor: 'Cinematic text-to-video with optional driving audio' },
     { id: 'wan-2.7-i2v-fal', label: 'WAN 2.7 (FAL) I2V', provider: 'FAL', icon: logoBytedance, goodFor: 'High-quality image-to-video with optional end frame and audio', badge: '⭐ Recommended' },
@@ -3742,10 +3775,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const [referenceLoraScale, setReferenceLoraScale] = useState<number>(0.75);
     const isKlingFalVideoModel = videoModel === 'kling-o3-pro-fal' || videoModel === 'kling-v3-pro-i2v-fal' || videoModel === 'kling-v3-pro-t2v-fal';
     const isKlingFalV3Model = videoModel === 'kling-v3-pro-i2v-fal' || videoModel === 'kling-v3-pro-t2v-fal';
-    const isTextOnlyVideoModel = videoModel === 'grok-imagine-video' || videoModel === 'kling-v3-pro-t2v-fal' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'p-video';
-    const supportsAudioDrivenFilmingModel = videoModel === 'aurora-fal' || videoModel === 'ltx-audio-to-video' || videoModel === 'p-video' || videoModel === 'ltx-2.3-pro' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'wan-2.7-i2v-fal' || videoModel === 'seedance-2.0-omni-fal';
+    const isTextOnlyVideoModel = videoModel === 'grok-imagine-video' || videoModel === 'seedance-2.5-t2v-fal' || videoModel === 'kling-v3-pro-t2v-fal' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'p-video';
+    const supportsAudioDrivenFilmingModel = videoModel === 'aurora-fal' || videoModel === 'ltx-audio-to-video' || videoModel === 'p-video' || videoModel === 'ltx-2.3-pro' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'wan-2.7-i2v-fal' || (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal');
     const requiresShotAudio = videoModel === 'aurora-fal' || videoModel === 'ltx-audio-to-video';
-    const isSeedanceStoryboardPanelModel = videoModel === 'seedance-1.5-pro' || videoModel === 'seedance-2.0-fal';
+    const isSeedanceStoryboardPanelModel = videoModel === 'seedance-1.5-pro' || videoModel === 'seedance-2.0-fal' || videoModel === 'seedance-2.5-i2v-fal';
     const [referenceAspectRatio, setReferenceAspectRatio] = useState<AspectRatioOption>('16:9');
     const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
     const seedreamSize = imageSize === '4K' ? '4K' : '2K';
@@ -10284,14 +10317,39 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     ? `${fullPrompt}\n\n${qwenCompositionHint}Use the input images as references for composition, identity, wardrobe, environment, and scene continuity.`
                     : fullPrompt;
 
+                const activeReferenceModel = referenceImageModel === 'auto'
+                    ? pickImageModel({ prompt: fullPrompt, hasReferences: gptInputs.length > 0 }, REFERENCE_MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedream-v5-pro-fal').model
+                    : referenceImageModel;
+                if (referenceImageModel === 'auto') console.info(`Auto model: ${activeReferenceModel}`);
                 let imageMedia: MediaItem;
-                if (referenceImageModel === 'qwen-2512') {
+                if (activeReferenceModel === 'qwen-2512') {
                     const baseImage = qwenInputs[0];
                     imageMedia = await generateImageWithQwenImage(qwen2512Prompt, modelAspectRatio, baseImage);
-                } else if (referenceImageModel === 'qwen-max-fal') {
+                } else if (activeReferenceModel === 'qwen-max-fal') {
                     imageMedia = await generateImageWithFalQwenImageMax(fullPrompt, { aspectRatio: modelAspectRatio });
-                } else if (referenceImageModel === 'seedream-v5-lite-fal') {
+                } else if (activeReferenceModel === 'seedream-v5-lite-fal') {
                     imageMedia = await generateImageWithFalSeedreamV5Lite(fullPrompt, { aspectRatio: modelAspectRatio });
+                } else if (activeReferenceModel === 'seedream-v5-pro-fal') {
+                    imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+                } else if (activeReferenceModel === 'seedream-v5-pro-edit-fal') {
+                    if (gptInputs.length === 0) {
+                        imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+                    } else {
+                        const edited = await editImageWithFalSeedreamV5Pro(gptImage2Prompt, gptInputs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+                        if (!edited.length) {
+                            throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                        }
+                        imageMedia = edited[0];
+                    }
+                } else if (activeReferenceModel === 'krea-2-large-fal' || activeReferenceModel === 'krea-2-turbo-fal') {
+                    const kreaAspect = modelAspectRatio === '3:4' ? '4:5' : modelAspectRatio;
+                    imageMedia = await generateImageWithFalKrea2(fullPrompt, {
+                        variant: activeReferenceModel === 'krea-2-large-fal' ? 'large' : 'turbo',
+                        aspectRatio: kreaAspect,
+                        styleReferences: activeReferenceModel === 'krea-2-large-fal' && gptInputs.length > 0 ? gptInputs.slice(0, 3) : undefined,
+                    });
+                } else if (activeReferenceModel === 'ideogram-v4-fal') {
+                    imageMedia = await generateImageWithFalIdeogramV4(fullPrompt, { aspectRatio: modelAspectRatio, renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY' });
                 } else if (isMultiAngleModel) {
                     if (qwenInputs.length === 0) {
                         throw new Error('Qwen Multi-Angle requires at least one reference or sketch image for storyboards.');
@@ -10303,7 +10361,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         { numOutputs: 1 }
                     );
                     imageMedia = images[0];
-                } else if (referenceImageModel === 'qwen') {
+                } else if (activeReferenceModel === 'qwen') {
                     if (qwenInputs.length === 0) {
                         throw new Error('Qwen 2511 requires at least one reference or sketch image for storyboards.');
                     }
@@ -10312,7 +10370,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         aspectRatio: modelAspectRatio,
                         extraImages,
                     });
-                } else if (referenceImageModel === 'gpt-image-2-fal') {
+                } else if (activeReferenceModel === 'gpt-image-2-fal') {
                     if (gptInputs.length === 0) {
                         throw new Error('GPT Image 2 needs at least one reference, sketch, pose, or previous-shot image for storyboard generation.');
                     }
@@ -10326,20 +10384,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         throw new Error('FAL GPT Image 2 returned no storyboard images.');
                     }
                     imageMedia = edited[0];
-                } else if (referenceImageModel === 'gpt-image-1.5') {
+                } else if (activeReferenceModel === 'gpt-image-1.5') {
                     imageMedia = await generateImageWithGptImage15(fullPrompt, modelAspectRatio, gptInputs);
-                } else if (referenceImageModel === 'grok-image') {
+                } else if (activeReferenceModel === 'grok-image') {
                     imageMedia = await generateImageWithGrok(fullPrompt);
-                } else if (referenceImageModel === 'grok-image-fal') {
+                } else if (activeReferenceModel === 'grok-image-fal') {
                     imageMedia = await generateImageWithFalGrokImagine(fullPrompt, { aspectRatio: modelAspectRatio });
-                } else if (referenceImageModel === 'wan-2.7-image-pro') {
+                } else if (activeReferenceModel === 'wan-2.7-image-pro') {
                     imageMedia = await generateImageWithWan27ImagePro(
                         fullPrompt,
                         modelAspectRatio,
                         imageSize,
                         qwenInputs.length > 0 ? qwenInputs.slice(0, 9) : undefined
                     );
-                } else if (referenceImageModel === 'wan-2.7-pro-fal') {
+                } else if (activeReferenceModel === 'wan-2.7-pro-fal') {
                     if (wanInputs.length > 0) {
                         const edited = await editImageWithFalWanV27Pro(wanPrompt, wanInputs, {
                             aspectRatio: modelAspectRatio,
@@ -10352,7 +10410,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     } else {
                         imageMedia = await generateImageWithFalWanV27Pro(fullPrompt, { aspectRatio: modelAspectRatio });
                     }
-                } else if (referenceImageModel === 'nano-banana-2-fal') {
+                } else if (activeReferenceModel === 'nano-banana-2-fal') {
                     const falInputs = compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences;
                     if (falInputs.length > 0) {
                         const edited = await editImageWithFalNanoBanana2(fullPrompt, falInputs, {
@@ -10370,20 +10428,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             resolution: imageSize,
                         });
                     }
-                } else if (referenceImageModel === 'firered') {
+                } else if (activeReferenceModel === 'firered') {
                     if (qwenInputs.length === 0) {
                         throw new Error('FireRed Edit requires at least one reference, sketch, pose, or previous-shot image for storyboards.');
                     }
                     imageMedia = await editImageWithFireRed(fireRedPrompt, qwenInputs, { aspectRatio: modelAspectRatio });
-                } else if (referenceImageModel === 'z-image') {
+                } else if (activeReferenceModel === 'z-image') {
                     imageMedia = await generateImageWithZImage(fullPrompt, modelAspectRatio, loraOptions);
-                } else if (referenceImageModel === 'flux-klein') {
+                } else if (activeReferenceModel === 'flux-klein') {
                     const baseImage = supplementalReferences[0];
                     imageMedia = await generateImageWithFluxKlein(fullPrompt, modelAspectRatio, baseImage, loraOptions);
-                } else if (referenceImageModel === 'flux-2-turbo') {
+                } else if (activeReferenceModel === 'flux-2-turbo') {
                     const baseImage = supplementalReferences[0];
                     imageMedia = await generateImageWithFlux2Turbo(fullPrompt, modelAspectRatio, baseImage, loraOptions);
-                } else if (referenceImageModel === 'seedream') {
+                } else if (activeReferenceModel === 'seedream') {
                     if (seedreamInputs.length > 0) {
                         imageMedia = await generateImageWithSeedreamReferences(
                             seedreamPrompt,
@@ -11004,6 +11062,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             case 'seedance-2.0-fal':
             case 'seedance-2.0-omni-fal':
                 return { supported: true, options: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 10 };
+            case 'seedance-2.5-t2v-fal':
+            case 'seedance-2.5-i2v-fal':
+            case 'seedance-2.5-omni-fal':
+                return { supported: true, options: Array.from({ length: 27 }, (_, index) => index + 4), fallback: 10 };
             case 'pixverse-c1-reference-fal':
                 return { supported: true, options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 };
             default:
@@ -11178,7 +11240,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const referencePayload = referenceImageUrl ? await getBase64FromUrl(referenceImageUrl) : undefined;
             const endFramePayload = shot.endFrameUrl ? await getBase64FromUrl(shot.endFrameUrl) : undefined;
             const voiceoverPayload = shot.voiceoverUrl ? await getBase64FromUrl(shot.voiceoverUrl) : undefined;
-            const contextReferenceImages = videoModel === 'seedance-2.0-omni-fal' || videoModel === 'pixverse-c1-reference-fal'
+            const contextReferenceImages = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal') || videoModel === 'pixverse-c1-reference-fal'
                 ? Array.from(
                     new Map(
                         runtimeContextReferences
@@ -11187,7 +11249,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     ).values()
                 )
                 : [];
-            const seedanceOmniImagePayloads = videoModel === 'seedance-2.0-omni-fal'
+            const seedanceOmniImagePayloads = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')
                 ? await Promise.all(
                     [
                         ...(referenceImageUrl ? [{ url: referenceImageUrl, name: 'Start frame' }] : []),
@@ -11204,7 +11266,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         ))
                 )
                 : [];
-            const seedanceOmniVideoPayloads = videoModel === 'seedance-2.0-omni-fal'
+            const seedanceOmniVideoPayloads = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')
                 ? await Promise.all(
                     resolvedMotionReferenceCandidates
                         .slice(0, 3)
@@ -11232,7 +11294,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 : [];
 
             const renderVideoAttempt = async (candidateMotionPrompt: string) => {
-                if (videoModel === 'grok-imagine-video') {
+                const activeVideoModel = videoModel === 'auto'
+                    ? pickVideoModel({
+                        prompt: candidateMotionPrompt,
+                        description: shot.description,
+                        characters: shot.characters,
+                        environment: shot.environment,
+                        products: (shot.products || []) as string[],
+                        hasStartFrame: Boolean(referencePayload),
+                        referenceCount: seedanceOmniImagePayloads.length,
+                        durationSeconds: normalizedDurationSeconds,
+                    }, FILMING_VIDEO_MODELS.filter((id) => id !== 'auto'), 'seedance-2.5-i2v-fal').model
+                    : videoModel;
+                if (videoModel === 'auto') console.info(`Auto video model for shot ${shot.shot}: ${activeVideoModel}`);
+                if (activeVideoModel === 'grok-imagine-video') {
                     const publicImageUrl = referenceImageUrl && /^https?:\/\//.test(referenceImageUrl) ? referenceImageUrl : undefined;
                     return generateVideoWithGrok({
                         prompt: [candidateMotionPrompt, veoElementsHint].filter(Boolean).join(' '),
@@ -11243,7 +11318,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         onProgress: (msg) => console.log(`Filming Shot ${shot.shot}: ${msg}`),
                     });
                 }
-                if (videoModel === 'ltx-audio-to-video') {
+                if (activeVideoModel === 'ltx-audio-to-video') {
                     if (!voiceoverPayload) {
                         throw new Error('LTX Audio-to-Video requires a voiceover audio track.');
                     }
@@ -11254,7 +11329,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         resolution: ltxAudioResolution,
                     });
                 }
-                if (videoModel === 'wan-2.7-t2v-fal') {
+                if (activeVideoModel === 'wan-2.7-t2v-fal') {
                     return generateVideoWithFalWanV27Text(candidateMotionPrompt, {
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
@@ -11262,7 +11337,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         audio: voiceoverPayload,
                     });
                 }
-                if (videoModel === 'kling-v3-pro-t2v-fal') {
+                if (activeVideoModel === 'kling-v3-pro-t2v-fal') {
                     return generateVideoWithFalKlingV3Text(candidateMotionPrompt, {
                         duration: normalizedDurationSeconds,
                         aspectRatio: klingAspectRatio,
@@ -11276,19 +11351,19 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         referenceImages: resolvedKlingBindings.referenceImages,
                     });
                 }
-                if (videoModel.startsWith('veo-')) {
+                if (activeVideoModel.startsWith('veo-')) {
                     return generateVideoWithVeo(
                         [candidateMotionPrompt, veoElementsHint].filter(Boolean).join(' '),
                         (msg) => console.log(`Filming Shot ${shot.shot}: ${msg}`),
                         '16:9',
                         referencePayload,
-                        videoModel
+                        activeVideoModel
                     );
                 }
-                if (videoModel === 'seedance-1.5-pro') {
+                if (activeVideoModel === 'seedance-1.5-pro') {
                     return generateVideoWithSeedance(candidateMotionPrompt, referencePayload);
                 }
-                if (videoModel === 'seedance-2.0-fal') {
+                if (activeVideoModel === 'seedance-2.0-fal') {
                     if (!referencePayload) {
                         throw new Error('Seedance 2.0 requires a storyboard or start frame.');
                     }
@@ -11300,7 +11375,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         generateAudio: true,
                     });
                 }
-                if (videoModel === 'seedance-2.0-omni-fal') {
+                if (activeVideoModel === 'seedance-2.0-omni-fal') {
                     if (seedanceOmniImagePayloads.length === 0 && seedanceOmniVideoPayloads.length === 0) {
                         throw new Error('Seedance 2.0 Omni requires a storyboard/start frame or context references.');
                     }
@@ -11314,7 +11389,40 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         generateAudio: Boolean(voiceoverPayload),
                     });
                 }
-                if (videoModel === 'pixverse-c1-reference-fal') {
+                if (activeVideoModel === 'seedance-2.5-i2v-fal') {
+                    if (!referencePayload) {
+                        throw new Error('Seedance 2.5 requires a storyboard or start frame.');
+                    }
+                    return generateVideoWithFalSeedance25Image(candidateMotionPrompt, referencePayload, {
+                        endImage: endFramePayload,
+                        duration: normalizedDurationSeconds,
+                        resolution: '720p',
+                        generateAudio: true,
+                    });
+                }
+                if (activeVideoModel === 'seedance-2.5-omni-fal') {
+                    if (seedanceOmniImagePayloads.length === 0 && seedanceOmniVideoPayloads.length === 0) {
+                        throw new Error('Seedance 2.5 Omni requires a storyboard/start frame or context references.');
+                    }
+                    return generateVideoWithFalSeedance25Reference(candidateMotionPrompt, {
+                        images: seedanceOmniImagePayloads.length > 0 ? seedanceOmniImagePayloads : undefined,
+                        videos: seedanceOmniVideoPayloads.length > 0 ? seedanceOmniVideoPayloads : undefined,
+                        audios: voiceoverPayload ? [voiceoverPayload] : undefined,
+                        duration: normalizedDurationSeconds,
+                        aspectRatio: '16:9',
+                        resolution: '720p',
+                        generateAudio: Boolean(voiceoverPayload),
+                    });
+                }
+                if (activeVideoModel === 'seedance-2.5-t2v-fal') {
+                    return generateVideoWithFalSeedance25Text(candidateMotionPrompt, {
+                        duration: normalizedDurationSeconds,
+                        aspectRatio: '16:9',
+                        resolution: '720p',
+                        generateAudio: true,
+                    });
+                }
+                if (activeVideoModel === 'pixverse-c1-reference-fal') {
                     if (pixverseReferencePayloads.length === 0) {
                         throw new Error('PixVerse C1 Reference requires a storyboard/start frame or context references.');
                     }
@@ -11325,7 +11433,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         generateAudio: false,
                     });
                 }
-                if (videoModel === 'wan-2.2-i2v-fast') {
+                if (activeVideoModel === 'wan-2.2-i2v-fast') {
                     if (!referencePayload) {
                         throw new Error('Wan 2.2 I2V Fast requires a storyboard or start frame.');
                     }
@@ -11334,7 +11442,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         numFrames: Math.max(33, Math.round(normalizedDurationSeconds * 16) + 1),
                     });
                 }
-                if (videoModel === 'wan-2.7-i2v-fal') {
+                if (activeVideoModel === 'wan-2.7-i2v-fal') {
                     if (!referencePayload) {
                         throw new Error('WAN 2.7 I2V requires a storyboard or start frame.');
                     }
@@ -11346,7 +11454,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         audio: voiceoverPayload,
                     });
                 }
-                if (videoModel === 'ltx-2.3-fast') {
+                if (activeVideoModel === 'ltx-2.3-fast') {
                     return generateVideoWithLtx23Fast(candidateMotionPrompt, {
                         image: referencePayload,
                         lastFrameImage: endFramePayload,
@@ -11356,7 +11464,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         fps: ltxFps,
                     });
                 }
-                if (videoModel === 'ltx-2.3-pro') {
+                if (activeVideoModel === 'ltx-2.3-pro') {
                     return generateVideoWithLtx23Pro(candidateMotionPrompt, {
                         image: referencePayload,
                         lastFrameImage: endFramePayload,
@@ -11370,7 +11478,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         generateAudio: ltxGenerateAudio,
                     });
                 }
-                if (videoModel === 'p-video') {
+                if (activeVideoModel === 'p-video') {
                     return generateVideoWithPVideo(candidateMotionPrompt, {
                         image: referencePayload,
                         audio: voiceoverPayload,
@@ -11382,7 +11490,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         promptUpsampling: pVideoPromptUpsampling,
                     });
                 }
-                if (videoModel === 'kling-v2.6-motion-control') {
+                if (activeVideoModel === 'kling-v2.6-motion-control') {
                     if (!referencePayload) {
                         throw new Error('Kling Motion Control requires a storyboard or start frame.');
                     }
@@ -11404,13 +11512,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         }
                     );
                 }
-                if (videoModel === 'kling-v2.5-turbo-pro') {
+                if (activeVideoModel === 'kling-v2.5-turbo-pro') {
                     if (!referencePayload) {
                         throw new Error('Kling 2.5 Turbo requires a storyboard or start frame.');
                     }
                     return generateVideoWithKling(candidateMotionPrompt, referencePayload);
                 }
-                if (videoModel === 'kling-o3-pro-fal') {
+                if (activeVideoModel === 'kling-o3-pro-fal') {
                     const referenceVideo = resolvedMotionReferenceUrl
                         ? await getBase64FromUrl(resolvedMotionReferenceUrl)
                         : undefined;
@@ -11432,7 +11540,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         referenceVideo: klingUseReferenceVideoForO3 ? referenceVideo : undefined,
                     });
                 }
-                if (videoModel === 'kling-v3-pro-i2v-fal') {
+                if (activeVideoModel === 'kling-v3-pro-i2v-fal') {
                     if (!referencePayload) {
                         throw new Error('Kling v3 Pro I2V requires a storyboard or start frame.');
                     }
@@ -11450,7 +11558,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         referenceImages: resolvedKlingBindings.referenceImages,
                     });
                 }
-                if (videoModel === 'grok-imagine-i2v-fal') {
+                if (activeVideoModel === 'grok-imagine-i2v-fal') {
                     if (!referencePayload) {
                         throw new Error('Grok Imagine I2V requires a storyboard or start frame.');
                     }
@@ -11460,7 +11568,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         resolution: '720p',
                     });
                 }
-                if (videoModel === 'aurora-fal') {
+                if (activeVideoModel === 'aurora-fal') {
                     if (!voiceoverPayload) {
                         throw new Error('Creatify Aurora requires a voiceover audio track.');
                     }
@@ -12854,28 +12962,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     placeholder="Enter project title..."
                                                 />
                                             </div>
-                                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Project Group</label>
-                                                    <input
-                                                        type="text"
-                                                        value={storyBible.projectGroup || ''}
-                                                        onChange={e => updateBible({ projectGroup: e.target.value })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
-                                                        placeholder="Client / Show / Franchise"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Subgroup</label>
-                                                    <input
-                                                        type="text"
-                                                        value={storyBible.projectSubgroup || ''}
-                                                        onChange={e => updateBible({ projectSubgroup: e.target.value })}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
-                                                        placeholder="Campaign / Season / Batch"
-                                                    />
-                                                </div>
-                                            </div>
                                             <div>
                                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Logline</label>
                                                 <textarea
@@ -12904,194 +12990,222 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 <div className="mt-2 text-[10px] text-gray-500">
                                                     <span className="block">Style inspiration only. {directorPersonaMeta.summary}</span>
                                                 </div>
-                                                <div className="mt-2 flex items-center gap-3">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPersonaImportOpen((prev) => !prev)}
-                                                        className="text-[10px] text-indigo-300 hover:text-white"
-                                                    >
-                                                        {personaImportOpen ? 'Hide JSON Import' : 'Import Personas (JSON)'}
-                                                    </button>
-                                                    {storyBible.directorPersonas && storyBible.directorPersonas.length > 0 && (
+                                                <details className="script-more">
+                                                    <summary>Persona import, stacks and custom prompt</summary>
+                                                    <div className="mt-2 flex items-center gap-3">
                                                         <button
                                                             type="button"
-                                                            onClick={() => updateBible({ directorPersonas: [] })}
-                                                            className="text-[10px] text-gray-400 hover:text-white"
-                                                        >
-                                                            Clear Custom
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                {personaImportOpen && (
-                                                    <div className="mt-3 space-y-2">
-                                                        <textarea
-                                                            value={personaImportText}
-                                                            onChange={(e) => {
-                                                                setPersonaImportText(e.target.value);
-                                                                setPersonaImportError(null);
-                                                            }}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 transition-shadow"
-                                                            rows={4}
-                                                            placeholder='Paste JSON: {"id":"precision-thriller","label":"Precision Thriller","summary":"Precision + cold lighting","prompt":"cool palette, precise blocking, slow push-ins"}'
-                                                        />
-                                                        {personaImportError && (
-                                                            <div className="text-[10px] text-red-300">{personaImportError}</div>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                try {
-                                                                    const parsed = JSON.parse(personaImportText);
-                                                                    const incoming = normalizeCustomPersonas(parsed);
-                                                                    if (incoming.length === 0) {
-                                                                        setPersonaImportError('No valid personas found. Ensure label + prompt are set.');
-                                                                        return;
-                                                                    }
-                                                                    const existing = normalizeCustomPersonas(storyBible.directorPersonas || []);
-                                                                    const byId = new Map(existing.map((p) => [p.id, p]));
-                                                                    incoming.forEach((p) => {
-                                                                        if (!byId.has(p.id)) {
-                                                                            byId.set(p.id, p);
-                                                                        }
-                                                                    });
-                                                                    updateBible({ directorPersonas: Array.from(byId.values()) });
-                                                                    setPersonaImportText('');
-                                                                    setPersonaImportError(null);
-                                                                } catch (e) {
-                                                                    setPersonaImportError('Invalid JSON. Paste an object or array.');
-                                                                }
-                                                            }}
-                                                            className="bg-gray-800 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg"
-                                                        >
-                                                            Add Personas
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {directorPersona === 'custom' && (
-                                                    <div className="mt-3">
-                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Custom Persona Prompt</label>
-                                                        <textarea
-                                                            value={directorPersonaPromptOverride}
-                                                            onChange={(e) => {
-                                                                const next = e.target.value;
-                                                                setDirectorPersonaPromptOverride(next);
-                                                                updateBible({ directorPersonaPrompt: next });
-                                                            }}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 transition-shadow"
-                                                            rows={3}
-                                                            placeholder="e.g., minimalist framing, clinical lighting, slow push-ins, restrained color"
-                                                        />
-                                                    </div>
-                                                )}
-                                                <div className="mt-4 bg-gray-900/60 border border-gray-700 rounded-lg p-3">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="text-[10px] uppercase tracking-wider text-gray-500">Persona Stacks</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setPersonaPresetPersonaId(directorPersona);
-                                                                setPersonaPresetCameraId(cameraPresetId);
-                                                                setPersonaPresetLensId(lensPresetId);
-                                                                setPersonaPresetLightingId(personaPresetLightingId || (LIGHTING_PRESETS[0]?.id || 'golden'));
-                                                            }}
+                                                            onClick={() => setPersonaImportOpen((prev) => !prev)}
                                                             className="text-[10px] text-indigo-300 hover:text-white"
                                                         >
-                                                            Use Current
+                                                            {personaImportOpen ? 'Hide JSON Import' : 'Import Personas (JSON)'}
                                                         </button>
+                                                        {storyBible.directorPersonas && storyBible.directorPersonas.length > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateBible({ directorPersonas: [] })}
+                                                                className="text-[10px] text-gray-400 hover:text-white"
+                                                            >
+                                                                Clear Custom
+                                                            </button>
+                                                        )}
                                                     </div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                        <input
-                                                            type="text"
-                                                            value={personaPresetName}
-                                                            onChange={(e) => setPersonaPresetName(e.target.value)}
-                                                            placeholder="Stack name"
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
-                                                        />
-                                                        <select
-                                                            value={personaPresetPersonaId}
-                                                            onChange={(e) => setPersonaPresetPersonaId(e.target.value)}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
-                                                        >
-                                                            {directorPersonas.map((persona) => (
-                                                                <option key={persona.id} value={persona.id}>{persona.label}</option>
-                                                            ))}
-                                                        </select>
-                                                        <select
-                                                            value={personaPresetCameraId}
-                                                            onChange={(e) => setPersonaPresetCameraId(e.target.value)}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
-                                                        >
-                                                            {CAMERA_PRESETS.map((preset) => (
-                                                                <option key={preset.id} value={preset.id}>{preset.label}</option>
-                                                            ))}
-                                                        </select>
-                                                        <select
-                                                            value={personaPresetLensId}
-                                                            onChange={(e) => setPersonaPresetLensId(e.target.value)}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
-                                                        >
-                                                            {LENS_PRESETS.map((preset) => (
-                                                                <option key={preset.id} value={preset.id}>{preset.label}</option>
-                                                            ))}
-                                                        </select>
-                                                        <select
-                                                            value={personaPresetLightingId}
-                                                            onChange={(e) => setPersonaPresetLightingId(e.target.value)}
-                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 md:col-span-2"
-                                                        >
-                                                            {LIGHTING_PRESETS.map((preset) => (
-                                                                <option key={preset.id} value={preset.id}>{preset.label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div className="mt-2 flex items-center gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleSavePersonaPreset}
-                                                            className="bg-gray-800 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg"
-                                                        >
-                                                            Save Stack
-                                                        </button>
-                                                    </div>
-                                                    {personaPresets.length > 0 && (
+                                                    {personaImportOpen && (
                                                         <div className="mt-3 space-y-2">
-                                                            {personaPresets.map((preset) => (
-                                                                <div key={preset.id} className="flex flex-col gap-2 bg-gray-900 border border-gray-700 rounded-lg p-2">
-                                                                    <div className="text-xs font-semibold text-white">{preset.label}</div>
-                                                                    <div className="text-[10px] text-gray-400">
-                                                                        Director: {(directorPersonas.find((p) => p.id === preset.directorPersonaId) || directorPersonas[0]).label}
-                                                                        {' · '}Camera: {(CAMERA_PRESETS.find((p) => p.id === preset.cameraPresetId) || CAMERA_PRESETS[0]).label}
-                                                                        {' · '}Lens: {(LENS_PRESETS.find((p) => p.id === preset.lensPresetId) || LENS_PRESETS[0]).label}
-                                                                        {' · '}Light: {(LIGHTING_PRESETS.find((p) => p.id === preset.lightingPresetId) || LIGHTING_PRESETS[0]).label}
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleApplyPersonaPreset(preset)}
-                                                                            className="text-[10px] text-emerald-300 hover:text-emerald-200 font-semibold"
-                                                                        >
-                                                                            Apply to All Shots
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleLoadPersonaPreset(preset)}
-                                                                            className="text-[10px] text-indigo-300 hover:text-indigo-200 font-semibold"
-                                                                        >
-                                                                            Load
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleDeletePersonaPreset(preset.id)}
-                                                                            className="text-[10px] text-red-300 hover:text-red-200 font-semibold"
-                                                                        >
-                                                                            Delete
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
+                                                            <textarea
+                                                                value={personaImportText}
+                                                                onChange={(e) => {
+                                                                    setPersonaImportText(e.target.value);
+                                                                    setPersonaImportError(null);
+                                                                }}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 transition-shadow"
+                                                                rows={4}
+                                                                placeholder='Paste JSON: {"id":"precision-thriller","label":"Precision Thriller","summary":"Precision + cold lighting","prompt":"cool palette, precise blocking, slow push-ins"}'
+                                                            />
+                                                            {personaImportError && (
+                                                                <div className="text-[10px] text-red-300">{personaImportError}</div>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    try {
+                                                                        const parsed = JSON.parse(personaImportText);
+                                                                        const incoming = normalizeCustomPersonas(parsed);
+                                                                        if (incoming.length === 0) {
+                                                                            setPersonaImportError('No valid personas found. Ensure label + prompt are set.');
+                                                                            return;
+                                                                        }
+                                                                        const existing = normalizeCustomPersonas(storyBible.directorPersonas || []);
+                                                                        const byId = new Map(existing.map((p) => [p.id, p]));
+                                                                        incoming.forEach((p) => {
+                                                                            if (!byId.has(p.id)) {
+                                                                                byId.set(p.id, p);
+                                                                            }
+                                                                        });
+                                                                        updateBible({ directorPersonas: Array.from(byId.values()) });
+                                                                        setPersonaImportText('');
+                                                                        setPersonaImportError(null);
+                                                                    } catch (e) {
+                                                                        setPersonaImportError('Invalid JSON. Paste an object or array.');
+                                                                    }
+                                                                }}
+                                                                className="bg-gray-800 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg"
+                                                            >
+                                                                Add Personas
+                                                            </button>
                                                         </div>
                                                     )}
+                                                    {directorPersona === 'custom' && (
+                                                        <div className="mt-3">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Custom Persona Prompt</label>
+                                                            <textarea
+                                                                value={directorPersonaPromptOverride}
+                                                                onChange={(e) => {
+                                                                    const next = e.target.value;
+                                                                    setDirectorPersonaPromptOverride(next);
+                                                                    updateBible({ directorPersonaPrompt: next });
+                                                                }}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 transition-shadow"
+                                                                rows={3}
+                                                                placeholder="e.g., minimalist framing, clinical lighting, slow push-ins, restrained color"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-4 bg-gray-900/60 border border-gray-700 rounded-lg p-3">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="text-[10px] uppercase tracking-wider text-gray-500">Persona Stacks</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setPersonaPresetPersonaId(directorPersona);
+                                                                    setPersonaPresetCameraId(cameraPresetId);
+                                                                    setPersonaPresetLensId(lensPresetId);
+                                                                    setPersonaPresetLightingId(personaPresetLightingId || (LIGHTING_PRESETS[0]?.id || 'golden'));
+                                                                }}
+                                                                className="text-[10px] text-indigo-300 hover:text-white"
+                                                            >
+                                                                Use Current
+                                                            </button>
+                                                        </div>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                            <input
+                                                                type="text"
+                                                                value={personaPresetName}
+                                                                onChange={(e) => setPersonaPresetName(e.target.value)}
+                                                                placeholder="Stack name"
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                            <select
+                                                                value={personaPresetPersonaId}
+                                                                onChange={(e) => setPersonaPresetPersonaId(e.target.value)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+                                                            >
+                                                                {directorPersonas.map((persona) => (
+                                                                    <option key={persona.id} value={persona.id}>{persona.label}</option>
+                                                                ))}
+                                                            </select>
+                                                            <select
+                                                                value={personaPresetCameraId}
+                                                                onChange={(e) => setPersonaPresetCameraId(e.target.value)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+                                                            >
+                                                                {CAMERA_PRESETS.map((preset) => (
+                                                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                                                ))}
+                                                            </select>
+                                                            <select
+                                                                value={personaPresetLensId}
+                                                                onChange={(e) => setPersonaPresetLensId(e.target.value)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"
+                                                            >
+                                                                {LENS_PRESETS.map((preset) => (
+                                                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                                                ))}
+                                                            </select>
+                                                            <select
+                                                                value={personaPresetLightingId}
+                                                                onChange={(e) => setPersonaPresetLightingId(e.target.value)}
+                                                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 md:col-span-2"
+                                                            >
+                                                                {LIGHTING_PRESETS.map((preset) => (
+                                                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        <div className="mt-2 flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleSavePersonaPreset}
+                                                                className="bg-gray-800 hover:bg-indigo-600 text-white text-xs px-3 py-2 rounded-lg"
+                                                            >
+                                                                Save Stack
+                                                            </button>
+                                                        </div>
+                                                        {personaPresets.length > 0 && (
+                                                            <div className="mt-3 space-y-2">
+                                                                {personaPresets.map((preset) => (
+                                                                    <div key={preset.id} className="flex flex-col gap-2 bg-gray-900 border border-gray-700 rounded-lg p-2">
+                                                                        <div className="text-xs font-semibold text-white">{preset.label}</div>
+                                                                        <div className="text-[10px] text-gray-400">
+                                                                            Director: {(directorPersonas.find((p) => p.id === preset.directorPersonaId) || directorPersonas[0]).label}
+                                                                            {' · '}Camera: {(CAMERA_PRESETS.find((p) => p.id === preset.cameraPresetId) || CAMERA_PRESETS[0]).label}
+                                                                            {' · '}Lens: {(LENS_PRESETS.find((p) => p.id === preset.lensPresetId) || LENS_PRESETS[0]).label}
+                                                                            {' · '}Light: {(LIGHTING_PRESETS.find((p) => p.id === preset.lightingPresetId) || LIGHTING_PRESETS[0]).label}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleApplyPersonaPreset(preset)}
+                                                                                className="text-[10px] text-emerald-300 hover:text-emerald-200 font-semibold"
+                                                                            >
+                                                                                Apply to All Shots
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleLoadPersonaPreset(preset)}
+                                                                                className="text-[10px] text-indigo-300 hover:text-indigo-200 font-semibold"
+                                                                            >
+                                                                                Load
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleDeletePersonaPreset(preset.id)}
+                                                                                className="text-[10px] text-red-300 hover:text-red-200 font-semibold"
+                                                                            >
+                                                                                Delete
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                <details className="script-more">
+                                                    <summary>Project group and subgroup</summary>
+                                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Project Group</label>
+                                                        <input
+                                                            type="text"
+                                                            value={storyBible.projectGroup || ''}
+                                                            onChange={e => updateBible({ projectGroup: e.target.value })}
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
+                                                            placeholder="Client / Show / Franchise"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Subgroup</label>
+                                                        <input
+                                                            type="text"
+                                                            value={storyBible.projectSubgroup || ''}
+                                                            onChange={e => updateBible({ projectSubgroup: e.target.value })}
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
+                                                            placeholder="Campaign / Season / Batch"
+                                                        />
+                                                    </div>
                                                 </div>
+                                                </details>
+                                                    </div>
+                                                </details>
                                             </div>
                                             <div>
                                                 <div className="flex justify-between items-center mb-1">
@@ -13293,442 +13407,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 )}
                                             </div>
                                         )}
-                                    </details>
-                                    <details className="script-section">
-                                        <summary className="script-section__summary"><span>Cloud Sync</span><small>Shared folder and collaborators</small></summary>
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div>
-                                                <p className="text-xs text-gray-400">Link a shared folder to keep everyone up to date.</p>
-                                            </div>
-                                            <div className="text-[10px] text-gray-500 uppercase tracking-wider">
-                                                {activeProfileName ? `You: ${activeProfileName}` : 'No profile'}
-                                            </div>
-                                        </div>
-                                        <div className="mt-4 space-y-4">
-                                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Provider</label>
-                                                    <select
-                                                        value={projectSync.provider || ''}
-                                                        onChange={(e) => handleSyncProviderChange(e.target.value)}
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
-                                                    >
-                                                        <option value="">Not configured</option>
-                                                        <option value="dropbox">Dropbox</option>
-                                                        <option value="google-drive">Google Drive</option>
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Sync Folder</label>
-                                                    <div className="flex gap-2">
-                                                        <input
-                                                            type="text"
-                                                            value={projectSync.rootPath || ''}
-                                                            readOnly
-                                                            className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-300"
-                                                            placeholder="Choose a shared folder"
-                                                        />
-                                                        <button
-                                                            onClick={handlePickSyncFolder}
-                                                            disabled={!canSelectSyncFolder}
-                                                            className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 rounded-lg"
-                                                        >
-                                                            Browse
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <label className="flex items-center gap-2 text-xs text-gray-400">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={projectSync.autoSync !== false}
-                                                    onChange={(e) => setProjectSync(prev => ({ ...prev, autoSync: e.target.checked }))}
-                                                />
-                                                Auto-sync in the background
-                                            </label>
-                                            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                                                <span className="px-2 py-1 rounded-full bg-gray-900 border border-gray-700">
-                                                    {syncProviderLabel}
-                                                </span>
-                                                {projectPath ? (
-                                                    <span className={`px-2 py-1 rounded-full border ${isInSyncRoot || !projectSync.rootPath ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'}`}>
-                                                        {projectSync.rootPath
-                                                            ? (isInSyncRoot ? 'Project in sync folder' : 'Project outside sync folder')
-                                                            : 'No sync folder selected'}
-                                                    </span>
-                                                ) : (
-                                                    <span className="px-2 py-1 rounded-full border border-gray-700 text-gray-500">Save the project to enable sync</span>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center justify-between bg-gray-900/60 border border-gray-700 rounded-lg p-3">
-                                                <div>
-                                                    <div className="text-xs font-semibold text-gray-300">Status</div>
-                                                    <div className="text-[10px] text-gray-500">
-                                                        {syncStatus.message || (isSyncConfigured ? 'Checking for updates...' : 'Sync not configured')}
-                                                    </div>
-                                                    {projectCollaboration.lastModifiedBy && (
-                                                        <div className="text-[10px] text-gray-500 mt-1">
-                                                            Last saved by {projectCollaboration.lastModifiedBy} - {formatTimestamp(projectCollaboration.lastModifiedAt)}
-                                                        </div>
-                                                    )}
-                                                    {projectSync.remoteModifiedAt && (
-                                                        <div className="text-[10px] text-gray-500 mt-1">
-                                                            Cloud updated - {formatTimestamp(projectSync.remoteModifiedAt)}
-                                                        </div>
-                                                    )}
-                                                    {syncStatus.lock?.by && (
-                                                        <div className={`text-[10px] mt-1 ${syncStatus.lock.isActive ? 'text-amber-300' : 'text-emerald-300'}`}>
-                                                            {syncStatus.lock.isActive
-                                                                ? `Editing lock: ${syncStatus.lock.by} - ${formatTimestamp(syncStatus.lock.at)}`
-                                                                : `Your editing lock is active - ${formatTimestamp(syncStatus.lock.at)}`}
-                                                        </div>
-                                                    )}
-                                                    {syncStatus.incoming?.by && (
-                                                        <div className="text-[10px] text-indigo-300 mt-1">
-                                                            Latest: {syncStatus.incoming.by} - {formatTimestamp(syncStatus.incoming.at)}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    {syncStatus.state === 'incoming' && projectPath && (
-                                                        <button
-                                                            onClick={onReloadProject}
-                                                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
-                                                        >
-                                                            Reload
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={onPushToCloud}
-                                                        disabled={!projectPath || !projectSync.provider}
-                                                        className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 py-2 rounded-lg"
-                                                    >
-                                                        Push
-                                                    </button>
-                                                    <button
-                                                        onClick={onPullFromCloud}
-                                                        disabled={!projectPath || !projectSync.provider}
-                                                        className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 py-2 rounded-lg"
-                                                    >
-                                                        Pull
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Collaborators</span>
-                                                    <span className="text-[10px] text-gray-500">{collaborators.length} people</span>
-                                                </div>
-                                                {collaborators.length === 0 ? (
-                                                    <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
-                                                        Add collaborators to share this project.
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-2">
-                                                        {collaborators.map(collab => (
-                                                            <div key={collab.id} className="flex items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2">
-                                                                <input
-                                                                    value={collab.name}
-                                                                    onChange={(e) => updateCollaborator(collab.id, { name: e.target.value })}
-                                                                    className="flex-1 bg-transparent text-xs text-gray-200 outline-none"
-                                                                />
-                                                                <select
-                                                                    value={collab.role}
-                                                                    onChange={(e) => updateCollaborator(collab.id, { role: e.target.value as ProjectCollaboratorRole })}
-                                                                    className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-300"
-                                                                >
-                                                                    <option value="owner">Owner</option>
-                                                                    <option value="admin">Admin</option>
-                                                                    <option value="editor">Editor</option>
-                                                                    <option value="viewer">Viewer</option>
-                                                                </select>
-                                                                <button
-                                                                    onClick={() => removeCollaborator(collab.id)}
-                                                                    className="text-[10px] text-gray-400 hover:text-red-300"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    <input
-                                                        value={newCollaboratorName}
-                                                        onChange={(e) => setNewCollaboratorName(e.target.value)}
-                                                        placeholder="Add name or email"
-                                                        className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    />
-                                                    <select
-                                                        value={newCollaboratorRole}
-                                                        onChange={(e) => setNewCollaboratorRole(e.target.value as ProjectCollaboratorRole)}
-                                                        className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    >
-                                                        <option value="owner">Owner</option>
-                                                        <option value="admin">Admin</option>
-                                                        <option value="editor">Editor</option>
-                                                        <option value="viewer">Viewer</option>
-                                                    </select>
-                                                    <button
-                                                        onClick={addCollaborator}
-                                                        className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
-                                                    >
-                                                        Add
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </details>
-                                    <details className="script-section">
-                                        <summary className="script-section__summary"><span>Team Chat</span><small>Updates, meeting links, shared drives</small></summary>
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div>
-                                                <p className="text-xs text-gray-400">Save quick updates, meeting links, and shared drives inside the project.</p>
-                                            </div>
-                                        </div>
-                                        <div className="mt-4 space-y-5">
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Meeting Links</span>
-                                                    <span className="text-[10px] text-gray-500">{meetingLinks.length} links</span>
-                                                </div>
-                                                {meetingLinks.length === 0 ? (
-                                                    <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
-                                                        Add Zoom, Google Meet, or Microsoft Teams links.
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-2">
-                                                        {meetingLinks.map(link => (
-                                                            <div key={link.id} className="flex flex-wrap items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2 text-xs text-gray-300">
-                                                                <span className="px-2 py-1 rounded-full bg-gray-800 text-[10px] text-gray-400">
-                                                                    {formatMeetingProvider(link.provider)}
-                                                                </span>
-                                                                <a href={link.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 truncate max-w-[220px]">
-                                                                    {link.label || link.url}
-                                                                </a>
-                                                                <span className="text-[10px] text-gray-500">{formatTimestamp(link.createdAt)}</span>
-                                                                <button
-                                                                    onClick={() => removeMeetingLink(link.id)}
-                                                                    className="ml-auto text-[10px] text-gray-400 hover:text-red-300"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    <select
-                                                        value={meetingProvider}
-                                                        onChange={(e) => setMeetingProvider(e.target.value as ProjectMeetingProvider)}
-                                                        className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    >
-                                                        <option value="google-meet">Google Meet</option>
-                                                        <option value="zoom">Zoom</option>
-                                                        <option value="microsoft-teams">Microsoft Teams</option>
-                                                    </select>
-                                                    <input
-                                                        value={meetingUrl}
-                                                        onChange={(e) => setMeetingUrl(e.target.value)}
-                                                        placeholder="https://..."
-                                                        className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    />
-                                                    <input
-                                                        value={meetingLabel}
-                                                        onChange={(e) => setMeetingLabel(e.target.value)}
-                                                        placeholder="Label (optional)"
-                                                        className="flex-1 min-w-[160px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    />
-                                                    <button
-                                                        onClick={addMeetingLink}
-                                                        className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
-                                                    >
-                                                        Add
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Shared Storage Links</span>
-                                                    <span className="text-[10px] text-gray-500">{storageLinks.length} links</span>
-                                                </div>
-                                                {storageLinks.length === 0 ? (
-                                                    <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
-                                                        Add a shared Dropbox, Google Drive, or OneDrive folder link.
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-2">
-                                                        {storageLinks.map(link => (
-                                                            <div key={link.id} className="flex flex-wrap items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2 text-xs text-gray-300">
-                                                                <span className="px-2 py-1 rounded-full bg-gray-800 text-[10px] text-gray-400">
-                                                                    {formatStorageProvider(link.provider)}
-                                                                </span>
-                                                                <a href={link.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 truncate max-w-[220px]">
-                                                                    {link.label || link.url}
-                                                                </a>
-                                                                <span className="text-[10px] text-gray-500">{formatTimestamp(link.createdAt)}</span>
-                                                                <button
-                                                                    onClick={() => removeStorageLink(link.id)}
-                                                                    className="ml-auto text-[10px] text-gray-400 hover:text-red-300"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    <select
-                                                        value={storageProvider}
-                                                        onChange={(e) => setStorageProvider(e.target.value as ProjectStorageProvider)}
-                                                        className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    >
-                                                        <option value="one-drive">OneDrive</option>
-                                                        <option value="google-drive">Google Drive</option>
-                                                        <option value="dropbox">Dropbox</option>
-                                                        <option value="other">Other</option>
-                                                    </select>
-                                                    <input
-                                                        value={storageUrl}
-                                                        onChange={(e) => setStorageUrl(e.target.value)}
-                                                        placeholder="Shared folder link"
-                                                        className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    />
-                                                    <input
-                                                        value={storageLabel}
-                                                        onChange={(e) => setStorageLabel(e.target.value)}
-                                                        placeholder="Label (optional)"
-                                                        className="flex-1 min-w-[160px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
-                                                    />
-                                                    <button
-                                                        onClick={addStorageLink}
-                                                        className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg"
-                                                    >
-                                                        Add
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Project Chat</span>
-                                                    <select
-                                                        value={activeChatThreadId}
-                                                        onChange={(e) => handleSelectChatThread(e.target.value)}
-                                                        className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-[10px] text-gray-300"
-                                                    >
-                                                        <option value="project">Project</option>
-                                                        {shotPrompts.map(shot => (
-                                                            <option key={shot.shot} value={`shot-${shot.shot}`}>
-                                                                Shot {shot.shot}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-3 h-56 overflow-y-auto space-y-3">
-                                                    {chatMessages.length === 0 ? (
-                                                        <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
-                                                            Start the conversation for this thread.
-                                                        </div>
-                                                    ) : (
-                                                        chatMessages.map(message => (
-                                                            <div key={message.id} className="text-xs text-gray-300">
-                                                                <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-500">
-                                                                    <span className="text-gray-200 font-semibold">{message.authorName}</span>
-                                                                    <span>{formatTimestamp(message.createdAt)}</span>
-                                                                    {message.mentions && message.mentions.length > 0 && (
-                                                                        <span className="text-indigo-300">Mentions: {message.mentions.join(', ')}</span>
-                                                                    )}
-                                                                </div>
-                                                                {message.body && (
-                                                                    <div className="mt-1 text-xs text-gray-200">{renderChatMessageBody(message.body)}</div>
-                                                                )}
-                                                                {message.attachments && message.attachments.length > 0 && (
-                                                                    <div className="mt-2 flex flex-wrap gap-2">
-                                                                        {message.attachments.map(attachment => {
-                                                                            const isImage = attachment.mime.startsWith('image/');
-                                                                            return (
-                                                                                <a
-                                                                                    key={attachment.id}
-                                                                                    href={attachment.url}
-                                                                                    download={attachment.name}
-                                                                                    className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-[10px] text-gray-300 hover:border-indigo-400/60"
-                                                                                >
-                                                                                    {isImage ? (
-                                                                                        <img src={attachment.url} alt={attachment.name} className="w-16 h-16 object-cover rounded" />
-                                                                                    ) : (
-                                                                                        <div className="w-16 h-16 flex items-center justify-center text-gray-500">
-                                                                                            File
-                                                                                        </div>
-                                                                                    )}
-                                                                                    <div className="mt-1 truncate max-w-[80px]">{attachment.name}</div>
-                                                                                </a>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ))
-                                                    )}
-                                                </div>
-                                                {chatAttachments.length > 0 && (
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                        {chatAttachments.map(attachment => (
-                                                            <div key={attachment.id} className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-[10px] text-gray-300">
-                                                                <span className="truncate max-w-[140px]">{attachment.name}</span>
-                                                                <button
-                                                                    onClick={() => removeChatAttachment(attachment.id)}
-                                                                    className="text-gray-400 hover:text-red-300"
-                                                                >
-                                                                    Remove
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                <div className="mt-3">
-                                                    <textarea
-                                                        value={chatMessage}
-                                                        onChange={(e) => setChatMessage(e.target.value)}
-                                                        placeholder="Write a message, use @ to mention"
-                                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white min-h-[72px]"
-                                                    />
-                                                    {mentionSuggestions.length > 0 && (
-                                                        <div className="mt-2 flex flex-wrap gap-2">
-                                                            {mentionSuggestions.map(name => (
-                                                                <button
-                                                                    key={name}
-                                                                    onClick={() => insertMention(name)}
-                                                                    className="text-[10px] bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded-full"
-                                                                >
-                                                                    @{name}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                        <input
-                                                            type="file"
-                                                            ref={chatFileInputRef}
-                                                            className="hidden"
-                                                            onChange={(e) => handleChatAttachmentUpload(e.target.files)}
-                                                            multiple
-                                                        />
-                                                        <button
-                                                            onClick={() => chatFileInputRef.current?.click()}
-                                                            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg flex items-center gap-1"
-                                                        >
-                                                            <UploadIcon className="w-3 h-3" /> Attach
-                                                        </button>
-                                                        <button
-                                                            onClick={handleSendChatMessage}
-                                                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
-                                                        >
-                                                            Send
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
                                     </details>
                                 </aside>
                                 <div className="script-page__editor">
@@ -13946,6 +13624,455 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             </div>
                         )}
 
+                        {activePhase === 'team' && (
+                            <div className="team-page">
+                                <div className="phase-bar flex justify-between items-end">
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-white">Team</h2>
+                                        <p className="text-gray-400 text-sm mt-1">Keep the crew in sync: shared folder, collaborators, chat and meeting links live here instead of the script.</p>
+                                    </div>
+                                </div>
+                                <div className="team-page__grid">
+                                        <details className="script-section" open>
+                                            <summary className="script-section__summary"><span>Cloud Sync</span><small>Shared folder and collaborators</small></summary>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-xs text-gray-400">Link a shared folder to keep everyone up to date.</p>
+                                                </div>
+                                                <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                                                    {activeProfileName ? `You: ${activeProfileName}` : 'No profile'}
+                                                </div>
+                                            </div>
+                                            <div className="mt-4 space-y-4">
+                                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Provider</label>
+                                                        <select
+                                                            value={projectSync.provider || ''}
+                                                            onChange={(e) => handleSyncProviderChange(e.target.value)}
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow text-white"
+                                                        >
+                                                            <option value="">Not configured</option>
+                                                            <option value="dropbox">Dropbox</option>
+                                                            <option value="google-drive">Google Drive</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Sync Folder</label>
+                                                        <div className="flex gap-2">
+                                                            <input
+                                                                type="text"
+                                                                value={projectSync.rootPath || ''}
+                                                                readOnly
+                                                                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs text-gray-300"
+                                                                placeholder="Choose a shared folder"
+                                                            />
+                                                            <button
+                                                                onClick={handlePickSyncFolder}
+                                                                disabled={!canSelectSyncFolder}
+                                                                className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 rounded-lg"
+                                                            >
+                                                                Browse
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <label className="flex items-center gap-2 text-xs text-gray-400">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={projectSync.autoSync !== false}
+                                                        onChange={(e) => setProjectSync(prev => ({ ...prev, autoSync: e.target.checked }))}
+                                                    />
+                                                    Auto-sync in the background
+                                                </label>
+                                                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                                                    <span className="px-2 py-1 rounded-full bg-gray-900 border border-gray-700">
+                                                        {syncProviderLabel}
+                                                    </span>
+                                                    {projectPath ? (
+                                                        <span className={`px-2 py-1 rounded-full border ${isInSyncRoot || !projectSync.rootPath ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'}`}>
+                                                            {projectSync.rootPath
+                                                                ? (isInSyncRoot ? 'Project in sync folder' : 'Project outside sync folder')
+                                                                : 'No sync folder selected'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-1 rounded-full border border-gray-700 text-gray-500">Save the project to enable sync</span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center justify-between bg-gray-900/60 border border-gray-700 rounded-lg p-3">
+                                                    <div>
+                                                        <div className="text-xs font-semibold text-gray-300">Status</div>
+                                                        <div className="text-[10px] text-gray-500">
+                                                            {syncStatus.message || (isSyncConfigured ? 'Checking for updates...' : 'Sync not configured')}
+                                                        </div>
+                                                        {projectCollaboration.lastModifiedBy && (
+                                                            <div className="text-[10px] text-gray-500 mt-1">
+                                                                Last saved by {projectCollaboration.lastModifiedBy} - {formatTimestamp(projectCollaboration.lastModifiedAt)}
+                                                            </div>
+                                                        )}
+                                                        {projectSync.remoteModifiedAt && (
+                                                            <div className="text-[10px] text-gray-500 mt-1">
+                                                                Cloud updated - {formatTimestamp(projectSync.remoteModifiedAt)}
+                                                            </div>
+                                                        )}
+                                                        {syncStatus.lock?.by && (
+                                                            <div className={`text-[10px] mt-1 ${syncStatus.lock.isActive ? 'text-amber-300' : 'text-emerald-300'}`}>
+                                                                {syncStatus.lock.isActive
+                                                                    ? `Editing lock: ${syncStatus.lock.by} - ${formatTimestamp(syncStatus.lock.at)}`
+                                                                    : `Your editing lock is active - ${formatTimestamp(syncStatus.lock.at)}`}
+                                                            </div>
+                                                        )}
+                                                        {syncStatus.incoming?.by && (
+                                                            <div className="text-[10px] text-indigo-300 mt-1">
+                                                                Latest: {syncStatus.incoming.by} - {formatTimestamp(syncStatus.incoming.at)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        {syncStatus.state === 'incoming' && projectPath && (
+                                                            <button
+                                                                onClick={onReloadProject}
+                                                                className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
+                                                            >
+                                                                Reload
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={onPushToCloud}
+                                                            disabled={!projectPath || !projectSync.provider}
+                                                            className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 py-2 rounded-lg"
+                                                        >
+                                                            Push
+                                                        </button>
+                                                        <button
+                                                            onClick={onPullFromCloud}
+                                                            disabled={!projectPath || !projectSync.provider}
+                                                            className="text-xs bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white px-3 py-2 rounded-lg"
+                                                        >
+                                                            Pull
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Collaborators</span>
+                                                        <span className="text-[10px] text-gray-500">{collaborators.length} people</span>
+                                                    </div>
+                                                    {collaborators.length === 0 ? (
+                                                        <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
+                                                            Add collaborators to share this project.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            {collaborators.map(collab => (
+                                                                <div key={collab.id} className="flex items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2">
+                                                                    <input
+                                                                        value={collab.name}
+                                                                        onChange={(e) => updateCollaborator(collab.id, { name: e.target.value })}
+                                                                        className="flex-1 bg-transparent text-xs text-gray-200 outline-none"
+                                                                    />
+                                                                    <select
+                                                                        value={collab.role}
+                                                                        onChange={(e) => updateCollaborator(collab.id, { role: e.target.value as ProjectCollaboratorRole })}
+                                                                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-300"
+                                                                    >
+                                                                        <option value="owner">Owner</option>
+                                                                        <option value="admin">Admin</option>
+                                                                        <option value="editor">Editor</option>
+                                                                        <option value="viewer">Viewer</option>
+                                                                    </select>
+                                                                    <button
+                                                                        onClick={() => removeCollaborator(collab.id)}
+                                                                        className="text-[10px] text-gray-400 hover:text-red-300"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                        <input
+                                                            value={newCollaboratorName}
+                                                            onChange={(e) => setNewCollaboratorName(e.target.value)}
+                                                            placeholder="Add name or email"
+                                                            className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        />
+                                                        <select
+                                                            value={newCollaboratorRole}
+                                                            onChange={(e) => setNewCollaboratorRole(e.target.value as ProjectCollaboratorRole)}
+                                                            className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        >
+                                                            <option value="owner">Owner</option>
+                                                            <option value="admin">Admin</option>
+                                                            <option value="editor">Editor</option>
+                                                            <option value="viewer">Viewer</option>
+                                                        </select>
+                                                        <button
+                                                            onClick={addCollaborator}
+                                                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
+                                                        >
+                                                            Add
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </details>
+                                        <details className="script-section" open>
+                                            <summary className="script-section__summary"><span>Team Chat</span><small>Updates, meeting links, shared drives</small></summary>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-xs text-gray-400">Save quick updates, meeting links, and shared drives inside the project.</p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-4 space-y-5">
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Meeting Links</span>
+                                                        <span className="text-[10px] text-gray-500">{meetingLinks.length} links</span>
+                                                    </div>
+                                                    {meetingLinks.length === 0 ? (
+                                                        <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
+                                                            Add Zoom, Google Meet, or Microsoft Teams links.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            {meetingLinks.map(link => (
+                                                                <div key={link.id} className="flex flex-wrap items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2 text-xs text-gray-300">
+                                                                    <span className="px-2 py-1 rounded-full bg-gray-800 text-[10px] text-gray-400">
+                                                                        {formatMeetingProvider(link.provider)}
+                                                                    </span>
+                                                                    <a href={link.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 truncate max-w-[220px]">
+                                                                        {link.label || link.url}
+                                                                    </a>
+                                                                    <span className="text-[10px] text-gray-500">{formatTimestamp(link.createdAt)}</span>
+                                                                    <button
+                                                                        onClick={() => removeMeetingLink(link.id)}
+                                                                        className="ml-auto text-[10px] text-gray-400 hover:text-red-300"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                        <select
+                                                            value={meetingProvider}
+                                                            onChange={(e) => setMeetingProvider(e.target.value as ProjectMeetingProvider)}
+                                                            className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        >
+                                                            <option value="google-meet">Google Meet</option>
+                                                            <option value="zoom">Zoom</option>
+                                                            <option value="microsoft-teams">Microsoft Teams</option>
+                                                        </select>
+                                                        <input
+                                                            value={meetingUrl}
+                                                            onChange={(e) => setMeetingUrl(e.target.value)}
+                                                            placeholder="https://..."
+                                                            className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        />
+                                                        <input
+                                                            value={meetingLabel}
+                                                            onChange={(e) => setMeetingLabel(e.target.value)}
+                                                            placeholder="Label (optional)"
+                                                            className="flex-1 min-w-[160px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        />
+                                                        <button
+                                                            onClick={addMeetingLink}
+                                                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
+                                                        >
+                                                            Add
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Shared Storage Links</span>
+                                                        <span className="text-[10px] text-gray-500">{storageLinks.length} links</span>
+                                                    </div>
+                                                    {storageLinks.length === 0 ? (
+                                                        <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
+                                                            Add a shared Dropbox, Google Drive, or OneDrive folder link.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            {storageLinks.map(link => (
+                                                                <div key={link.id} className="flex flex-wrap items-center gap-2 bg-gray-900/60 border border-gray-700 rounded-lg p-2 text-xs text-gray-300">
+                                                                    <span className="px-2 py-1 rounded-full bg-gray-800 text-[10px] text-gray-400">
+                                                                        {formatStorageProvider(link.provider)}
+                                                                    </span>
+                                                                    <a href={link.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 truncate max-w-[220px]">
+                                                                        {link.label || link.url}
+                                                                    </a>
+                                                                    <span className="text-[10px] text-gray-500">{formatTimestamp(link.createdAt)}</span>
+                                                                    <button
+                                                                        onClick={() => removeStorageLink(link.id)}
+                                                                        className="ml-auto text-[10px] text-gray-400 hover:text-red-300"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                        <select
+                                                            value={storageProvider}
+                                                            onChange={(e) => setStorageProvider(e.target.value as ProjectStorageProvider)}
+                                                            className="bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        >
+                                                            <option value="one-drive">OneDrive</option>
+                                                            <option value="google-drive">Google Drive</option>
+                                                            <option value="dropbox">Dropbox</option>
+                                                            <option value="other">Other</option>
+                                                        </select>
+                                                        <input
+                                                            value={storageUrl}
+                                                            onChange={(e) => setStorageUrl(e.target.value)}
+                                                            placeholder="Shared folder link"
+                                                            className="flex-1 min-w-[180px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        />
+                                                        <input
+                                                            value={storageLabel}
+                                                            onChange={(e) => setStorageLabel(e.target.value)}
+                                                            placeholder="Label (optional)"
+                                                            className="flex-1 min-w-[160px] bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white"
+                                                        />
+                                                        <button
+                                                            onClick={addStorageLink}
+                                                            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg"
+                                                        >
+                                                            Add
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Project Chat</span>
+                                                        <select
+                                                            value={activeChatThreadId}
+                                                            onChange={(e) => handleSelectChatThread(e.target.value)}
+                                                            className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-[10px] text-gray-300"
+                                                        >
+                                                            <option value="project">Project</option>
+                                                            {shotPrompts.map(shot => (
+                                                                <option key={shot.shot} value={`shot-${shot.shot}`}>
+                                                                    Shot {shot.shot}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-3 h-56 overflow-y-auto space-y-3">
+                                                        {chatMessages.length === 0 ? (
+                                                            <div className="text-xs text-gray-500 border border-dashed border-gray-700 rounded-lg p-3 text-center">
+                                                                Start the conversation for this thread.
+                                                            </div>
+                                                        ) : (
+                                                            chatMessages.map(message => (
+                                                                <div key={message.id} className="text-xs text-gray-300">
+                                                                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-500">
+                                                                        <span className="text-gray-200 font-semibold">{message.authorName}</span>
+                                                                        <span>{formatTimestamp(message.createdAt)}</span>
+                                                                        {message.mentions && message.mentions.length > 0 && (
+                                                                            <span className="text-indigo-300">Mentions: {message.mentions.join(', ')}</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {message.body && (
+                                                                        <div className="mt-1 text-xs text-gray-200">{renderChatMessageBody(message.body)}</div>
+                                                                    )}
+                                                                    {message.attachments && message.attachments.length > 0 && (
+                                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                                            {message.attachments.map(attachment => {
+                                                                                const isImage = attachment.mime.startsWith('image/');
+                                                                                return (
+                                                                                    <a
+                                                                                        key={attachment.id}
+                                                                                        href={attachment.url}
+                                                                                        download={attachment.name}
+                                                                                        className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-[10px] text-gray-300 hover:border-indigo-400/60"
+                                                                                    >
+                                                                                        {isImage ? (
+                                                                                            <img src={attachment.url} alt={attachment.name} className="w-16 h-16 object-cover rounded" />
+                                                                                        ) : (
+                                                                                            <div className="w-16 h-16 flex items-center justify-center text-gray-500">
+                                                                                                File
+                                                                                            </div>
+                                                                                        )}
+                                                                                        <div className="mt-1 truncate max-w-[80px]">{attachment.name}</div>
+                                                                                    </a>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                    {chatAttachments.length > 0 && (
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {chatAttachments.map(attachment => (
+                                                                <div key={attachment.id} className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-[10px] text-gray-300">
+                                                                    <span className="truncate max-w-[140px]">{attachment.name}</span>
+                                                                    <button
+                                                                        onClick={() => removeChatAttachment(attachment.id)}
+                                                                        className="text-gray-400 hover:text-red-300"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-3">
+                                                        <textarea
+                                                            value={chatMessage}
+                                                            onChange={(e) => setChatMessage(e.target.value)}
+                                                            placeholder="Write a message, use @ to mention"
+                                                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-xs text-white min-h-[72px]"
+                                                        />
+                                                        {mentionSuggestions.length > 0 && (
+                                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                                {mentionSuggestions.map(name => (
+                                                                    <button
+                                                                        key={name}
+                                                                        onClick={() => insertMention(name)}
+                                                                        className="text-[10px] bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded-full"
+                                                                    >
+                                                                        @{name}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            <input
+                                                                type="file"
+                                                                ref={chatFileInputRef}
+                                                                className="hidden"
+                                                                onChange={(e) => handleChatAttachmentUpload(e.target.files)}
+                                                                multiple
+                                                            />
+                                                            <button
+                                                                onClick={() => chatFileInputRef.current?.click()}
+                                                                className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg flex items-center gap-1"
+                                                            >
+                                                                <UploadIcon className="w-3 h-3" /> Attach
+                                                            </button>
+                                                            <button
+                                                                onClick={handleSendChatMessage}
+                                                                className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg"
+                                                            >
+                                                                Send
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </details>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Worldbuilding Phase */}
                         {activePhase === 'worldbuilding' && (
                             <ProjectWorldbuildingPanel
@@ -13973,7 +14100,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="flex justify-between items-end border-b border-gray-700 pb-4">
+                                        <div className="phase-bar flex justify-between items-end">
                                             <div>
                                                 <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                                                     <ClapperboardIcon className="w-8 h-8 text-indigo-400" /> AI Director Mode
@@ -14391,7 +14518,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Concept Phase */}
                         {activePhase === 'concept' && (
                             <div className="space-y-8">
-                                <div className="flex justify-between items-end border-b border-gray-700 pb-4">
+                                <div className="phase-bar flex justify-between items-end">
                                     <div>
                                         <h2 className="text-2xl font-bold text-white">Concept & Casting</h2>
                                         <p className="text-gray-400 text-sm mt-1">Review extracted assets and generate visual references.</p>
@@ -15830,7 +15957,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Storyboard Phase */}
                         {activePhase === 'storyboard' && (
                             <div className="space-y-6">
-                                <div className="sticky top-0 bg-gray-900/95 backdrop-blur z-30 py-3 border-b border-gray-800 space-y-2">
+                                <div className="phase-bar space-y-2">
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <h2 className="text-xl font-bold text-white">Storyboard</h2>
@@ -17222,7 +17349,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Filming Phase */}
                         {activePhase === 'filming' && (
                             <div className="space-y-6">
-                                <div className="flex justify-between items-center border-b border-gray-700 pb-4 sticky top-0 bg-gray-900/95 backdrop-blur z-30">
+                                <div className="phase-bar flex justify-between items-center">
                                     <div>
                                         <h2 className="text-2xl font-bold text-white">Principal Photography</h2>
                                         <p className="text-gray-400 text-sm mt-1">Turn your storyboard visuals into high-quality video clips using Veo, Grok (text), Seedance, Wan, Kling, or LTX.</p>
@@ -17321,7 +17448,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             {videoModel === 'ltx-audio-to-video' && (
                                                 <span className="text-[10px] text-amber-300 font-semibold px-2">Voiceover required</span>
                                             )}
-                                        {(videoModel === 'p-video' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'wan-2.7-i2v-fal' || videoModel === 'seedance-2.0-omni-fal') && (
+                                        {(videoModel === 'p-video' || videoModel === 'wan-2.7-t2v-fal' || videoModel === 'wan-2.7-i2v-fal' || (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')) && (
                                                 <span className="text-[10px] text-cyan-300 font-semibold px-2">Audio optional</span>
                                             )}
                                         </div>
@@ -18025,11 +18152,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                                 </div>
                                                                             )}
                                                                         </div>
-                                                                        {(videoModel === 'kling-v2.6-motion-control' || videoModel === 'kling-o3-pro-fal' || videoModel === 'seedance-2.0-omni-fal') && (
+                                                                        {(videoModel === 'kling-v2.6-motion-control' || videoModel === 'kling-o3-pro-fal' || (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')) && (
                                                                             <div className="space-y-2">
                                                                                 <div className="flex items-center justify-between">
                                                                                     <span className="text-[10px] uppercase tracking-wider text-gray-500">
-                                                                                        {videoModel === 'seedance-2.0-omni-fal' ? 'Reference Video' : 'Motion Reference Video'}
+                                                                                        {(videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal') ? 'Reference Video' : 'Motion Reference Video'}
                                                                                     </span>
                                                                                     <div className="flex items-center gap-2">
                                                                                         <button
@@ -18088,7 +18215,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                                     <div className="w-full h-20 rounded border border-dashed border-gray-700 flex items-center justify-center text-[10px] text-gray-500">
                                                                                         {videoModel === 'kling-v2.6-motion-control'
                                                                                             ? 'Reference video required for motion control'
-                                                                                            : videoModel === 'seedance-2.0-omni-fal'
+                                                                                            : (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')
                                                                                                 ? 'Optional extra video reference for Seedance Omni'
                                                                                                 : (klingUseReferenceVideoForO3 ? 'Reference video required for Kling O3 mode' : 'Optional reference video for Kling O3')}
                                                                                     </div>
@@ -18360,7 +18487,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         )}
                         {activePhase === 'review' && (
                             <div className="space-y-6">
-                                <div className="flex justify-between items-center border-b border-gray-700 pb-4">
+                                <div className="phase-bar flex justify-between items-center">
                                     <div>
                                         <h2 className="text-2xl font-bold text-white">Project Review & Analysis</h2>
                                         <p className="text-gray-400 text-sm mt-1">AI-powered continuity checks and quality assurance.</p>

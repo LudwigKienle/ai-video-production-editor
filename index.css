@@ -3911,3 +3911,19 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .script-page__editor { order: 1; }
 .script-page__inspector { order: 2; }
 .script-page__inspector .grid.md\:grid-cols-2 { grid-template-columns: minmax(0, 1fr); }
+
+/* Phase action bars + Story Bible "More" ----------------------------------- */
+.phase-bar { position: sticky; top: -1.25rem; z-index: 20; padding: 0.55rem 0.75rem !important; margin-bottom: 0.25rem; border: 1px solid var(--shell-hairline) !important; border-radius: 0.7rem; background: rgb(var(--app-panel-rgb) / 0.92) !important; backdrop-filter: blur(16px); box-shadow: 0 8px 22px rgb(0 0 0 / 0.14); gap: 0.75rem; }
+.phase-bar h2 { font-size: 1.05rem !important; font-weight: 650; }
+.phase-bar h2 svg { width: 1.1rem !important; height: 1.1rem !important; }
+.phase-bar p { font-size: 0.74rem !important; margin-top: 0.1rem !important; }
+.phase-bar .text-2xl, .phase-bar .text-xl { font-size: 1.05rem !important; }
+.script-more { border: 1px solid var(--shell-hairline); border-radius: 0.55rem; background: rgb(var(--app-bg-rgb) / 0.25); }
+.script-more > summary { padding: 0.45rem 0.65rem; cursor: pointer; list-style: none; color: var(--app-muted); font-size: 0.76rem; font-weight: 600; }
+.script-more > summary::-webkit-details-marker { display: none; }
+.script-more > summary::before { content: '›'; display: inline-block; margin-right: 0.35rem; transition: transform 120ms ease; }
+.script-more[open] > summary::before { transform: rotate(90deg); }
+.script-more > summary:hover { color: var(--app-text); }
+.script-more > *:not(summary) { padding: 0 0.65rem 0.65rem; }
+.team-page { display: grid; gap: 0.75rem; }
+.team-page__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); gap: 0.75rem; align-items: start; }
