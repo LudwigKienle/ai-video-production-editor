@@ -59,6 +59,7 @@ export const WORKSPACE_NAV_GROUPS: WorkspaceNavGroup[] = [
       { id: 'ASSET_LIBRARY', name: 'Library', description: 'Reusable media and packs', icon: BoxIcon },
       { id: 'MOODBOARD', name: 'Moodboard', description: 'Visual direction and references', icon: PaletteIcon },
       { id: 'NOTEBOOKLM', name: 'Research', description: 'Source notes and context', icon: BrainIcon },
+      { id: 'TEAM', name: 'Team', description: 'Collaboration, shared spaces, chat', icon: UserCircleIcon },
       { id: 'PLUGINS', name: 'Plugins', description: 'Install packs, LUTs and host plugins', icon: LayersIcon },
     ],
   },

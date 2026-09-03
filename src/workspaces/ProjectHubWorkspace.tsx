@@ -171,6 +171,8 @@ interface ProjectHubWorkspaceProps {
     allowedFeatures?: StoryProjectFeature[];
     disabledFeatures?: StoryProjectFeature[];
     onSendWorldMeshToSetDesign?: (asset: SetDesignAsset) => void;
+    /** Render only the Team layer (collaboration, sync, chat) as its own workspace. */
+    teamMode?: boolean;
 }
 
 type ProductionPhase = 'library' | 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing' | 'team';
@@ -3640,10 +3642,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     allowedFeatures,
     disabledFeatures,
     onSendWorldMeshToSetDesign,
+    teamMode = false,
 }) => {
     const phaseCatalog = useMemo(
-        () => ALL_PHASES.filter((phase) => phase.id !== 'scene_wall' || canUseSceneWall),
-        [canUseSceneWall],
+        () => ALL_PHASES.filter((phase) => (teamMode ? phase.id === 'team' : phase.id !== 'team' && (phase.id !== 'scene_wall' || canUseSceneWall))),
+        [canUseSceneWall, teamMode],
     );
     const getPhaseLabel = useCallback(
         (phase: ProductionPhase) => phaseCatalog.find((entry) => entry.id === phase)?.label || phase,
@@ -3716,6 +3719,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const storedUiPrefs = useMemo(() => readProjectHubUiPrefs(uiPrefsScope), [uiPrefsScope]);
 
     const [activePhase, setActivePhase] = useState<ProductionPhase>(() => {
+        if (teamMode) return 'team';
         const preferred = storedUiPrefs.activePhase;
         return preferred && allowedPhaseIds.includes(preferred) ? preferred : initialPhaseValue;
     });
@@ -3820,6 +3824,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     }, [activePhase, allowedPhaseIds, initialPhaseValue]);
 
     useEffect(() => {
+        if (teamMode) return;
         if (!requestedPhase) {
             lastAppliedRequestedPhaseRef.current = null;
             return;
@@ -3889,6 +3894,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     }, [allowedPhaseIds, uiPrefsScope]);
 
     useEffect(() => {
+        if (teamMode) return;
         writeProjectHubUiPrefs(uiPrefsScope, {
             activePhase,
             conceptEntityTab,
@@ -12695,7 +12701,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     );
 
     return (
-        <div className="project-hub h-full flex flex-col">
+        <div className={`project-hub h-full flex flex-col ${teamMode ? 'project-hub--team' : ''}`}>
             {/* Main Workspace Area */}
             <div className="flex-grow overflow-hidden relative">
                 {isLoading && (

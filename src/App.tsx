@@ -8330,10 +8330,9 @@ function App() {
             onSmartFill: handleSmartFill,
         };
 
-        switch (activeWorkspace) {
-            case 'PROJECT':
-                return (
-                    <ProjectHubWorkspace
+        const renderProjectHub = (teamMode: boolean) => (
+            <ProjectHubWorkspace
+                        teamMode={teamMode}
                         storyBible={storyBible}
                         setStoryBible={setStoryBible}
                         projectPath={projectPath}
@@ -8392,6 +8391,56 @@ function App() {
                             setProjectHubActiveShotNumber(activeShotNumber);
                         }}
                     />
+        );
+
+        switch (activeWorkspace) {
+            case 'PROJECT':
+                return renderProjectHub(false);
+            case 'TEAM':
+                return (
+                    <div className="team-workspace">
+                        <div className="team-workspace__head">
+                            <div>
+                                <h2 className="team-workspace__title">Team</h2>
+                                <p className="team-workspace__text">Who is here, what is shared, and how the crew talks. This layer sits next to the project, not inside it.</p>
+                            </div>
+                            <PresenceBar
+                                presence={realtimePresence}
+                                configuredCollaboratorCount={projectCollaboration.collaborators.length}
+                                realtimeStatus={realtimeStatus}
+                                syncProvider={projectSync.provider || (collaborationDocStatus === 'connected' ? 'yjs' : null)}
+                                localUserName={localCollaborator.name}
+                                activeWorkspace={activeWorkspace}
+                                activePhase={projectHubActivePhase}
+                                activeShotNumber={projectHubActiveShotNumber}
+                                selectedClipId={selectedClipId}
+                                locks={activeCollaborativeLocks}
+                                latestAgentActivity={latestAgentActivity}
+                            />
+                        </div>
+                        <div className="team-workspace__shared">
+                            <div className="team-workspace__label">Shared spaces</div>
+                            {recentProjects.length === 0 ? (
+                                <p className="team-workspace__empty">Projects you open appear here; the ones with a sync provider are shared with the crew.</p>
+                            ) : (
+                                <div className="team-workspace__spaces">
+                                    {recentProjects.slice(0, 8).map((project) => (
+                                        <button
+                                            key={project.path}
+                                            type="button"
+                                            className={`team-space ${project.path === projectPath ? 'team-space--active' : ''}`}
+                                            onClick={() => handleOpenRecentProject(project.path)}
+                                            title={project.path}
+                                        >
+                                            <span className="team-space__name">{project.name || project.path.split(/[\\/]/).pop()}</span>
+                                            <span className="team-space__meta">{project.path === projectPath ? 'Open now' : 'Open'}{projectSync.provider && project.path === projectPath ? ` · synced via ${projectSync.provider}` : ''}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        {renderProjectHub(true)}
+                    </div>
                 );
             case 'OUTFIT':
                 return (

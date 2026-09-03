@@ -28,6 +28,7 @@ export type Workspace =
   | 'REQUESTS'
   | 'MOODBOARD'
   | 'PLUGINS'
+  | 'TEAM'
   | 'NOTEBOOKLM';
 
 export interface NeurocinematicsAnalysisResult {
