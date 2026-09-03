@@ -12789,10 +12789,60 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                         {/* Script Phase */}
                         {activePhase === 'script' && (
-                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
-                                <div className="lg:col-span-4 flex flex-col gap-6">
-                                    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-                                        <h3 className="text-lg font-bold text-white mb-4">Story Bible</h3>
+                            <div className="script-page">
+                                <div className="script-page__bar">
+                                    <div className="script-page__bar-left">
+                                        <div className="toolbar-segmented" role="radiogroup" aria-label="Script mode">
+                                            <button type="button" role="radio" aria-checked={scriptInputMode === 'paste'} onClick={() => setScriptInputMode('paste')} className={`toolbar-segmented__item ${scriptInputMode === 'paste' ? 'toolbar-segmented__item--active' : ''}`}>Editor</button>
+                                            {canGenerateScript && (
+                                                <button type="button" role="radio" aria-checked={scriptInputMode === 'generate'} onClick={() => setScriptInputMode('generate')} className={`toolbar-segmented__item ${scriptInputMode === 'generate' ? 'toolbar-segmented__item--active' : ''}`}><MagicWandIcon className="w-3.5 h-3.5" /> AI Writer</button>
+                                            )}
+                                        </div>
+                                        <span className="script-page__stats">
+                                            {(storyBible.script || '').trim() ? `${(storyBible.script || '').trim().split(/\s+/).length.toLocaleString()} words · ${((storyBible.script || '').match(/^\s*(INT\.|EXT\.|INT\/EXT\.|EXT\/INT\.|I\/E\.)/gim) || []).length} scenes` : 'No script yet'}
+                                        </span>
+                                    </div>
+                                    <div className="script-page__bar-right">
+                                        <input type="file" ref={scriptFileInputRef} onChange={handleScriptUpload} className="hidden" accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md,.json" />
+                                        <input type="file" ref={scriptSceneWallPdfInputRef} onChange={handleOneClickSceneWallPdfImport} className="hidden" accept=".pdf,application/pdf" />
+                                        <input type="file" ref={scriptImageInputRef} onChange={handleScriptImageUpload} className="hidden" accept="image/*" multiple />
+                                        <input type="file" ref={pdfMoodboardInputRef} onChange={handlePdfMoodboardExtract} className="hidden" accept=".pdf" />
+                                        <details className="script-page__menu">
+                                            <summary className="toolbar-button"><PdfIcon className="w-3.5 h-3.5" /> Import</summary>
+                                            <div className="app-menu script-page__menu-panel" role="menu">
+                                                <div className="app-menu__section app-menu__section--list">
+                                                    <button type="button" className="app-menu-item" onClick={(event) => { scriptFileInputRef.current?.click(); (event.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open'); }}>Script file (PDF, DOCX, TXT…)</button>
+                                                    {canUseSceneWall && (
+                                                        <button type="button" className="app-menu-item" onClick={(event) => { scriptSceneWallPdfInputRef.current?.click(); (event.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open'); }}>PDF → Scene Wall (1 click)</button>
+                                                    )}
+                                                    <button type="button" className="app-menu-item" disabled={!canGenerateScript} onClick={(event) => { scriptImageInputRef.current?.click(); (event.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open'); }}>Images → Script</button>
+                                                    <button type="button" className="app-menu-item" onClick={(event) => { pdfMoodboardInputRef.current?.click(); (event.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open'); }}>PDF → Moodboard</button>
+                                                </div>
+                                            </div>
+                                        </details>
+                                        {storyBible.script && canAnalyzeScript && (
+                                            <>
+                                                <button type="button" onClick={handleSuggestNextBeats} className="toolbar-button" title="Suggest the next story beats"><BrainIcon className="w-3.5 h-3.5" /> What's next?</button>
+                                                <button type="button" onClick={handleAnalyzeScriptQuality} className="toolbar-button" title="Plot holes, dialogue notes, golden shots"><ClipboardCheckIcon className="w-3.5 h-3.5" /> Script Doctor</button>
+                                            </>
+                                        )}
+                                        {canAnalyzeScript && (
+                                            <button
+                                                type="button"
+                                                onClick={handleAnalyzeScript}
+                                                disabled={!(storyBible.script || '').trim()}
+                                                className="app-button app-primary text-xs script-page__analyze"
+                                                title="Extract characters, locations and assets from the script"
+                                            >
+                                                <SparklesIcon className="w-3.5 h-3.5" /> Analyze Script
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="script-page__body">
+                                <aside className="script-page__inspector">
+                                    <details className="script-section" open>
+                                        <summary className="script-section__summary"><span>Story Bible</span><small>Title, logline, personas and style</small></summary>
                                         <div className="space-y-4">
                                             <div>
                                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Project Title</label>
@@ -13104,11 +13154,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 </div>
                                             )}
                                         </div>
-                                    </div>
-                                    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
+                                    </details>
+                                    <details className="script-section">
+                                        <summary className="script-section__summary"><span>Moodboard</span><small>Style references for preproduction</small></summary>
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <h3 className="text-lg font-bold text-white">Moodboard (optional)</h3>
                                                 <p className="text-xs text-gray-400">Collect style references for preproduction.</p>
                                             </div>
                                             <button
@@ -13243,11 +13293,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 )}
                                             </div>
                                         )}
-                                    </div>
-                                    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
+                                    </details>
+                                    <details className="script-section">
+                                        <summary className="script-section__summary"><span>Cloud Sync</span><small>Shared folder and collaborators</small></summary>
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <h3 className="text-lg font-bold text-white">Cloud Sync & Collaboration</h3>
                                                 <p className="text-xs text-gray-400">Link a shared folder to keep everyone up to date.</p>
                                             </div>
                                             <div className="text-[10px] text-gray-500 uppercase tracking-wider">
@@ -13428,11 +13478,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
+                                    </details>
+                                    <details className="script-section">
+                                        <summary className="script-section__summary"><span>Team Chat</span><small>Updates, meeting links, shared drives</small></summary>
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <h3 className="text-lg font-bold text-white">Team Chat & Meetings</h3>
                                                 <p className="text-xs text-gray-400">Save quick updates, meeting links, and shared drives inside the project.</p>
                                             </div>
                                         </div>
@@ -13679,63 +13729,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    {canAnalyzeScript && (
-                                        <div className="bg-indigo-900/30 rounded-xl p-6 border border-indigo-500/30">
-                                            <h3 className="text-md font-bold text-indigo-300 mb-2">Ready to breakdown?</h3>
-                                            <p className="text-sm text-indigo-200 mb-4">AI will extract characters, locations, and brand assets from your script.</p>
-                                            <button
-                                                onClick={handleAnalyzeScript}
-                                                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-3 px-4 rounded-lg shadow-lg transition-all transform hover:translate-y-[-1px]"
-                                            >
-                                                Analyze Script
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="lg:col-span-8 flex flex-col h-[70vh]">
+                                    </details>
+                                </aside>
+                                <div className="script-page__editor">
                                     <div className="bg-gray-800 rounded-xl border border-gray-700 flex-grow flex flex-col overflow-hidden shadow-xl relative">
-                                        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50">
-                                            <div className="flex gap-2">
-                                                <button onClick={() => setScriptInputMode('paste')} className={`px-3 py-1 rounded text-sm font-medium ${scriptInputMode === 'paste' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>Editor</button>
-                                                {canGenerateScript && (
-                                                    <button onClick={() => setScriptInputMode('generate')} className={`px-3 py-1 rounded text-sm font-medium flex items-center gap-1 ${scriptInputMode === 'generate' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}><MagicWandIcon className="w-3 h-3" /> AI Writer</button>
-                                                )}
-                                            </div>
-                                            <div className="flex gap-2 items-center">
-                                                {storyBible.script && canAnalyzeScript && (
-                                                    <>
-                                                        <button onClick={handleSuggestNextBeats} className="text-xs bg-purple-900/50 hover:bg-purple-600 text-purple-200 px-3 py-1 rounded border border-purple-500/30 flex items-center gap-1">
-                                                            <BrainIcon className="w-3 h-3" /> What's Next?
-                                                        </button>
-                                                        <button onClick={handleAnalyzeScriptQuality} className="text-xs bg-teal-900/50 hover:bg-teal-600 text-teal-200 px-3 py-1 rounded border border-teal-500/30 flex items-center gap-1">
-                                                            <ClipboardCheckIcon className="w-3 h-3" /> Script Doctor
-                                                        </button>
-                                                    </>
-                                                )}
-                                                <input type="file" ref={scriptFileInputRef} onChange={handleScriptUpload} className="hidden" accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md,.json" />
-                                                <button onClick={() => scriptFileInputRef.current?.click()} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"><PdfIcon className="w-3 h-3" /> Import Script</button>
-                                                <input type="file" ref={scriptSceneWallPdfInputRef} onChange={handleOneClickSceneWallPdfImport} className="hidden" accept=".pdf,application/pdf" />
-                                                {canUseSceneWall && (
-                                                    <button
-                                                        onClick={() => scriptSceneWallPdfInputRef.current?.click()}
-                                                        className="text-xs text-emerald-300 hover:text-emerald-200 flex items-center gap-1"
-                                                    >
-                                                        <ListIcon className="w-3 h-3" /> PDF -&gt; Scene Wall (1-Click)
-                                                    </button>
-                                                )}
-                                                <input type="file" ref={scriptImageInputRef} onChange={handleScriptImageUpload} className="hidden" accept="image/*" multiple />
-                                                <button
-                                                    onClick={() => scriptImageInputRef.current?.click()}
-                                                    disabled={!canGenerateScript}
-                                                    className="text-xs text-fuchsia-300 hover:text-fuchsia-200 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center gap-1"
-                                                >
-                                                    <CameraIcon className="w-3 h-3" /> Image -&gt; Script
-                                                </button>
-                                                <input type="file" ref={pdfMoodboardInputRef} onChange={handlePdfMoodboardExtract} className="hidden" accept=".pdf" />
-                                                <button onClick={() => pdfMoodboardInputRef.current?.click()} className="text-xs text-amber-300 hover:text-amber-200 flex items-center gap-1"><LandscapeIcon className="w-3 h-3" /> PDF Moodboard</button>
-                                            </div>
-                                        </div>
 
                                         {scriptInputMode === 'generate' && canGenerateScript && (
                                             <div className="p-4 bg-gray-900 border-b border-gray-700">
@@ -13944,6 +13941,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             )}
                                         </div>
                                     </div>
+                                </div>
                                 </div>
                             </div>
                         )}
