@@ -22,64 +22,30 @@ type StudioAgentStripProps = {
   onRejectPending?: () => unknown;
 };
 
-const STATUS_STYLES: Record<
+export const STUDIO_AGENT_STATUS_STYLES: Record<
   StudioAgentRuntimeState['status'],
-  { badge: string; label: string }
+  { dot: string; chip: string; label: string }
 > = {
-  idle: {
-    badge: 'border-slate-500/30 bg-slate-500/10 text-slate-200',
-    label: 'Idle',
-  },
-  planning: {
-    badge: 'border-sky-400/20 bg-sky-400/10 text-sky-200',
-    label: 'Planning',
-  },
-  awaiting_approval: {
-    badge: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
-    label: 'Awaiting Approval',
-  },
-  acting: {
-    badge: 'border-indigo-400/20 bg-indigo-400/10 text-indigo-200',
-    label: 'Acting',
-  },
-  verifying: {
-    badge: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
-    label: 'Verifying',
-  },
-  completed: {
-    badge: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200',
-    label: 'Verified',
-  },
-  error: {
-    badge: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
-    label: 'Needs review',
-  },
+  idle: { dot: 'status-dot--muted', chip: '', label: 'Idle' },
+  planning: { dot: 'status-dot--accent', chip: 'status-chip--accent', label: 'Planning' },
+  awaiting_approval: { dot: 'status-dot--warm', chip: 'status-chip--warm', label: 'Needs approval' },
+  acting: { dot: 'status-dot--accent', chip: 'status-chip--accent', label: 'Working' },
+  verifying: { dot: 'status-dot--warm', chip: 'status-chip--warm', label: 'Verifying' },
+  completed: { dot: 'status-dot--success', chip: 'status-chip--success', label: 'Verified' },
+  error: { dot: 'status-dot--danger', chip: 'status-chip--danger', label: 'Needs review' },
 };
+
+const STATUS_STYLES = STUDIO_AGENT_STATUS_STYLES;
 
 const TASK_STEP_STYLES: Record<
   StudioAgentTaskStep['status'],
-  { badge: string; label: string }
+  { chip: string; label: string }
 > = {
-  pending: {
-    badge: 'border-white/10 bg-white/5 text-slate-200',
-    label: 'Queued',
-  },
-  running: {
-    badge: 'border-sky-400/20 bg-sky-400/10 text-sky-200',
-    label: 'Running',
-  },
-  completed: {
-    badge: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200',
-    label: 'Done',
-  },
-  blocked: {
-    badge: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
-    label: 'Blocked',
-  },
-  failed: {
-    badge: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
-    label: 'Retry',
-  },
+  pending: { chip: '', label: 'Queued' },
+  running: { chip: 'status-chip--accent', label: 'Running' },
+  completed: { chip: 'status-chip--success', label: 'Done' },
+  blocked: { chip: 'status-chip--warm', label: 'Blocked' },
+  failed: { chip: 'status-chip--danger', label: 'Retry' },
 };
 
 const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
@@ -150,74 +116,21 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
   ];
 
   return (
-    <div className="agent-strip rounded-2xl border border-white/10 bg-gradient-to-r from-slate-950/90 via-slate-950/75 to-indigo-950/45 px-3 py-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] ${statusMeta.badge}`}>
-              Studio Agent {statusMeta.label}
-            </span>
-            {state.capabilityTitle && (
-              <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-300">
-                {state.capabilityTitle}
-              </span>
-            )}
-            {activeTask && (
-              <span className="rounded-full border border-indigo-400/20 bg-indigo-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-indigo-100">
-                Queue {activeTask.status.replace(/_/g, ' ')}
-              </span>
-            )}
-            {approvalBundle && (
-              <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-emerald-100">
-                Bundle Active
-              </span>
-            )}
-          </div>
-          <div className="mt-2 text-sm text-white">{state.detail}</div>
-          <div className="mt-1 text-xs text-slate-300">{state.snapshotSummary}</div>
-          {activeTask && (
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                    Run Queue
-                  </div>
-                  <div className="mt-1 text-sm font-medium text-white">{activeTask.title}</div>
-                  <div className="mt-1 text-xs text-slate-300">
-                    {activeTask.resultSummary || 'Queue ready.'}
-                  </div>
-                </div>
-                <div className="text-xs text-slate-300">
-                  {nextTaskStep ? `Next: ${nextTaskStep.title}` : 'All queued steps are complete.'}
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 xl:grid-cols-2">
-                {activeTask.steps.map((step) => {
-                  const stepMeta = TASK_STEP_STYLES[step.status];
-                  return (
-                    <div
-                      key={step.id}
-                      className="rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-white">{step.title}</div>
-                          <div className="mt-1 text-[11px] text-slate-300">
-                            {step.detail || (step.status === 'pending' ? 'Waiting for its turn in the run.' : 'No detail yet.')}
-                          </div>
-                        </div>
-                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${stepMeta.badge}`}>
-                          {stepMeta.label}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <section className="status-card status-card--agent" aria-label="Studio Agent">
+      <div className="status-card__head">
+        <span className={`status-dot ${statusMeta.dot}`} />
+        <span className="status-card__title">Studio Agent</span>
+        <span className={`status-chip ${statusMeta.chip}`}>{statusMeta.label}</span>
+        {state.capabilityTitle && (
+          <span className="status-card__meta">{state.capabilityTitle}</span>
+        )}
+        {activeTask && (
+          <span className="status-chip">Queue {activeTask.status.replace(/_/g, ' ')}</span>
+        )}
+        {approvalBundle && (
+          <span className="status-chip status-chip--success">Bundle active</span>
+        )}
+        <div className="status-card__actions">
           {showQuickActions && quickActions.map((action) => (
             <button
               key={action.key}
@@ -227,7 +140,7 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
                 void onExecute(action.capabilityId, action.input);
               }}
               data-studio-action={`studio-agent:${action.key}`}
-              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-100 transition hover:border-indigo-300/40 hover:bg-indigo-400/10 disabled:cursor-not-allowed disabled:opacity-45"
+              className="status-button"
             >
               {action.label}
             </button>
@@ -240,7 +153,7 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
                 void onResumeTaskQueue?.();
               }}
               data-studio-action="studio-agent:resume-queue"
-              className="rounded-full border border-indigo-400/20 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-100 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+              className="status-button status-button--accent"
             >
               Resume Run
             </button>
@@ -253,7 +166,7 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
                   void onApprovePending?.();
                 }}
                 data-studio-action="studio-agent:approve"
-                className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-100 transition hover:bg-emerald-500/20"
+                className="status-button status-button--success"
               >
                 {activeTask ? 'Approve Run' : 'Approve'}
               </button>
@@ -263,7 +176,7 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
                   onRejectPending?.();
                 }}
                 data-studio-action="studio-agent:reject"
-                className="rounded-full border border-rose-400/20 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:bg-rose-500/20"
+                className="status-button status-button--danger"
               >
                 Reject
               </button>
@@ -271,7 +184,40 @@ const StudioAgentStrip: React.FC<StudioAgentStripProps> = ({
           )}
         </div>
       </div>
-    </div>
+      <div className="status-card__body">
+        <div className="status-card__text">{state.detail}</div>
+        <div className="status-card__note">{state.snapshotSummary}</div>
+        {activeTask && (
+          <div className="status-task">
+            <div className="status-task__head">
+              <div className="min-w-0">
+                <div className="status-task__title">{activeTask.title}</div>
+                <div className="status-card__note">{activeTask.resultSummary || 'Queue ready.'}</div>
+              </div>
+              <div className="status-card__note">
+                {nextTaskStep ? `Next: ${nextTaskStep.title}` : 'All queued steps are complete.'}
+              </div>
+            </div>
+            <div className="status-task__steps">
+              {activeTask.steps.map((step) => {
+                const stepMeta = TASK_STEP_STYLES[step.status];
+                return (
+                  <div key={step.id} className="status-task__step">
+                    <div className="min-w-0">
+                      <div className="status-task__step-title">{step.title}</div>
+                      <div className="status-card__note">
+                        {step.detail || (step.status === 'pending' ? 'Waiting for its turn in the run.' : 'No detail yet.')}
+                      </div>
+                    </div>
+                    <span className={`status-chip ${stepMeta.chip}`}>{stepMeta.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 };
 

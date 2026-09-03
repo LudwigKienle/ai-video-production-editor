@@ -53,6 +53,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [soniloKey, setSoniloKey] = useState('');
     const [falKey, setFalKey] = useState('');
     const [ltxKey, setLtxKey] = useState('');
+    const [runwayKey, setRunwayKey] = useState('');
     const [worldLabsKey, setWorldLabsKey] = useState('');
     const [braveSearchKey, setBraveSearchKey] = useState('');
     const [unsplashKey, setUnsplashKey] = useState('');
@@ -68,6 +69,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [soniloSaved, setSoniloSaved] = useState(false);
     const [falSaved, setFalSaved] = useState(false);
     const [ltxSaved, setLtxSaved] = useState(false);
+    const [runwaySaved, setRunwaySaved] = useState(false);
     const [worldLabsSaved, setWorldLabsSaved] = useState(false);
     const [braveSearchSaved, setBraveSearchSaved] = useState(false);
     const [unsplashSaved, setUnsplashSaved] = useState(false);
@@ -85,6 +87,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         const storedSonilo = localStorage.getItem('sonilo_api_key');
         const storedFal = localStorage.getItem('fal_api_key');
         const storedLtx = localStorage.getItem('ltx_api_key');
+        const storedRunway = localStorage.getItem('runway_api_key');
         const storedWorldLabs = localStorage.getItem('worldlabs_api_key');
         const storedBraveSearch = localStorage.getItem('brave_search_api_key');
         const storedUnsplash = localStorage.getItem(UNSPLASH_ACCESS_KEY_STORAGE_KEY);
@@ -123,6 +126,10 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (storedLtx) {
             setLtxKey(storedLtx);
             setLtxSaved(true);
+        }
+        if (storedRunway) {
+            setRunwayKey(storedRunway);
+            setRunwaySaved(true);
         }
         if (storedWorldLabs) {
             setWorldLabsKey(storedWorldLabs);
@@ -222,7 +229,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         setCloudError('');
 
         const hasCloudConfig = dropboxClientId.trim() || googleDriveClientId.trim();
-        if (!googleKey.trim() && !replicateKey.trim() && !xaiKey.trim() && !elevenLabsKey.trim() && !sonautoKey.trim() && !soniloKey.trim() && !falKey.trim() && !ltxKey.trim() && !worldLabsKey.trim() && !braveSearchKey.trim() && !unsplashKey.trim() && !hasCloudConfig) {
+        if (!googleKey.trim() && !replicateKey.trim() && !xaiKey.trim() && !elevenLabsKey.trim() && !sonautoKey.trim() && !soniloKey.trim() && !falKey.trim() && !ltxKey.trim() && !runwayKey.trim() && !worldLabsKey.trim() && !braveSearchKey.trim() && !unsplashKey.trim() && !hasCloudConfig) {
             setError("Please enter at least one API Key to continue.");
             return;
         }
@@ -277,6 +284,12 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             localStorage.setItem('ltx_api_key', ltxKey.trim());
         } else {
             localStorage.removeItem('ltx_api_key');
+        }
+
+        if (runwayKey.trim()) {
+            localStorage.setItem('runway_api_key', runwayKey.trim());
+        } else {
+            localStorage.removeItem('runway_api_key');
         }
 
         if (worldLabsKey.trim()) {
@@ -606,6 +619,38 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                 rel="noreferrer"
                             >
                                 console.ltx.video
+                            </a>
+                            . Create a key and paste it here.
+                        </p>
+                    </div>
+
+                    <div className="app-card p-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="block text-xs font-bold app-muted uppercase">Runway API</label>
+                            {runwaySaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
+                        </div>
+                        <div className="relative">
+                            <input
+                                type="password"
+                                value={runwayKey}
+                                onChange={(e) => { setRunwayKey(e.target.value); setRunwaySaved(false); }}
+                                className="app-input pl-10"
+                                placeholder="Runway API key"
+                            />
+                            <div className="absolute left-3 top-3.5 app-muted">
+                                <LockIcon className="w-4 h-4" />
+                            </div>
+                        </div>
+                        <p className="text-[10px] app-muted mt-2">Used for Runway Ruby: SDR video to true HDR (HDR10, HLG, ProRes, or EXR sequences) in Upscale › Color Science.</p>
+                        <p className="text-[10px] app-muted mt-1">
+                            Get a key at{' '}
+                            <a
+                                className="text-indigo-300 hover:text-indigo-200"
+                                href="https://dev.runwayml.com"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                dev.runwayml.com
                             </a>
                             . Create a key and paste it here.
                         </p>

@@ -32,9 +32,22 @@ export interface MoodboardCategory {
     isCustom?: boolean;
 }
 
+export type MoodboardConnector = {
+    id: string;
+    from: string;
+    to: string;
+    categoryId: string;
+    label?: string;
+    style?: 'arrow' | 'line';
+};
+
 export interface MoodboardItem {
     id: string;
-    kind?: 'image' | 'text';
+    kind?: 'image' | 'text' | 'note';
+    /** Sticky-note tint or text colour. */
+    color?: string;
+    fontSize?: number;
+    locked?: boolean;
     url?: string;
     text?: string;
     label?: string;
@@ -58,6 +71,7 @@ export interface MoodboardItem {
 export interface CategorizedMoodboard {
     categories: MoodboardCategory[];
     items: MoodboardItem[];
+    connectors?: MoodboardConnector[];
 }
 
 export const DEFAULT_MOODBOARD_CATEGORIES: MoodboardCategory[] = [

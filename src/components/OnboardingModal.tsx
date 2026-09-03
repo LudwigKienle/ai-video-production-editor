@@ -28,10 +28,6 @@ interface OnboardingModalProps {
 const THEME_OPTIONS: Array<{ id: Theme; label: string }> = [
   { id: 'dark', label: '🌑 Dark' },
   { id: 'light', label: '☀️ Light' },
-  { id: 'cinematic', label: '🎬 Cinematic' },
-  { id: 'cyberpunk', label: '⚡ Neon' },
-  { id: 'fantasy', label: '🌿 Fantasy' },
-  { id: 'studio', label: '🏢 Studio' },
 ];
 
 const MODE_CARDS: Array<{

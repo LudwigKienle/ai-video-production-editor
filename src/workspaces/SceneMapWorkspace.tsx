@@ -16,6 +16,7 @@ import {
     snapToGrid,
     DEFAULT_GRID_SIZE,
 } from '../data/sceneMapTypes';
+import SceneMap3DView from '../components/SceneMap3DView';
 
 interface SceneMapWorkspaceProps {
     sceneMap: SceneMapState | null;
@@ -33,6 +34,7 @@ const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
     const state = sceneMap || createDefaultSceneMapState();
     const activeScene = state.scenes.find((s) => s.id === state.activeSceneId) || state.scenes[0];
     const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+    const [view3d, setView3d] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
@@ -245,6 +247,11 @@ const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
                 <button className="scene-tab add-tab" onClick={addScene}>
                     + New Scene
                 </button>
+                <div className="scene-tabs__spacer" />
+                <div className="toolbar-segmented" role="radiogroup" aria-label="View">
+                    <button type="button" role="radio" aria-checked={!view3d} className={`toolbar-segmented__item ${!view3d ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(false)}>2D plan</button>
+                    <button type="button" role="radio" aria-checked={view3d} className={`toolbar-segmented__item ${view3d ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(true)}>3D blockout</button>
+                </div>
             </div>
 
             <div className="scene-map-content">
@@ -349,6 +356,25 @@ const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
                 </div>
 
                 {/* Canvas Area */}
+                {view3d && activeScene && (
+                    <SceneMap3DView
+                        scene={activeScene}
+                        selectedElementId={selectedElementId}
+                        onSelectElement={setSelectedElementId}
+                        onMoveElement={(id, position) => {
+                            const current = sceneMap || createDefaultSceneMapState();
+                            onChange({
+                                ...current,
+                                scenes: current.scenes.map((scene) => scene.id !== activeScene.id ? scene : {
+                                    ...scene,
+                                    elements: scene.elements.map((element) => element.id === id
+                                        ? { ...element, position: { x: Math.round(position.x - element.size.width / 2), y: Math.round(position.y - element.size.height / 2) } }
+                                        : element),
+                                }),
+                            });
+                        }}
+                    />
+                )}
                 <div
                     ref={canvasRef}
                     className="scene-canvas"

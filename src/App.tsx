@@ -66,7 +66,12 @@ import Header from './components/Header';
 import PresenceBar from './components/PresenceBar';
 import RemoteCursorOverlay from './components/RemoteCursorOverlay';
 import StudioAgentStrip from './components/StudioAgentStrip';
-import WorkspaceSwitcher from './components/WorkspaceSwitcher';
+import AppSidebar from './components/AppSidebar';
+import { resolveWorkspaceNav } from './config/workspaceNav';
+import { STUDIO_AGENT_STATUS_STYLES } from './components/StudioAgentStrip';
+import ActivityCenter from './components/ActivityCenter';
+import { useTaskCenter } from './hooks/useTaskCenter';
+import { estimateProgress, summarizeTasks } from './services/taskCenter';
 import ApiKeyModal from './components/ApiKeyModal';
 import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
@@ -100,6 +105,8 @@ import CompositingWorkspace from './workspaces/CompositingWorkspace';
 import MoodboardWorkspace from './workspaces/MoodboardWorkspace';
 import NotebookLMWorkspace from './workspaces/NotebookLMWorkspace';
 import MicrodramaWorkspace from './workspaces/MicrodramaWorkspace';
+import PluginsWorkspace from './workspaces/PluginsWorkspace';
+import PostPageBar, { POST_PAGES, isPostPage } from './components/PostPageBar';
 import PricingScreen from './components/PricingScreen';
 import OptionsModal, { EstimateResult, OptionsModalConfig, PricingResult } from './components/OptionsModal';
 import AuthScreen from './components/AuthScreen';
@@ -485,6 +492,18 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-happy-horse-i2v', provider: 'fal', model: 'alibaba/happy-horse/image-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Happy Horse 1.0 I2V (1080p)' },
     { id: 'fal-seedance-2-i2v', provider: 'fal', model: 'bytedance/seedance-2.0/image-to-video', kind: 'video', unitCost: withMargin(0.3024), unitLabel: 'second', label: 'FAL Seedance 2.0 I2V (720p)' },
     { id: 'fal-seedance-2-ref', provider: 'fal', model: 'bytedance/seedance-2.0/reference-to-video', kind: 'video', unitCost: withMargin(0.3024), unitLabel: 'second', label: 'FAL Seedance 2.0 Reference-to-Video (720p)' },
+    { id: 'fal-seedance-25-t2v', provider: 'fal', model: 'bytedance/seedance-2.5/text-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 T2V (720p)' },
+    { id: 'fal-seedance-25-i2v', provider: 'fal', model: 'bytedance/seedance-2.5/image-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 I2V (720p)' },
+    { id: 'fal-seedance-25-ref', provider: 'fal', model: 'bytedance/seedance-2.5/reference-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 Reference-to-Video (720p)' },
+    { id: 'fal-seedream-v5-pro-t2i', provider: 'fal', model: 'bytedance/seedream/v5/pro/text-to-image', kind: 'image', unitCost: withMargin(0.0675), unitLabel: 'image', label: 'FAL Seedream 5.0 Pro T2I' },
+    { id: 'fal-seedream-v5-pro-edit', provider: 'fal', model: 'bytedance/seedream/v5/pro/edit', kind: 'edit', unitCost: withMargin(0.0675), unitLabel: 'request', label: 'FAL Seedream 5.0 Pro Edit' },
+    { id: 'fal-krea-2-large', provider: 'fal', model: 'krea/v2/large/text-to-image', kind: 'image', unitCost: withMargin(0.05), unitLabel: 'image', label: 'FAL Krea 2 Large T2I' },
+    { id: 'fal-krea-2-turbo', provider: 'fal', model: 'fal-ai/krea-2/turbo', kind: 'image', unitCost: withMargin(0.02), unitLabel: 'image', label: 'FAL Krea 2 Turbo T2I' },
+    { id: 'fal-ideogram-v4', provider: 'fal', model: 'ideogram/v4', kind: 'image', unitCost: withMargin(0.06), unitLabel: 'image', label: 'FAL Ideogram 4 T2I' },
+    { id: 'fal-hunyuan3d-v3', provider: 'fal', model: 'fal-ai/hunyuan3d-v3/image-to-3d', kind: 'edit', unitCost: withMargin(0.3), unitLabel: 'request', label: 'FAL Hunyuan3D v3 Image-to-3D' },
+    { id: 'fal-trellis-2', provider: 'fal', model: 'fal-ai/trellis-2', kind: 'edit', unitCost: withMargin(0.1), unitLabel: 'request', label: 'FAL Trellis 2 Image-to-3D' },
+    { id: 'fal-rodin-v25', provider: 'fal', model: 'fal-ai/hyper3d/rodin/v2.5', kind: 'edit', unitCost: withMargin(0.4), unitLabel: 'request', label: 'FAL Rodin 2.5 Image-to-3D' },
+    { id: 'runway-ruby', provider: 'runway', model: 'ruby', kind: 'edit', unitCost: withMargin(0.5), unitLabel: 'clip', label: 'Runway Ruby SDR to HDR' },
     { id: 'fal-kling-o3', provider: 'fal', model: 'fal-ai/kling-video/o3/pro/image-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Kling O3 Pro I2V' },
     { id: 'fal-kling-o3-ref', provider: 'fal', model: 'fal-ai/kling-video/o3/pro/reference-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Kling O3 Pro Reference-to-Video' },
     { id: 'fal-kling-v3-i2v', provider: 'fal', model: 'fal-ai/kling-video/v3/pro/image-to-video', kind: 'video', unitCost: withMargin(0.336), unitLabel: 'second', label: 'FAL Kling v3 Pro I2V' },
@@ -663,8 +682,9 @@ const THEME_STORAGE_KEY = 'ui_theme_v1';
 const SHORTCUT_STORAGE_KEY = 'ui_shortcuts_v1';
 const STARTUP_PREFERENCES_KEY = 'startup_preferences_v1';
 const ONBOARDING_COMPLETED_KEY = 'studio_onboarding_completed_v1';
+const SIDEBAR_COLLAPSED_KEY = 'studio_sidebar_collapsed_v1';
 const WEB_TEAM_STORAGE_KEY = 'bw_active_team_id';
-const THEME_OPTIONS: Theme[] = ['dark', 'light', 'fantasy', 'cyberpunk', 'studio', 'cinematic'];
+const THEME_OPTIONS: Theme[] = ['dark', 'light'];
 const DEFAULT_STARTUP_PREFERENCES: StartupPreferences = {
     startupWorkspace: 'PROJECT',
     autoOpenAssistant: false,
@@ -694,6 +714,9 @@ const getInitialTheme = (): Theme => {
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
     if (stored && THEME_OPTIONS.includes(stored as Theme)) return stored as Theme;
+    // Legacy themes (fantasy, cyberpunk, studio, cinematic) collapse onto the two supported looks.
+    if (stored === 'studio') return 'light';
+    if (stored) return 'dark';
     const prefersLight = window.matchMedia?.('(prefers-color-scheme: light)').matches;
     return prefersLight ? 'light' : 'dark';
 };
@@ -836,6 +859,17 @@ function App() {
     // Application State
     const lastHistoryDomainRef = useRef<AppHistoryDomain | null>(null);
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace>('PROJECT');
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        try {
+            return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+        } catch {
+            return false;
+        }
+    });
+    const [activityDrawerOpen, setActivityDrawerOpen] = useState(false);
+    const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+    const taskCenterTasks = useTaskCenter();
     const [
         mediaItems,
         setMediaItemsWithHistory,
@@ -7392,6 +7426,48 @@ function App() {
         return { ok: true as const };
     }, [billingStatus?.credit_balance_cents, isByokMode, isElectron, isHostedPlan, teamId]);
 
+    useEffect(() => {
+        try {
+            window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? 'true' : 'false');
+        } catch {
+            // ignore storage failures
+        }
+    }, [sidebarCollapsed]);
+
+    // Surface the activity drawer automatically when the Studio Agent needs attention.
+    const studioAgentNeedsAttention =
+        Boolean(studioAgentState.pendingApproval)
+        || studioAgentState.status === 'awaiting_approval'
+        || studioAgentState.status === 'error';
+    useEffect(() => {
+        if (studioAgentNeedsAttention) {
+            setActivityDrawerOpen(true);
+        }
+    }, [studioAgentNeedsAttention]);
+
+    useEffect(() => {
+        const handleShellShortcut = (event: KeyboardEvent) => {
+            const target = event.target as HTMLElement | null;
+            const isTyping = Boolean(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable));
+            if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+            if (event.key === '\\' && !isTyping) {
+                event.preventDefault();
+                setSidebarCollapsed((value) => !value);
+            } else if (event.shiftKey && !isTyping && /^[1-8]$/.test(event.key)) {
+                const page = POST_PAGES[Number(event.key) - 1];
+                if (page) {
+                    event.preventDefault();
+                    setActiveWorkspace(page.id);
+                }
+            } else if (event.key === ',' && !event.shiftKey) {
+                event.preventDefault();
+                setShowSettings(true);
+            }
+        };
+        window.addEventListener('keydown', handleShellShortcut);
+        return () => window.removeEventListener('keydown', handleShellShortcut);
+    }, []);
+
     // --- Render ---
 
     if (!user) {
@@ -8389,6 +8465,7 @@ function App() {
             );
             case 'IMAGE_GEN': return (
                 <ImageGenerationWorkspace
+                    productionFormatId={storyBible.productionFormat}
                     uiMode={uiMode}
                     apiKeyReady={apiKeyReady}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
@@ -8406,6 +8483,7 @@ function App() {
             );
             case 'VIDEO_GEN': return (
                 <VideoGenerationWorkspace
+                    productionFormatId={storyBible.productionFormat}
                     apiKeyReady={apiKeyReady}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
                     mediaItems={mediaItems}
@@ -8557,6 +8635,9 @@ function App() {
                     setStoryBible={setStoryBible}
                 />
             );
+            case 'PLUGINS': return (
+                <PluginsWorkspace onOpenGrading={() => setActiveWorkspace('POST')} />
+            );
             case 'NOTEBOOKLM': return (
                 <NotebookLMWorkspace
                     storyBible={storyBible}
@@ -8570,8 +8651,53 @@ function App() {
         }
     };
 
+    const workspaceNav = resolveWorkspaceNav({
+        activeWorkspace,
+        uiMode,
+        allowedWorkspaces,
+        showReview: isDirector,
+        showRequests: !isDirector,
+    });
+    const agentStatusMeta = STUDIO_AGENT_STATUS_STYLES[studioAgentState.status];
+    const onlineCount = realtimePresence.length;
+    const taskSummary = summarizeTasks(taskCenterTasks);
+    const activeTaskProgress = taskSummary.activeCount > 0
+        ? taskSummary.active.reduce((sum, task) => sum + estimateProgress(task), 0) / taskSummary.activeCount
+        : null;
+    const activityLabel = studioAgentState.pendingApproval
+        ? 'Approval needed'
+        : taskSummary.activeCount > 0
+            ? `${taskSummary.activeCount} running`
+            : studioAgentState.status !== 'idle'
+                ? agentStatusMeta.label
+                : taskSummary.failedCount > 0
+                    ? `${taskSummary.failedCount} failed`
+                    : onlineCount > 1
+                        ? `${onlineCount} online`
+                        : 'Activity';
+    const activityTone: 'idle' | 'busy' | 'attention' | 'ready' | 'error' = studioAgentState.pendingApproval
+        ? 'attention'
+        : taskSummary.activeCount > 0 || studioAgentState.status === 'planning' || studioAgentState.status === 'acting'
+            ? 'busy'
+            : studioAgentState.status === 'awaiting_approval' || studioAgentState.status === 'verifying'
+                ? 'attention'
+                : taskSummary.failedCount > 0 || studioAgentState.status === 'error'
+                    ? 'error'
+                    : studioAgentState.status === 'completed'
+                        ? 'ready'
+                        : 'idle';
+    const sidebarProjectStatus: { label: string; tone: 'ready' | 'busy' | 'attention' } = isProjectLoading
+        ? { label: 'Loading', tone: 'busy' }
+        : isProjectSaving
+            ? { label: 'Saving', tone: 'busy' }
+            : isAutoSaving
+                ? { label: 'Auto-saving', tone: 'busy' }
+                : projectPath
+                    ? { label: 'Saved', tone: 'ready' }
+                    : { label: 'Choose a folder', tone: 'attention' };
+
     return (
-        <div className="app-shell relative flex flex-col h-screen overflow-hidden">
+        <div className="app-shell app-frame">
             <Header
                 onUndo={undo}
                 onRedo={redo}
@@ -8610,8 +8736,27 @@ function App() {
                 onUpdateProfileRole={handleUpdateProfileRole}
                 planLabel={planLabel}
                 creditBalance={creditBalance}
+                sidebarCollapsed={sidebarCollapsed}
+                onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+                breadcrumb={{
+                    group: workspaceNav.activeGroup?.name,
+                    workspace: workspaceNav.activeItem?.name,
+                    description: workspaceNav.activeItem?.description,
+                }}
+                activity={{
+                    open: activityDrawerOpen,
+                    onToggle: () => setActivityDrawerOpen((value) => !value),
+                    label: activityLabel,
+                    tone: activityTone,
+                    progress: activeTaskProgress,
+                }}
+                projectMenuOpen={projectMenuOpen}
+                onProjectMenuOpenChange={setProjectMenuOpen}
                 auxiliaryContent={(
-                    <div className="header-auxiliary mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,1fr)]">
+                    <div className="app-activity-grid">
+                        <div className="app-activity-grid__full">
+                            <ActivityCenter tasks={taskCenterTasks} />
+                        </div>
                         <PresenceBar
                             presence={realtimePresence}
                             configuredCollaboratorCount={projectCollaboration.collaborators.length}
@@ -8643,54 +8788,62 @@ function App() {
                 presence={realtimePresence}
                 localCollaboratorId={localCollaborator.id}
             />
-            {!isElectron && (trialExpired || lowCredits) && (
-                <div className="px-6 py-3 border-b border-amber-500/30 bg-amber-500/10 text-amber-100 text-sm">
-                    <div className="container mx-auto flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            {trialExpired && 'Your 7‑day trial ended. Choose a plan to keep full access.'}
-                            {!trialExpired && lowCredits && 'Low credits. Top up to continue hosted generation.'}
-                            {!trialExpired && creditsExhausted && ' Credits are exhausted. Generation is paused until top-up.'}
+            <div className="app-frame__body">
+                <AppSidebar
+                    nav={workspaceNav}
+                    activeWorkspace={activeWorkspace}
+                    onSwitch={handleManualWorkspaceSwitch}
+                    uiMode={uiMode}
+                    collapsed={sidebarCollapsed}
+                    projectName={projectName || storyBible.title}
+                    projectStatus={sidebarProjectStatus}
+                    onOpenProject={() => setProjectMenuOpen(true)}
+                    onOpenSettings={() => setShowSettings(true)}
+                />
+                <div className="app-frame__content">
+                    {!isElectron && (trialExpired || lowCredits) && (
+                        <div className="app-banner app-banner--warm">
+                            <div>
+                                {trialExpired && 'Your 7‑day trial ended. Choose a plan to keep full access.'}
+                                {!trialExpired && lowCredits && 'Low credits. Top up to continue hosted generation.'}
+                                {!trialExpired && creditsExhausted && ' Credits are exhausted. Generation is paused until top-up.'}
+                            </div>
+                            <a href="./studio.html" className="app-banner__action">
+                                Open Billing
+                            </a>
                         </div>
-                        <a
-                            href="./studio.html"
-                            className="px-3 py-1 rounded-full border border-amber-300/40 text-amber-100 text-xs hover:bg-amber-300/10"
-                        >
-                            Open Billing
-                        </a>
-                    </div>
-                </div>
-            )}
-            <WorkspaceSwitcher
-                activeWorkspace={activeWorkspace}
-                onSwitch={handleManualWorkspaceSwitch}
-                uiMode={uiMode}
-                allowedWorkspaces={allowedWorkspaces}
-                showReview={isDirector}
-                showRequests={!isDirector}
-            />
-            {!isDirector && requestSummaries.length > 0 && (
-                <div className="px-6 py-3 border-b border-slate-500/20 bg-slate-900/40 text-slate-200">
-                    <div className="container mx-auto flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <div className="text-xs uppercase tracking-[0.2em] text-amber-300">Director Requests</div>
-                            <div className="text-sm">
-                                {requestSummaries.length} change request{requestSummaries.length === 1 ? '' : 's'} pending.
+                    )}
+                    {!isDirector && requestSummaries.length > 0 && (
+                        <div className="app-banner">
+                            <div>
+                                <div className="app-banner__title">Director requests</div>
+                                <div className="app-banner__text">
+                                    {requestSummaries.length} change request{requestSummaries.length === 1 ? '' : 's'} pending.
+                                </div>
+                            </div>
+                            <div className="app-banner__chips">
+                                {requestSummaries.map((request) => (
+                                    <span key={request.id} className="status-chip status-chip--warm">
+                                        {request.type} {request.action} {request.targetName}
+                                        {request.affectedShots.length > 0 ? ` → shots ${request.affectedShots.join(', ')}` : ''}
+                                    </span>
+                                ))}
                             </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-slate-300">
-                            {requestSummaries.map((request) => (
-                                <span key={request.id} className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5">
-                                    {request.type} {request.action} {request.targetName}
-                                    {request.affectedShots.length > 0 ? ` → shots ${request.affectedShots.join(', ')}` : ''}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
+                    )}
+                    <main className={`app-main-surface ${blockForBilling ? 'pointer-events-none opacity-45' : ''}`}>
+                        {renderWorkspace()}
+                    </main>
+                    {isPostPage(activeWorkspace) && (
+                        <PostPageBar
+                            active={activeWorkspace}
+                            allowed={new Set(allowedWorkspaces)}
+                            onSelect={handleManualWorkspaceSwitch}
+                            summary={`${timelineClips.length} clip${timelineClips.length === 1 ? '' : 's'} · ${mediaItems.length} media${selectedClipId ? ' · clip selected' : ''}`}
+                        />
+                    )}
                 </div>
-            )}
-            <main className={`app-main-surface flex-grow overflow-hidden ${blockForBilling ? 'pointer-events-none opacity-45' : ''}`}>
-                {renderWorkspace()}
-            </main>
+            </div>
             {blockForBilling && (
                 <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 backdrop-blur-sm">
                     <div className="mx-6 w-full max-w-md rounded-2xl border border-amber-300/30 bg-slate-950/95 p-6 text-center text-slate-100 shadow-2xl">
@@ -8788,13 +8941,13 @@ function App() {
                 onSelectUIMode={setUiMode}
             />
 
-            {(!showOnboarding && (!apiKeyReady || showSettings)) && (
+            {(!showOnboarding && showSettings) && (
                 <ApiKeyModal
                     onKeySelected={() => {
                         setApiKeyReady(true);
                         setShowSettings(false);
                     }}
-                    onClose={apiKeyReady ? () => setShowSettings(false) : undefined}
+                    onClose={() => setShowSettings(false)}
                     shortcuts={shortcuts}
                     onUpdateShortcuts={setShortcuts}
                     autosaveSettings={autosaveSettings}

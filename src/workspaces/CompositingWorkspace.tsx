@@ -650,6 +650,24 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           </div>
         )}
 
+        <div className="quickstart">
+          <div className="quickstart__title">Start with what you want to do</div>
+          <div className="quickstart__grid">
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-layer')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+              <strong>Layer two clips</strong><span>Blend, screen or multiply a foreground over a background.</span>
+            </button>
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-key')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+              <strong>Key a green screen</strong><span>Corridor-style keyer with a separate alpha pass.</span>
+            </button>
+            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); document.getElementById('composite-relight')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+              <strong>Relight a shot</strong><span>Change the light direction and mood of a still.</span>
+            </button>
+            <button type="button" className="quickstart__item" onClick={() => setCompositingView('nodeStudio')}>
+              <strong>Build a node comp</strong><span>Full node graph for multi-pass work.</span>
+            </button>
+          </div>
+        </div>
+
         <div className="app-panel p-2 flex flex-wrap items-center gap-2">
           {COMPOSITING_WORKSPACE_VIEWS.map((view) => (
             <button
@@ -674,6 +692,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           <CompositingNodeStudioView mediaItems={mediaItems} onAddGeneratedMedia={onAddGeneratedMedia} />
         ) : (
           <>
+        <div id="composite-relight" />
         <ArtRelightPanel
           mediaItems={mediaItems}
           onAddGeneratedMedia={onAddGeneratedMedia}
@@ -1319,7 +1338,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
 
         <NatronCompositorPanel mediaItems={mediaItems} onAddGeneratedMedia={onAddGeneratedMedia} />
 
-        <section className="app-panel p-5 space-y-4">
+        <section id="composite-layer" className="app-panel p-5 space-y-4">
           <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Layer Composite</div>
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-3">

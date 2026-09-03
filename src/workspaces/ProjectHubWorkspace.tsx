@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
+import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
 import {
     generateProductionGuidelines,
     generateScriptWithMode,
@@ -12596,8 +12597,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     </div>
                 )}
 
-                <div className="h-full overflow-y-auto p-6 custom-scrollbar">
-                    <div className="max-w-7xl mx-auto">
+                <div className="h-full overflow-y-auto project-hub__scroll custom-scrollbar">
+                    <div className="project-hub__inner">
                         {error && (
                             <div className="mb-6 bg-red-500/10 border border-red-500/50 text-red-200 p-4 rounded-lg flex justify-between items-center">
                                 <p>{error}</p>
@@ -12605,124 +12606,134 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             </div>
                         )}
 
-                        <section className="project-hub-hero mb-6">
-                            <div className="project-hub-hero__header">
-                                <div className="project-hub-hero__title-block">
-                                    <div className="project-hub-kicker">Production Hub</div>
-                                    <h2>{projectLabel}</h2>
-                                    <p>Current focus: {activePhaseLabel}. Keep the next action visible and move forward one phase at a time.</p>
+                        <aside className="project-hub__nav" aria-label="Project navigation">
+                            <div className="project-hub__nav-head">
+                                <div className="project-hub-kicker">Project</div>
+                                <h2 className="project-hub__title">{projectLabel}</h2>
+                                <div className="project-hub__progress" title={`${quickstartStatus.completedCount} of ${quickstartStatus.totalCount} setup steps done`}>
+                                    <span style={{ width: `${progressPercent}%` }} />
                                 </div>
-                                <div className="project-hub-progress">
-                                    <span>{quickstartStatus.completedCount}/{quickstartStatus.totalCount}</span>
-                                    <strong>{progressPercent}% ready</strong>
-                                    <div className="project-hub-progress__bar">
-                                        <span style={{ width: `${progressPercent}%` }} />
-                                    </div>
-                                </div>
+                                <div className="project-hub__progress-label">{progressPercent}% ready · {quickstartStatus.completedCount}/{quickstartStatus.totalCount} steps</div>
                             </div>
 
-                            <div className={`project-hub-next ${nextReadinessItem ? 'project-hub-next--attention' : 'project-hub-next--ready'}`}>
-                                <div>
-                                    <div className="project-hub-next__label">{nextReadinessItem ? 'Next best step' : 'Ready to produce'}</div>
-                                    <div className="project-hub-next__title">
-                                        {nextReadinessItem ? nextReadinessItem.label : 'Project foundation is ready'}
-                                    </div>
-                                    <p>
-                                        {nextReadinessItem
-                                            ? nextReadinessItem.detail
-                                            : nextPhase
-                                                ? `Continue with ${nextPhase.label}: ${PHASE_DESCRIPTIONS[nextPhase.id]}.`
-                                                : 'Review the final pass or export when the cut is ready.'}
-                                    </p>
-                                </div>
-                                <div className="project-hub-next__actions">
+                            <label className="project-hub__format">
+                                <span className="project-hub-kicker">Format</span>
+                                <select
+                                    className="app-select app-select--compact"
+                                    value={storyBible.productionFormat || 'feature'}
+                                    onChange={(event) => {
+                                        const nextId = event.target.value as typeof PRODUCTION_FORMATS[number]['id'];
+                                        setStoryBible((prev) => ({ ...prev, productionFormat: nextId }));
+                                    }}
+                                >
+                                    {PRODUCTION_FORMATS.map((format) => (
+                                        <option key={format.id} value={format.id}>{format.label} · {format.tagline}</option>
+                                    ))}
+                                </select>
+                                <span className="project-hub__format-hint">{getProductionFormat(storyBible.productionFormat).description}</span>
+                            </label>
+
+                            <ol className="project-hub__phases" role="list">
+                                {phases.map((phase, index) => {
+                                    const isActive = activePhase === phase.id;
+                                    const isPast = currentPhaseIndex > index;
+                                    const emphasised = getProductionFormat(storyBible.productionFormat).emphasisPhases.includes(phase.id);
+                                    return (
+                                        <li key={phase.id}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setActivePhase(phase.id as ProductionPhase)}
+                                                data-studio-action={`project-phase:${phase.id}`}
+                                                className={`project-hub__phase ${isActive ? 'project-hub__phase--active' : ''} ${isPast && !isActive ? 'project-hub__phase--done' : ''}`}
+                                                title={PHASE_DESCRIPTIONS[phase.id]}
+                                            >
+                                                <span className="project-hub__phase-step">{isPast && !isActive ? '✓' : index + 1}</span>
+                                                <phase.icon className="project-hub__phase-icon" />
+                                                <span className="project-hub__phase-text">
+                                                    <span className="project-hub__phase-label">{phase.label}</span>
+                                                    <span className="project-hub__phase-hint">{PHASE_DESCRIPTIONS[phase.id]}</span>
+                                                </span>
+                                                {emphasised && <span className="project-hub__phase-dot" title="Key phase for this format" />}
+                                            </button>
+                                        </li>
+                                    );
+                                })}
+                            </ol>
+
+                            <div className={`project-hub__next ${nextReadinessItem ? 'project-hub__next--attention' : 'project-hub__next--ready'}`}>
+                                <div className="project-hub-kicker">{nextReadinessItem ? 'Next step' : 'Ready to produce'}</div>
+                                <div className="project-hub__next-title">{nextReadinessItem ? nextReadinessItem.label : 'Foundation is ready'}</div>
+                                <p className="project-hub__next-text">
+                                    {nextReadinessItem
+                                        ? nextReadinessItem.detail
+                                        : nextPhase
+                                            ? `Continue with ${nextPhase.label}.`
+                                            : 'Review the final pass or export when the cut is ready.'}
+                                </p>
+                                <div className="project-hub__next-actions">
                                     {nextReadinessItem?.onAction && (
-                                        <button type="button" className="app-button app-primary" onClick={nextReadinessItem.onAction}>
+                                        <button type="button" className="app-button app-primary text-xs" onClick={nextReadinessItem.onAction}>
                                             {nextReadinessItem.actionLabel}
                                         </button>
                                     )}
                                     {nextPhase && (
-                                        <button type="button" className="app-button app-secondary" onClick={() => setActivePhase(nextPhase.id)}>
+                                        <button type="button" className="app-button app-tertiary text-xs" onClick={() => setActivePhase(nextPhase.id)}>
                                             Open {nextPhase.label}
                                         </button>
                                     )}
                                 </div>
                             </div>
 
-                            <div className="project-hub-readiness-grid">
-                                {readinessItems.map((item, index) => (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        className={`project-hub-readiness-item ${item.complete ? 'project-hub-readiness-item--ready' : 'project-hub-readiness-item--needed'}`}
-                                        onClick={item.onAction}
-                                        disabled={!item.onAction}
-                                    >
-                                        <span className="project-hub-readiness-item__step">{index + 1}</span>
-                                        <span className="project-hub-readiness-item__copy">
-                                            <span className="project-hub-readiness-item__label">{item.label}</span>
-                                            <span className="project-hub-readiness-item__detail">{item.detail}</span>
-                                        </span>
-                                        <span className="project-hub-readiness-item__state">
-                                            {item.complete ? 'Ready' : item.actionLabel || 'Needed'}
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
+                            <details className="project-hub__checklist">
+                                <summary>Setup checklist · {readinessItems.filter((item) => item.complete).length}/{readinessItems.length}</summary>
+                                <ul role="list">
+                                    {readinessItems.map((item) => (
+                                        <li key={item.id}>
+                                            <button type="button" className={`project-hub__check ${item.complete ? 'project-hub__check--done' : ''}`} onClick={item.onAction} disabled={!item.onAction}>
+                                                <span className="project-hub__check-state">{item.complete ? '✓' : '○'}</span>
+                                                <span className="project-hub__check-text">
+                                                    <span>{item.label}</span>
+                                                    <small>{item.complete ? 'Ready' : item.detail}</small>
+                                                </span>
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </details>
 
-                            {canUseSceneWall && sceneWallEnabled && (
-                                <div className="project-hub-hero__tools">
-                                    <button
-                                        type="button"
-                                        onClick={() => handleDeepSyncSceneWallFromScript('Project Context')}
-                                        className="app-button app-secondary text-xs"
-                                    >
-                                        Sync Scene Wall
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => onToggleSceneWallFeature?.(false)}
-                                        className="app-button app-tertiary text-xs"
-                                    >
-                                        Disable Scene Wall
-                                    </button>
+                            {getProductionFormat(storyBible.productionFormat).tips.length > 0 && (
+                                <div className="project-hub__tips">
+                                    <div className="project-hub-kicker">Tips for {getProductionFormat(storyBible.productionFormat).label}</div>
+                                    <ul>
+                                        {getProductionFormat(storyBible.productionFormat).tips.map((tip) => <li key={tip}>{tip}</li>)}
+                                    </ul>
                                 </div>
                             )}
-                        </section>
 
-                        <section className="project-hub-workflow mb-6">
-                            <div className="project-hub-workflow__header">
-                                <div>
-                                    <div className="project-hub-kicker">Workflow</div>
-                                    <div className="project-hub-workflow__title">Move through one production step at a time.</div>
+                            {canUseSceneWall && sceneWallEnabled && (
+                                <div className="project-hub__tools">
+                                    <button type="button" onClick={() => handleDeepSyncSceneWallFromScript('Project Context')} className="app-button app-secondary text-xs">Sync Scene Wall</button>
+                                    <button type="button" onClick={() => onToggleSceneWallFeature?.(false)} className="app-button app-tertiary text-xs">Disable Scene Wall</button>
                                 </div>
-                                <div className="project-hub-workflow__status">
-                                    <span>Current</span>
-                                    <strong>{activePhaseLabel}</strong>
-                                </div>
+                            )}
+                        </aside>
+
+                        <header className="project-hub__phase-head">
+                            <div>
+                                <div className="project-hub-kicker">Step {currentPhaseIndex + 1} of {phases.length}</div>
+                                <h3>{activePhaseLabel}</h3>
+                                <p>{PHASE_DESCRIPTIONS[activePhase]}</p>
                             </div>
-                            <div className="project-hub-phase-grid">
-                                {phases.map((phase, index) => {
-                                    const isActive = activePhase === phase.id;
-                                    const isPast = currentPhaseIndex > index;
-                                    return (
-                                        <button
-                                            key={phase.id}
-                                            onClick={() => setActivePhase(phase.id as ProductionPhase)}
-                                            data-studio-action={`project-phase:${phase.id}`}
-                                            className={`project-hub-phase ${isActive ? 'project-hub-phase--active' : ''} ${isPast && !isActive ? 'project-hub-phase--done' : ''}`}
-                                        >
-                                            <span className="project-hub-phase__step">{index + 1}</span>
-                                            <phase.icon className="project-hub-phase__icon" />
-                                            <span className="project-hub-phase__copy">
-                                                <span className="project-hub-phase__label">{phase.label}</span>
-                                                <span className="project-hub-phase__hint">{PHASE_DESCRIPTIONS[phase.id]}</span>
-                                            </span>
-                                        </button>
-                                    )
-                                })}
+                            <div className="project-hub__phase-nav">
+                                {currentPhaseIndex > 0 && (
+                                    <button type="button" className="toolbar-button" onClick={() => setActivePhase(phases[currentPhaseIndex - 1].id as ProductionPhase)}>‹ {phases[currentPhaseIndex - 1].label}</button>
+                                )}
+                                {nextPhase && (
+                                    <button type="button" className="toolbar-button toolbar-button--text" onClick={() => setActivePhase(nextPhase.id)}>{nextPhase.label} ›</button>
+                                )}
                             </div>
-                        </section>
+                        </header>
+
 
                         {/* Library Phase */}
                         {activePhase === 'library' && (

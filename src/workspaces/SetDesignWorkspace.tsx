@@ -67,6 +67,12 @@ import {
   resolveRenderSize,
 } from '../utils/setDesignRender';
 import { searchSketchfabModels, getSketchfabDownloadUrl } from '../services/sketchfabService';
+import {
+  generate3dWithFalHunyuan3dV3,
+  generate3dWithFalTrellis2,
+  generate3dWithFalRodinV25,
+} from '../services/falAiService';
+import type { SetDesignCameraKeyframe, SetDesignCameraPath } from '../types';
 import { CameraIcon, MagicWandIcon, TrashIcon, UploadIcon } from '../components/icons';
 
 type TransformMode = 'translate' | 'rotate' | 'scale';
@@ -96,6 +102,121 @@ const MATERIAL_PRESET_PACK_ASSETS = getAssetPackItemsByType(BUILTIN_ASSET_PACKS,
   .filter((item) => item.metadata);
 const DOWNLOADABLE_ASSET_PACKS = getDownloadableAssetPacks();
 const STARTER_HDRI_PACK = BUILTIN_ASSET_PACKS.find((pack) => pack.id === POLYHAVEN_STARTER_HDRI_PACK_ID) || BUILTIN_ASSET_PACKS[0];
+
+type BlockoutEngine = 'hunyuan3d-v3' | 'trellis-2' | 'rodin-v2.5' | 'rodin-replicate';
+
+const BLOCKOUT_ENGINES: Array<{ id: BlockoutEngine; label: string; hint: string; provider: 'fal' | 'replicate' }> = [
+  { id: 'hunyuan3d-v3', label: 'Hunyuan3D v3', hint: 'Fast, clean geometry. Best default for blockouts.', provider: 'fal' },
+  { id: 'trellis-2', label: 'Trellis 2', hint: 'Microsoft research model, strong on hard-surface props.', provider: 'fal' },
+  { id: 'rodin-v2.5', label: 'Rodin 2.5', hint: 'Highest fidelity, PBR textures, slower.', provider: 'fal' },
+  { id: 'rodin-replicate', label: 'Rodin (Replicate)', hint: 'Legacy route via your Replicate key.', provider: 'replicate' },
+];
+
+const DEFAULT_CAMERA_PATH: SetDesignCameraPath = {
+  keyframes: [],
+  durationSeconds: 6,
+  fps: 24,
+  loop: false,
+  easing: 'smooth',
+};
+
+const smoothstep = (value: number) => {
+  const t = Math.min(1, Math.max(0, value));
+  return t * t * (3 - 2 * t);
+};
+
+const sortKeyframes = (keyframes: SetDesignCameraKeyframe[]) =>
+  [...keyframes].sort((a, b) => a.time - b.time);
+
+/**
+ * Evaluates the camera pose at `time` along the keyframed path. Positions and
+ * look-at targets follow a centripetal Catmull-Rom spline so dolly and crane
+ * moves stay smooth; timing between keyframes is respected exactly.
+ */
+const evaluateCameraPath = (path: SetDesignCameraPath | undefined, time: number): SetDesignCamera | null => {
+  if (!path || path.keyframes.length === 0) return null;
+  const keyframes = sortKeyframes(path.keyframes);
+  if (keyframes.length === 1) return keyframes[0].camera;
+  const first = keyframes[0];
+  const last = keyframes[keyframes.length - 1];
+  if (time <= first.time) return first.camera;
+  if (time >= last.time) return last.camera;
+
+  let index = 0;
+  while (index < keyframes.length - 2 && keyframes[index + 1].time <= time) index += 1;
+  const a = keyframes[index];
+  const b = keyframes[index + 1];
+  const span = Math.max(0.0001, b.time - a.time);
+  const rawU = (time - a.time) / span;
+  const u = path.easing === 'linear' ? rawU : smoothstep(rawU);
+
+  const positions = keyframes.map((kf) => new THREE.Vector3(kf.camera.position.x, kf.camera.position.y, kf.camera.position.z));
+  const targets = keyframes.map((kf) => new THREE.Vector3(kf.camera.target.x, kf.camera.target.y, kf.camera.target.z));
+  const positionCurve = new THREE.CatmullRomCurve3(positions, false, 'centripetal');
+  const targetCurve = new THREE.CatmullRomCurve3(targets, false, 'centripetal');
+  const globalParam = (index + u) / (keyframes.length - 1);
+  const position = positionCurve.getPoint(globalParam);
+  const target = targetCurve.getPoint(globalParam);
+  const fov = a.camera.fov + (b.camera.fov - a.camera.fov) * u;
+  return {
+    position: { x: position.x, y: position.y, z: position.z },
+    target: { x: target.x, y: target.y, z: target.z },
+    fov,
+  };
+};
+
+const CAMERA_MOVE_PRESETS: Array<{ id: string; label: string; build: (base: SetDesignCamera) => SetDesignCamera[] }> = [
+  {
+    id: 'push-in',
+    label: 'Push in',
+    build: (base) => {
+      const dir = new THREE.Vector3(base.target.x - base.position.x, base.target.y - base.position.y, base.target.z - base.position.z);
+      const distance = dir.length();
+      dir.normalize();
+      const end = new THREE.Vector3(base.position.x, base.position.y, base.position.z).addScaledVector(dir, distance * 0.45);
+      return [base, { ...base, position: { x: end.x, y: end.y, z: end.z } }];
+    },
+  },
+  {
+    id: 'orbit',
+    label: 'Orbit 90°',
+    build: (base) => {
+      const center = new THREE.Vector3(base.target.x, base.target.y, base.target.z);
+      const offset = new THREE.Vector3(base.position.x, base.position.y, base.position.z).sub(center);
+      const frames: SetDesignCamera[] = [];
+      for (let i = 0; i <= 3; i += 1) {
+        const angle = (Math.PI / 2) * (i / 3);
+        const rotated = offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).add(center);
+        frames.push({ ...base, position: { x: rotated.x, y: rotated.y, z: rotated.z } });
+      }
+      return frames;
+    },
+  },
+  {
+    id: 'crane-up',
+    label: 'Crane up',
+    build: (base) => [
+      base,
+      { ...base, position: { x: base.position.x, y: base.position.y + 3, z: base.position.z } },
+    ],
+  },
+  {
+    id: 'dolly-left',
+    label: 'Dolly left',
+    build: (base) => {
+      const forward = new THREE.Vector3(base.target.x - base.position.x, 0, base.target.z - base.position.z).normalize();
+      const left = new THREE.Vector3(-forward.z, 0, forward.x).multiplyScalar(2.5);
+      return [
+        base,
+        {
+          ...base,
+          position: { x: base.position.x + left.x, y: base.position.y, z: base.position.z + left.z },
+          target: { x: base.target.x + left.x, y: base.target.y, z: base.target.z + left.z },
+        },
+      ];
+    },
+  },
+];
 
 const DEFAULT_SET_DESIGN: SetDesignState = {
   assets: [],
@@ -278,6 +399,12 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
   const [rodinPrompt, setRodinPrompt] = useState('');
   const [rodinImageUrl, setRodinImageUrl] = useState('');
   const [isGenerating3d, setIsGenerating3d] = useState(false);
+  const [blockoutEngine, setBlockoutEngine] = useState<BlockoutEngine>('hunyuan3d-v3');
+  const [blockoutLowPoly, setBlockoutLowPoly] = useState(true);
+  const [cameraPlaying, setCameraPlaying] = useState(false);
+  const [cameraTime, setCameraTime] = useState(0);
+  const [cameraRecording, setCameraRecording] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<string | null>(null);
   const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
   const [selectedShotId, setSelectedShotId] = useState<number | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
@@ -336,6 +463,9 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
   const pendingLoadsRef = useRef<Map<string, Promise<THREE.Object3D>>>(new Map());
   const objectUrlsRef = useRef<Set<string>>(new Set());
   const hdriObjectUrlRef = useRef<string | null>(null);
+  const cameraPlaybackRef = useRef<{ startedAtMs: number; startTime: number; loop: boolean } | null>(null);
+  const cameraRecorderRef = useRef<MediaRecorder | null>(null);
+  const cameraTimeDisplayRef = useRef<number>(0);
 
   const emitChange = useCallback((next: SetDesignState) => {
     setSceneState(next);
@@ -863,7 +993,48 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     const resizeObserver = new ResizeObserver(onResize);
     resizeObserver.observe(container);
 
+    let lastDisplayedTime = -1;
     const tick = () => {
+      const playback = cameraPlaybackRef.current;
+      if (playback) {
+        const path = sceneStateRef.current.cameraPath || DEFAULT_CAMERA_PATH;
+        const elapsed = (performance.now() - playback.startedAtMs) / 1000;
+        let time = playback.startTime + elapsed;
+        const duration = Math.max(0.1, path.durationSeconds);
+        let finished = false;
+        if (time >= duration) {
+          if (playback.loop && !cameraRecorderRef.current) {
+            playback.startedAtMs = performance.now();
+            playback.startTime = 0;
+            time = 0;
+          } else {
+            time = duration;
+            finished = true;
+          }
+        }
+        const pose = evaluateCameraPath(path, time);
+        if (pose) {
+          camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+          orbit.target.set(pose.target.x, pose.target.y, pose.target.z);
+          if (Math.abs(camera.fov - pose.fov) > 0.01) {
+            camera.fov = pose.fov;
+            camera.updateProjectionMatrix();
+          }
+        }
+        cameraTimeDisplayRef.current = time;
+        if (Math.abs(time - lastDisplayedTime) > 1 / 30) {
+          lastDisplayedTime = time;
+          setCameraTime(time);
+        }
+        if (finished) {
+          cameraPlaybackRef.current = null;
+          setCameraPlaying(false);
+          const recorder = cameraRecorderRef.current;
+          if (recorder && recorder.state !== 'inactive') {
+            recorder.stop();
+          }
+        }
+      }
       orbit.update();
       composer.render();
     };
@@ -1732,6 +1903,249 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     }
   };
 
+  // --- 3D blockout from a reference image -----------------------------------
+
+  const handleGenerateBlockout = async () => {
+    if (!rodinImageUrl.trim()) {
+      setStatus('Add a reference image first (upload, URL, or pick from the project).');
+      return;
+    }
+    if (blockoutEngine === 'rodin-replicate') {
+      await handleGenerate3d();
+      return;
+    }
+    setIsGenerating3d(true);
+    const engineMeta = BLOCKOUT_ENGINES.find((engine) => engine.id === blockoutEngine);
+    setStatus(`Building 3D blockout with ${engineMeta?.label || blockoutEngine}…`);
+    try {
+      const base = rodinImageUrl.startsWith('data:')
+        ? {
+          base64: rodinImageUrl.split(',')[1] || '',
+          mimeType: rodinImageUrl.slice(5, rodinImageUrl.indexOf(';')) || 'image/png',
+        }
+        : await getBase64FromUrl(rodinImageUrl);
+      const name = rodinPrompt.trim() || 'blockout';
+      const result = blockoutEngine === 'hunyuan3d-v3'
+        ? await generate3dWithFalHunyuan3dV3(base, { name, lowPoly: blockoutLowPoly })
+        : blockoutEngine === 'trellis-2'
+          ? await generate3dWithFalTrellis2(base, { name })
+          : await generate3dWithFalRodinV25([base], { name, prompt: rodinPrompt.trim() || undefined });
+      onAddGeneratedMedia?.(result);
+      handleAddAsset({
+        id: buildId(),
+        name: result.name,
+        kind: 'model',
+        format: 'glb',
+        url: result.meshUrl,
+        mediaId: result.id,
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      });
+      setStatus(`${engineMeta?.label || 'Blockout'} ready. Mesh added to the scene and saved to the Library.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '3D blockout failed.');
+    } finally {
+      setIsGenerating3d(false);
+    }
+  };
+
+  const handlePickReferenceImage = (url: string) => {
+    setRodinImageUrl(url);
+    setStatus('Reference selected. Choose an engine and build the blockout.');
+  };
+
+  // --- Camera moves ----------------------------------------------------------
+
+  const cameraPath = sceneState.cameraPath || DEFAULT_CAMERA_PATH;
+  const sortedKeyframes = useMemo(() => sortKeyframes(cameraPath.keyframes), [cameraPath.keyframes]);
+
+  const updateCameraPath = useCallback((patch: Partial<SetDesignCameraPath> | ((current: SetDesignCameraPath) => SetDesignCameraPath)) => {
+    const current = sceneStateRef.current;
+    const currentPath = current.cameraPath || DEFAULT_CAMERA_PATH;
+    const nextPath = typeof patch === 'function' ? patch(currentPath) : { ...currentPath, ...patch };
+    emitChange({ ...current, cameraPath: nextPath });
+  }, [emitChange]);
+
+  const readLiveCamera = useCallback((): SetDesignCamera => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (!camera || !orbit) return sceneStateRef.current.camera;
+    return {
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      target: { x: orbit.target.x, y: orbit.target.y, z: orbit.target.z },
+      fov: camera.fov,
+    };
+  }, []);
+
+  const applyCameraPose = useCallback((pose: SetDesignCamera) => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (!camera || !orbit) return;
+    camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+    orbit.target.set(pose.target.x, pose.target.y, pose.target.z);
+    camera.fov = pose.fov;
+    camera.updateProjectionMatrix();
+    orbit.update();
+  }, []);
+
+  const handleAddKeyframe = () => {
+    const live = readLiveCamera();
+    updateCameraPath((current) => {
+      const sorted = sortKeyframes(current.keyframes);
+      const lastTime = sorted.length ? sorted[sorted.length - 1].time : -2;
+      const time = Math.round((lastTime + 2) * 10) / 10;
+      const keyframes = [...current.keyframes, { id: buildId(), time: Math.max(0, time), camera: live }];
+      return {
+        ...current,
+        keyframes,
+        durationSeconds: Math.max(current.durationSeconds, Math.max(0, time)),
+      };
+    });
+    setCameraStatus('Keyframe added from the current view.');
+  };
+
+  const handleApplyPreset = (presetId: string) => {
+    const preset = CAMERA_MOVE_PRESETS.find((entry) => entry.id === presetId);
+    if (!preset) return;
+    const base = readLiveCamera();
+    const poses = preset.build(base);
+    const duration = Math.max(2, cameraPath.durationSeconds || 6);
+    const keyframes = poses.map((pose, index) => ({
+      id: buildId(),
+      time: poses.length === 1 ? 0 : Math.round((duration * index) / (poses.length - 1) * 10) / 10,
+      camera: pose,
+      label: preset.label,
+    }));
+    updateCameraPath({ keyframes, durationSeconds: duration });
+    setCameraStatus(`${preset.label} move created from the current view.`);
+  };
+
+  const handleUpdateKeyframe = (id: string, patch: Partial<SetDesignCameraKeyframe>) => {
+    updateCameraPath((current) => ({
+      ...current,
+      keyframes: current.keyframes.map((kf) => (kf.id === id ? { ...kf, ...patch } : kf)),
+    }));
+  };
+
+  const handleRemoveKeyframe = (id: string) => {
+    updateCameraPath((current) => ({ ...current, keyframes: current.keyframes.filter((kf) => kf.id !== id) }));
+  };
+
+  const handleSeekCamera = (time: number) => {
+    cameraPlaybackRef.current = null;
+    setCameraPlaying(false);
+    const clamped = Math.min(Math.max(0, time), Math.max(0.1, cameraPath.durationSeconds));
+    setCameraTime(clamped);
+    const pose = evaluateCameraPath(cameraPath, clamped);
+    if (pose) applyCameraPose(pose);
+  };
+
+  const handlePlayCamera = () => {
+    if (sortedKeyframes.length < 2) {
+      setCameraStatus('Add at least two keyframes to play a move.');
+      return;
+    }
+    const startTime = cameraTime >= cameraPath.durationSeconds - 0.05 ? 0 : cameraTime;
+    cameraPlaybackRef.current = { startedAtMs: performance.now(), startTime, loop: Boolean(cameraPath.loop) };
+    setCameraPlaying(true);
+  };
+
+  const handlePauseCamera = () => {
+    cameraPlaybackRef.current = null;
+    setCameraPlaying(false);
+  };
+
+  const handleStopCamera = () => {
+    handleSeekCamera(0);
+  };
+
+  const handleRecordCameraMove = () => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    if (sortedKeyframes.length < 2) {
+      setCameraStatus('Add at least two keyframes before recording.');
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined') {
+      setCameraStatus('Recording is not supported in this runtime.');
+      return;
+    }
+    const canvas = renderer.domElement;
+    const fps = cameraPath.fps || 24;
+    const stream = canvas.captureStream(fps);
+    const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      .find((candidate) => MediaRecorder.isTypeSupported(candidate)) || 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12_000_000 });
+    const chunks: BlobPart[] = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) chunks.push(event.data);
+    };
+    recorder.onstop = () => {
+      cameraRecorderRef.current = null;
+      setCameraRecording(false);
+      stream.getTracks().forEach((track) => track.stop());
+      if (transformRef.current) transformRef.current.visible = true;
+      const blob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      objectUrlsRef.current.add(url);
+      const item: MediaItem = {
+        id: `camera-move-${Date.now()}`,
+        name: `camera_move_${Date.now()}.webm`,
+        type: 'video',
+        url,
+        source: 'generated',
+        generatedBy: 'Set Design Camera Move',
+        duration: cameraPath.durationSeconds,
+      };
+      onAddGeneratedMedia?.(item);
+      setCameraStatus('Camera move rendered to the Library. Use it as a motion reference in Video Gen (Seedance Omni, Kling O3).');
+    };
+    if (transformRef.current) transformRef.current.visible = false;
+    transformRef.current?.detach();
+    cameraRecorderRef.current = recorder;
+    setCameraRecording(true);
+    setCameraStatus('Recording camera move…');
+    handleSeekCamera(0);
+    recorder.start(250);
+    cameraPlaybackRef.current = { startedAtMs: performance.now(), startTime: 0, loop: false };
+    setCameraPlaying(true);
+  };
+
+  const handleCopyCameraPath = async () => {
+    const payload = {
+      durationSeconds: cameraPath.durationSeconds,
+      fps: cameraPath.fps,
+      easing: cameraPath.easing || 'smooth',
+      keyframes: sortedKeyframes.map((kf) => ({ time: kf.time, ...kf.camera })),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCameraStatus('Camera path JSON copied.');
+    } catch {
+      setCameraStatus('Could not copy camera path.');
+    }
+  };
+
+  const projectImageCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const entries: Array<{ id: string; url: string; label: string }> = [];
+    (references || []).forEach((ref) => {
+      const url = (ref as { url?: string; imageUrl?: string }).url || (ref as { imageUrl?: string }).imageUrl;
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        entries.push({ id: `ref-${ref.id}`, url, label: (ref as { name?: string; label?: string }).name || (ref as { label?: string }).label || 'Reference' });
+      }
+    });
+    (mediaItems || []).forEach((item) => {
+      if (item.type === 'image' && item.url && !seen.has(item.url) && !isModelUrl(item.url) && !item.name.toLowerCase().endsWith('.glb')) {
+        seen.add(item.url);
+        entries.push({ id: `media-${item.id}`, url: item.url, label: item.name });
+      }
+    });
+    return entries.slice(0, 24);
+  }, [references, mediaItems]);
+
   const selectedAsset = sceneState.assets.find((asset) => asset.id === selectedAssetId) || null;
 
   const applyCameraFromShot = () => {
@@ -1895,45 +2309,235 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
             </section>
 
             <section className="app-panel p-4 space-y-3">
-              <div className="text-xs uppercase tracking-[0.2em] text-gray-400">AI Generate 3D (Rodin)</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">3D Blockout from Reference</div>
+                <span className="text-[10px] text-gray-500">Image → mesh</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {BLOCKOUT_ENGINES.map((engine) => (
+                  <button
+                    key={engine.id}
+                    type="button"
+                    onClick={() => setBlockoutEngine(engine.id)}
+                    title={engine.hint}
+                    className={`rounded-md border px-2 py-1.5 text-left text-[11px] transition ${blockoutEngine === engine.id ? 'border-indigo-400/60 bg-indigo-500/15 text-white' : 'border-gray-700 bg-gray-900/40 text-gray-300 hover:border-gray-500'}`}
+                  >
+                    <div className="font-semibold">{engine.label}</div>
+                    <div className="text-[10px] text-gray-500">{engine.provider === 'fal' ? 'via fal.ai' : 'via Replicate'}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-500">{BLOCKOUT_ENGINES.find((engine) => engine.id === blockoutEngine)?.hint}</p>
+              {rodinImageUrl ? (
+                <div className="relative overflow-hidden rounded-md border border-gray-700 bg-black/40">
+                  <img src={rodinImageUrl} alt="Blockout reference" className="h-32 w-full object-contain" />
+                  <button
+                    type="button"
+                    className="absolute right-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-black/80"
+                    onClick={() => setRodinImageUrl('')}
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <label className="flex h-24 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-gray-600 bg-gray-900/40 text-[11px] text-gray-400 hover:border-indigo-400/60 hover:text-gray-200">
+                  <UploadIcon className="mb-1 h-4 w-4" />
+                  Drop or upload a reference image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      const base64 = await fileToBase64(file);
+                      const mime = file.type || 'image/png';
+                      setRodinImageUrl(`data:${mime};base64,${base64}`);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </label>
+              )}
               <input
-                value={rodinImageUrl}
+                value={rodinImageUrl.startsWith('data:') ? '' : rodinImageUrl}
                 onChange={(event) => setRodinImageUrl(event.target.value)}
-                placeholder="Image URL..."
-                className="app-input"
+                placeholder="…or paste an image URL"
+                className="app-input text-xs"
               />
-              <label className="app-button app-secondary text-xs cursor-pointer w-full justify-center">
-                <UploadIcon className="w-4 h-4" />
-                Upload Image
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    const base64 = await fileToBase64(file);
-                    const mime = file.type || 'image/png';
-                    setRodinImageUrl(`data:${mime};base64,${base64}`);
-                    event.currentTarget.value = '';
-                  }}
-                />
-              </label>
+              {projectImageCandidates.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[10px] text-gray-500">From this project</div>
+                  <div className="flex gap-1.5 overflow-x-auto pb-1">
+                    {projectImageCandidates.map((candidate) => (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        title={candidate.label}
+                        onClick={() => handlePickReferenceImage(candidate.url)}
+                        className={`h-12 w-12 shrink-0 overflow-hidden rounded border ${rodinImageUrl === candidate.url ? 'border-indigo-400' : 'border-gray-700 hover:border-gray-500'}`}
+                      >
+                        <img src={candidate.url} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <input
                 value={rodinPrompt}
                 onChange={(event) => setRodinPrompt(event.target.value)}
-                placeholder="Prompt (optional)"
-                className="app-input"
+                placeholder="Name or hint (optional)"
+                className="app-input text-xs"
               />
+              {blockoutEngine === 'hunyuan3d-v3' && (
+                <label className="flex items-center gap-2 text-[11px] text-gray-300">
+                  <input type="checkbox" checked={blockoutLowPoly} onChange={(event) => setBlockoutLowPoly(event.target.checked)} />
+                  Low-poly blockout (faster, cleaner silhouettes)
+                </label>
+              )}
               <button
                 className="app-button app-primary text-xs w-full"
                 disabled={isGenerating3d}
-                onClick={handleGenerate3d}
+                onClick={handleGenerateBlockout}
               >
                 <MagicWandIcon className="w-4 h-4" />
-                {isGenerating3d ? 'Generating...' : 'Generate 3D Asset'}
+                {isGenerating3d ? 'Building blockout…' : 'Build 3D Blockout'}
               </button>
               {status && <p className="text-xs text-gray-400">{status}</p>}
+            </section>
+
+            <section className="app-panel p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Camera Move</div>
+                <span className="text-[10px] text-gray-500">{sortedKeyframes.length} keyframes</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {CAMERA_MOVE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className="app-button app-tertiary text-[10px]"
+                    onClick={() => handleApplyPreset(preset.id)}
+                    title="Builds a move starting from the current view"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <button className="app-button app-secondary text-xs w-full" onClick={handleAddKeyframe}>
+                <CameraIcon className="w-4 h-4" />
+                Add keyframe from current view
+              </button>
+              {sortedKeyframes.length > 0 && (
+                <div className="space-y-1.5 max-h-[220px] overflow-auto pr-1">
+                  {sortedKeyframes.map((kf, index) => (
+                    <div key={kf.id} className="flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900/50 px-2 py-1.5">
+                      <span className="w-5 text-center text-[10px] font-semibold text-gray-400">{index + 1}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={kf.time}
+                        onChange={(event) => handleUpdateKeyframe(kf.id, { time: Math.max(0, Number(event.target.value) || 0) })}
+                        className="app-input w-16 px-1.5 py-0.5 text-[11px]"
+                        title="Time (seconds)"
+                      />
+                      <span className="text-[10px] text-gray-500">s</span>
+                      <div className="ml-auto flex items-center gap-1">
+                        <button type="button" className="app-button app-tertiary text-[10px] px-1.5 py-0.5" onClick={() => handleSeekCamera(kf.time)} title="Jump to this keyframe">
+                          View
+                        </button>
+                        <button type="button" className="app-button app-tertiary text-[10px] px-1.5 py-0.5" onClick={() => handleUpdateKeyframe(kf.id, { camera: readLiveCamera() })} title="Overwrite with the current view">
+                          Set
+                        </button>
+                        <button type="button" className="app-button app-tertiary text-[10px] px-1.5 py-0.5 text-rose-300" onClick={() => handleRemoveKeyframe(kf.id)} title="Delete keyframe">
+                          <TrashIcon className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-3 gap-2 text-[11px]">
+                <label className="text-gray-400">
+                  Duration
+                  <input
+                    type="number"
+                    min={0.5}
+                    step={0.5}
+                    value={cameraPath.durationSeconds}
+                    onChange={(event) => updateCameraPath({ durationSeconds: Math.max(0.5, Number(event.target.value) || 0.5) })}
+                    className="app-input mt-1 px-1.5 py-0.5 text-[11px]"
+                  />
+                </label>
+                <label className="text-gray-400">
+                  FPS
+                  <select
+                    value={cameraPath.fps}
+                    onChange={(event) => updateCameraPath({ fps: Number(event.target.value) })}
+                    className="app-select mt-1 px-1.5 py-0.5 text-[11px]"
+                  >
+                    <option value={24}>24</option>
+                    <option value={25}>25</option>
+                    <option value={30}>30</option>
+                  </select>
+                </label>
+                <label className="text-gray-400">
+                  Easing
+                  <select
+                    value={cameraPath.easing || 'smooth'}
+                    onChange={(event) => updateCameraPath({ easing: event.target.value as 'linear' | 'smooth' })}
+                    className="app-select mt-1 px-1.5 py-0.5 text-[11px]"
+                  >
+                    <option value="smooth">Smooth</option>
+                    <option value="linear">Linear</option>
+                  </select>
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="app-button app-secondary text-xs px-2"
+                  onClick={cameraPlaying ? handlePauseCamera : handlePlayCamera}
+                  disabled={cameraRecording}
+                >
+                  {cameraPlaying ? 'Pause' : 'Play'}
+                </button>
+                <button type="button" className="app-button app-tertiary text-xs px-2" onClick={handleStopCamera} disabled={cameraRecording}>
+                  Stop
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0.1, cameraPath.durationSeconds)}
+                  step={0.01}
+                  value={Math.min(cameraTime, Math.max(0.1, cameraPath.durationSeconds))}
+                  onChange={(event) => handleSeekCamera(Number(event.target.value))}
+                  className="flex-1"
+                  disabled={cameraRecording}
+                />
+                <span className="w-12 text-right text-[10px] tabular-nums text-gray-400">{cameraTime.toFixed(1)}s</span>
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-gray-300">
+                <input type="checkbox" checked={Boolean(cameraPath.loop)} onChange={(event) => updateCameraPath({ loop: event.target.checked })} />
+                Loop playback
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="app-button app-primary text-xs"
+                  onClick={handleRecordCameraMove}
+                  disabled={cameraRecording || sortedKeyframes.length < 2}
+                >
+                  {cameraRecording ? 'Recording…' : 'Render to Library'}
+                </button>
+                <button type="button" className="app-button app-tertiary text-xs" onClick={handleCopyCameraPath} disabled={sortedKeyframes.length === 0}>
+                  Copy path JSON
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-500">
+                Rendered moves land in the Library as video and can drive Seedance Omni or Kling O3 as a motion reference.
+              </p>
+              {cameraStatus && <p className="text-xs text-gray-400">{cameraStatus}</p>}
             </section>
 
             <section className="app-panel p-4 space-y-3">

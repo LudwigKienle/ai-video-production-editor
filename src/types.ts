@@ -27,6 +27,7 @@ export type Workspace =
   | 'REVIEW'
   | 'REQUESTS'
   | 'MOODBOARD'
+  | 'PLUGINS'
   | 'NOTEBOOKLM';
 
 export interface NeurocinematicsAnalysisResult {
@@ -114,6 +115,8 @@ export type ClipFilters = {
   lutIntensity: number;
   customLut?: CubeLut | null;
   customLutName?: string | null;
+  /** Resolve-style primaries; baked into customLut when present. */
+  colorWheels?: import('./utils/colorWheels').ColorWheelGrade | null;
 };
 
 export type MediaItem = {
@@ -235,11 +238,28 @@ export type SetDesignCamera = {
   fov: number;
 };
 
+export type SetDesignCameraKeyframe = {
+  id: string;
+  /** Seconds from the start of the move. */
+  time: number;
+  camera: SetDesignCamera;
+  label?: string;
+};
+
+export type SetDesignCameraPath = {
+  keyframes: SetDesignCameraKeyframe[];
+  durationSeconds: number;
+  fps: number;
+  loop?: boolean;
+  easing?: 'linear' | 'smooth';
+};
+
 export type SetDesignState = {
   assets: SetDesignAsset[];
   lights: SetDesignLight[];
   grid: SetDesignGrid;
   camera: SetDesignCamera;
+  cameraPath?: SetDesignCameraPath;
 };
 
 export type WorldGenerationProvider = 'worldlabs';
@@ -936,6 +956,15 @@ export type ProjectPitchDeckSlide = {
   sources?: string[];
 };
 
+export type ResearchSourceLink = {
+  id: string;
+  url: string;
+  title: string;
+  notes?: string;
+  tags?: string[];
+  addedAt: string;
+};
+
 export type ProjectResearchReport = {
   id: string;
   query: string;
@@ -1119,6 +1148,9 @@ export type StoryBible = {
   sceneMap?: SceneMapState;
   extraAssets?: ExtraAssetsState;
   researchReports?: ProjectResearchReport[];
+  researchSources?: ResearchSourceLink[];
+  /** Project template that sets aspect ratio, look and casting defaults everywhere. */
+  productionFormat?: import('./data/productionFormats').ProductionFormatId;
 };
 
 export type ReferenceItem = {
@@ -1702,7 +1734,7 @@ export type ShotAnnotation = {
   updatedAt?: string;
 };
 
-export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local';
+export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local' | 'runway';
 export type UsageKind = 'image' | 'video' | 'audio' | 'edit' | 'analysis' | '3d-world' | 'other';
 export type UsageUnit = 'image' | 'second' | 'minute' | 'request' | 'clip' | 'stem';
 

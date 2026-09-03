@@ -108,7 +108,11 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: '#111827', // Match app bg-gray-900
+    backgroundColor: '#0f1115', // Match --app-bg so resizes never flash a foreign colour
+    // macOS: hide the title bar and let the toolbar host the traffic lights (Finder/Xcode style).
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 } }
+      : {}),
     icon: path.join(__dirname, '../public/vite.svg'), // Use your icon here
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

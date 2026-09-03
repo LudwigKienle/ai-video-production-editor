@@ -2,6 +2,7 @@ import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, 
 import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
 import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
+import { trackTask } from './taskCenter';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
 
@@ -468,7 +469,7 @@ ${payload.instruction}
 };
 
 // ... (Rest of the file remains exactly the same as previous version)
-export const generateVideoWithVeo = async (
+const generateVideoWithVeoInner = async (
     prompt: string,
     onProgress: (message: string) => void,
     aspectRatio: '16:9' | '9:16',
@@ -567,6 +568,16 @@ export const generateVideoWithVeo = async (
         duration,
     };
 };
+
+export const generateVideoWithVeo = (
+    prompt: string,
+    onProgress: (message: string) => void,
+    aspectRatio: '16:9' | '9:16',
+    referenceImage?: { base64: string; mimeType: string; },
+    model: string = 'veo-3.1-fast-generate-preview'
+): Promise<MediaItem> =>
+    trackTask({ label: model.includes('fast') ? 'Veo 3.1 Fast' : 'Veo 3.1', kind: 'video', provider: 'gemini', estimatedMs: 150_000, message: 'Generating…' }, (task) =>
+        generateVideoWithVeoInner(prompt, (message) => { task.update({ message }); onProgress(message); }, aspectRatio, referenceImage, model));
 
 export const generateImageWithNano = async (
     prompt: string,

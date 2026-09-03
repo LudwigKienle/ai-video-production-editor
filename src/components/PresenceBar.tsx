@@ -28,11 +28,11 @@ const STATUS_STYLES: Record<
   NonNullable<ProjectCollaborationPresenceStatus>,
   { dot: string; label: string }
 > = {
-  active: { dot: 'bg-emerald-400', label: 'Active' },
-  idle: { dot: 'bg-slate-400', label: 'Idle' },
-  reviewing: { dot: 'bg-sky-400', label: 'Reviewing' },
-  rendering: { dot: 'bg-fuchsia-400', label: 'Rendering' },
-  syncing: { dot: 'bg-amber-400', label: 'Syncing' },
+  active: { dot: 'status-dot--success', label: 'Active' },
+  idle: { dot: 'status-dot--muted', label: 'Idle' },
+  reviewing: { dot: 'status-dot--accent', label: 'Reviewing' },
+  rendering: { dot: 'status-dot--accent', label: 'Rendering' },
+  syncing: { dot: 'status-dot--warm', label: 'Syncing' },
 };
 
 const getInitials = (value: string) =>
@@ -43,39 +43,45 @@ const getInitials = (value: string) =>
     .map((part) => part.charAt(0).toUpperCase())
     .join('') || '?';
 
+const humanize = (value: string) =>
+  value
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/^\w/, (char) => char.toUpperCase());
+
 const formatCurrentActivity = (params: {
   activeWorkspace: Workspace;
   activePhase?: string | null;
   activeShotNumber?: number | null;
   selectedClipId?: string | null;
 }) => {
-  const parts = [params.activeWorkspace.replace(/_/g, ' ')];
+  const parts = [humanize(params.activeWorkspace)];
   if (params.activePhase) {
-    parts.push(`phase ${params.activePhase.replace(/_/g, ' ')}`);
+    parts.push(humanize(params.activePhase));
   }
   if (typeof params.activeShotNumber === 'number') {
-    parts.push(`shot ${params.activeShotNumber}`);
+    parts.push(`Shot ${params.activeShotNumber}`);
   }
   if (params.selectedClipId) {
-    parts.push(`clip ${params.selectedClipId.slice(0, 8)}`);
+    parts.push(`Clip ${params.selectedClipId.slice(0, 8)}`);
   }
-  return parts.join(' • ');
+  return parts.join(' · ');
 };
 
 const formatPresenceActivity = (entry: ProjectCollaborationPresence) => {
   const parts: string[] = [];
   if (entry.workspace) {
-    parts.push(entry.workspace.replace(/_/g, ' '));
+    parts.push(humanize(entry.workspace));
   }
   if (entry.activePhase) {
-    parts.push(entry.activePhase.replace(/_/g, ' '));
+    parts.push(humanize(entry.activePhase));
   }
   if (typeof entry.activeShotNumber === 'number') {
-    parts.push(`shot ${entry.activeShotNumber}`);
+    parts.push(`Shot ${entry.activeShotNumber}`);
   } else if (entry.activeClipId) {
-    parts.push(`clip ${entry.activeClipId.slice(0, 8)}`);
+    parts.push(`Clip ${entry.activeClipId.slice(0, 8)}`);
   }
-  return parts.join(' • ');
+  return parts.join(' · ');
 };
 
 const PresenceBar: React.FC<PresenceBarProps> = ({
@@ -98,16 +104,12 @@ const PresenceBar: React.FC<PresenceBarProps> = ({
     selectedClipId,
   });
   const liveCount = presence.length;
-  const configuredLabel =
+  const isLive = realtimeStatus === 'SUBSCRIBED';
+  const connectionLabel = isLive ? 'Live session' : 'Local session';
+  const rosterLabel =
     configuredCollaboratorCount > 0
-      ? `${configuredCollaboratorCount} configured`
-      : 'No team roster';
-  const connectionLabel =
-    realtimeStatus === 'SUBSCRIBED' ? 'Realtime live' : 'Local session';
-  const connectionTone =
-    realtimeStatus === 'SUBSCRIBED'
-      ? 'text-emerald-200 border-emerald-400/20 bg-emerald-400/10'
-      : 'text-slate-200 border-slate-500/30 bg-slate-500/10';
+      ? `${configuredCollaboratorCount} on the team`
+      : 'Just you';
   const fallbackPresence =
     presence.length > 0
       ? presence
@@ -131,75 +133,55 @@ const PresenceBar: React.FC<PresenceBarProps> = ({
   const visibleLocks = locks.slice(0, 4);
 
   return (
-    <div className="presence-card mt-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 backdrop-blur-sm">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] ${connectionTone}`}>
-              {connectionLabel}
-            </span>
-            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-300">
-              {liveCount} live
-            </span>
-            <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-300">
-              {configuredLabel}
-            </span>
-            {syncProvider && (
-              <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-sky-200">
-                Sync {syncProvider}
-              </span>
-            )}
+    <section className="status-card" aria-label="Collaboration">
+      <div className="status-card__head">
+        <span className={`status-dot ${isLive ? 'status-dot--success' : 'status-dot--muted'}`} />
+        <span className="status-card__title">{connectionLabel}</span>
+        <span className="status-card__meta">
+          {isLive ? `${liveCount} online` : rosterLabel}
+          {syncProvider ? ` · Sync via ${syncProvider}` : ''}
+        </span>
+      </div>
+      <div className="status-card__body">
+        <div className="status-card__text">{currentActivity}</div>
+        {latestAgentActivity && (
+          <div className="status-card__note">
+            {latestAgentActivity.actorName}: {latestAgentActivity.detail}
           </div>
-          <div className="mt-2 text-sm text-slate-100">{currentActivity}</div>
-          {latestAgentActivity && (
-            <div className="mt-1 text-xs text-amber-200">
-              Agent: {latestAgentActivity.actorName} • {latestAgentActivity.detail}
-            </div>
-          )}
-          {visibleLocks.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {visibleLocks.map((lock) => (
-                <span
-                  key={`${lock.scope}:${lock.key}`}
-                  className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-amber-100"
-                >
-                  {lock.scope.replace(/_/g, ' ')} · {lock.key} · {lock.claimedBy.name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+        )}
+        {visibleLocks.length > 0 && (
+          <div className="status-card__chips">
+            {visibleLocks.map((lock) => (
+              <span key={`${lock.scope}:${lock.key}`} className="status-chip status-chip--warm">
+                {humanize(lock.scope)} · {lock.key} · {lock.claimedBy.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {fallbackPresence.length > 0 && (
+        <div className="status-card__people">
           {fallbackPresence.map((entry) => {
             const status = STATUS_STYLES[entry.status || 'active'];
             const activity = formatPresenceActivity(entry);
             return (
               <div
                 key={`${entry.collaboratorId}-${entry.sessionId}`}
-                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5"
+                className="status-person"
+                title={`${entry.collaboratorName} · ${activity || status.label}`}
               >
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-900">
-                  {getInitials(entry.collaboratorName)}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-white">
-                    {entry.collaboratorName}
-                  </div>
-                  <div className="text-[10px] text-slate-300">
-                    {activity || status.label}
-                  </div>
-                </div>
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${status.dot}`}
-                  title={status.label}
-                />
+                <span className="status-person__avatar">{getInitials(entry.collaboratorName)}</span>
+                <span className="status-person__text">
+                  <span className="status-person__name">{entry.collaboratorName}</span>
+                  <span className="status-person__activity">{activity || status.label}</span>
+                </span>
+                <span className={`status-dot ${status.dot}`} />
               </div>
             );
           })}
         </div>
-      </div>
-    </div>
+      )}
+    </section>
   );
 };
 

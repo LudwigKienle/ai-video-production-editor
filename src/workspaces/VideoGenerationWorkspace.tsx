@@ -25,6 +25,9 @@ import {
   generateVideoWithFalPixverseC1Reference,
   generateVideoWithFalSeedanceImage,
   generateVideoWithFalSeedanceReference,
+  generateVideoWithFalSeedance25Text,
+  generateVideoWithFalSeedance25Image,
+  generateVideoWithFalSeedance25Reference,
   generateVideoWithFalKlingV3Text,
   generateVideoWithFalWanV27Image,
   generateVideoWithFalWanV27Text,
@@ -32,6 +35,8 @@ import {
 import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
+import { structurePromptForModel } from '../utils/modelPromptGuides';
+import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -53,6 +58,7 @@ interface VideoGenerationWorkspaceProps {
   }) => Promise<{ ok: boolean; message?: string }>;
   seedImage?: MediaItem | null;
   onConsumeSeed?: () => void;
+  productionFormatId?: ProductionFormatId | null;
 }
 
 type VideoModelId =
@@ -62,6 +68,9 @@ type VideoModelId =
   | 'seedance'
   | 'seedance-2-fal'
   | 'seedance-2-omni-fal'
+  | 'seedance-25-t2v-fal'
+  | 'seedance-25-i2v-fal'
+  | 'seedance-25-ref-fal'
   | 'wan-i2v'
   | 'wan-v27-t2v-fal'
   | 'wan-v27-i2v-fal'
@@ -108,6 +117,9 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'seedance', label: 'Seedance 1.5 Pro', provider: 'Replicate', supportsImage: true },
   { id: 'seedance-2-fal', label: 'Seedance 2.0 I2V', provider: 'FAL', supportsImage: true, requiresImage: true, supportsEndFrame: true },
   { id: 'seedance-2-omni-fal', label: 'Seedance 2.0 Omni', provider: 'FAL', supportsImage: true, supportsAudio: true },
+  { id: 'seedance-25-t2v-fal', label: 'Seedance 2.5 T2V', provider: 'FAL', supportsImage: false, supportsAudio: false },
+  { id: 'seedance-25-i2v-fal', label: 'Seedance 2.5 I2V', provider: 'FAL', supportsImage: true, requiresImage: true, supportsEndFrame: true },
+  { id: 'seedance-25-ref-fal', label: 'Seedance 2.5 Omni', provider: 'FAL', supportsImage: true, supportsAudio: true },
   { id: 'wan-i2v', label: 'Wan 2.2 I2V Fast', provider: 'Replicate', supportsImage: true, requiresImage: true },
   { id: 'wan-v27-t2v-fal', label: 'WAN 2.7 (Text-to-Video)', provider: 'FAL', supportsImage: false, supportsAudio: true },
   { id: 'wan-v27-i2v-fal', label: 'WAN 2.7 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true, supportsAudio: true, supportsEndFrame: true },
@@ -128,6 +140,12 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'ltx-audio', label: 'LTX Audio-to-Video', provider: 'Replicate', supportsImage: true, supportsAudio: true, requiresAudio: true },
   { id: 'p-video', label: 'P-Video', provider: 'Replicate', supportsImage: true, supportsAudio: true },
 ];
+
+const isSeedanceI2V = (modelId: VideoModelId) => modelId === 'seedance-2-fal' || modelId === 'seedance-25-i2v-fal';
+const isSeedanceOmni = (modelId: VideoModelId) => modelId === 'seedance-2-omni-fal' || modelId === 'seedance-25-ref-fal';
+const isSeedance25 = (modelId: VideoModelId) => modelId === 'seedance-25-t2v-fal' || modelId === 'seedance-25-i2v-fal' || modelId === 'seedance-25-ref-fal';
+type SeedanceResolution = '480p' | '720p' | '1080p';
+const SEEDANCE_25_DURATIONS = Array.from({ length: 27 }, (_, index) => index + 4);
 
 const VIDEO_WORKSPACE_UI_PREFS_KEY = 'video_workspace_ui_prefs_v1';
 
@@ -179,6 +197,9 @@ const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
   seedance: ['16:9', '9:16', '1:1'],
   'seedance-2-fal': ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
   'seedance-2-omni-fal': ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+  'seedance-25-t2v-fal': ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+  'seedance-25-i2v-fal': ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+  'seedance-25-ref-fal': ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
   'wan-i2v': ['16:9', '9:16'],
   'wan-v27-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -213,6 +234,9 @@ const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
   seedance: { provider: 'replicate', kind: 'video', model: 'bytedance/seedance-1.5-pro' },
   'seedance-2-fal': { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.0/image-to-video' },
   'seedance-2-omni-fal': { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.0/reference-to-video' },
+  'seedance-25-t2v-fal': { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/text-to-video' },
+  'seedance-25-i2v-fal': { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/image-to-video' },
+  'seedance-25-ref-fal': { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/reference-to-video' },
   'wan-i2v': { provider: 'replicate', kind: 'video', model: 'wan-video/wan-2.2-i2v-fast' },
   'wan-v27-t2v-fal': { provider: 'fal', kind: 'video', model: 'fal-ai/wan/v2.7/text-to-video' },
   'wan-v27-i2v-fal': { provider: 'fal', kind: 'video', model: 'fal-ai/wan/v2.7/image-to-video' },
@@ -241,6 +265,9 @@ const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options
   seedance: { supported: false, options: [5], fallback: 5 },
   'seedance-2-fal': { supported: true, options: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 10 },
   'seedance-2-omni-fal': { supported: true, options: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 10 },
+  'seedance-25-t2v-fal': { supported: true, options: SEEDANCE_25_DURATIONS, fallback: 10 },
+  'seedance-25-i2v-fal': { supported: true, options: SEEDANCE_25_DURATIONS, fallback: 10 },
+  'seedance-25-ref-fal': { supported: true, options: SEEDANCE_25_DURATIONS, fallback: 10 },
   'wan-i2v': { supported: true, options: [3, 5, 8, 10, 12], fallback: 5 },
   'wan-v27-t2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'wan-v27-i2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
@@ -423,6 +450,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   onValidateHostedGeneration,
   seedImage,
   onConsumeSeed,
+  productionFormatId,
 }) => {
   const uiPrefsScope = useMemo(
     () => buildWorkspaceUiPrefsScope(currentProjectPath, currentProjectName),
@@ -431,6 +459,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const storedUiPrefs = useMemo(() => readVideoWorkspaceUiPrefs(uiPrefsScope), [uiPrefsScope]);
   const [modelId, setModelId] = useState<VideoModelId>(() => storedUiPrefs.modelId || 'veo-fast');
   const [prompt, setPrompt] = useState('');
+  const [smartPromptStructure, setSmartPromptStructure] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>('16:9');
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
@@ -454,6 +483,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const [pVideoDraftMode, setPVideoDraftMode] = useState<boolean>(false);
   const [pVideoPromptUpsampling, setPVideoPromptUpsampling] = useState<boolean>(true);
   const [seedanceGenerateAudio, setSeedanceGenerateAudio] = useState<boolean>(true);
+  const [seedanceResolution, setSeedanceResolution] = useState<SeedanceResolution>('720p');
   const [seedanceOmniGenerateAudio, setSeedanceOmniGenerateAudio] = useState<boolean>(true);
   const [pixverseGenerateAudio, setPixverseGenerateAudio] = useState<boolean>(false);
   const [klingGenerateAudio, setKlingGenerateAudio] = useState<boolean>(true);
@@ -485,11 +515,11 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const availableAspectRatios = MODEL_ASPECT_RATIOS[modelId] || ASPECT_RATIOS;
   const supportsVeoElements = modelId === 'veo-fast' || modelId === 'veo';
   const supportsKlingAdvanced = modelId === 'kling-o3-pro-fal' || modelId === 'kling-v3-pro-i2v-fal' || modelId === 'kling-v3-pro-t2v-fal';
-  const supportsStoryboardRefs = modelId === 'seedance' || modelId === 'seedance-2-fal' || modelId === 'seedance-2-omni-fal' || modelId === 'pixverse-c1-ref-fal';
-  const usesStoryboardCollageFallback = modelId === 'seedance' || modelId === 'seedance-2-fal';
+  const supportsStoryboardRefs = modelId === 'seedance' || isSeedanceI2V(modelId) || isSeedanceOmni(modelId) || modelId === 'pixverse-c1-ref-fal';
+  const usesStoryboardCollageFallback = modelId === 'seedance' || isSeedanceI2V(modelId);
   const supportsElements = supportsVeoElements || supportsKlingAdvanced;
   const needsMotionRef = modelId === 'kling-motion' || (modelId === 'kling-o3-pro-fal' && klingUseReferenceVideoForO3);
-  const supportsMotionReference = needsMotionRef || modelId === 'kling-o3-pro-fal' || modelId === 'seedance-2-omni-fal';
+  const supportsMotionReference = needsMotionRef || modelId === 'kling-o3-pro-fal' || isSeedanceOmni(modelId);
   const needsAudio = modelOption?.requiresAudio === true || modelId === 'aurora-fal';
   const supportsAudioInput = modelOption?.supportsAudio === true || modelId === 'aurora-fal';
   const supportsEndFrame = modelOption?.supportsEndFrame === true || supportsKlingAdvanced;
@@ -581,13 +611,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       },
     ];
 
-    if (modelId === 'seedance-2-omni-fal') {
+    if (isSeedanceOmni(modelId)) {
       items.push({
         label: 'Reference',
         detail: hasSeedanceOmniReference ? 'Reference attached' : 'Add image, video, or storyboard ref',
         state: hasSeedanceOmniReference ? 'ready' : 'needed',
       });
-    } else if (modelId === 'seedance-2-fal' || modelId === 'pixverse-c1-ref-fal' || modelOption?.requiresImage) {
+    } else if (isSeedanceI2V(modelId) || modelId === 'pixverse-c1-ref-fal' || modelOption?.requiresImage) {
       items.push({
         label: 'Start frame',
         detail: hasRequiredImageReference ? 'Image guide ready' : 'Required for this engine',
@@ -618,7 +648,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     if (supportsMotionReference) {
       const requiredMotion = needsMotionRef;
       items.push({
-        label: modelId === 'seedance-2-omni-fal' ? 'Ref video' : 'Motion ref',
+        label: isSeedanceOmni(modelId) ? 'Ref video' : 'Motion ref',
         detail: hasMotionReference ? 'Video reference attached' : requiredMotion ? 'Required for this mode' : 'Optional',
         state: hasMotionReference ? 'ready' : requiredMotion ? 'needed' : 'optional',
       });
@@ -838,11 +868,11 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       setStatus(`${modelOption.label} requires a reference image.`);
       return;
     }
-    if (modelId === 'seedance-2-fal' && !referenceFile && !referenceUrl && storyboardReferenceAssets.length === 0) {
+    if (isSeedanceI2V(modelId) && !referenceFile && !referenceUrl && storyboardReferenceAssets.length === 0) {
       setStatus('Seedance 2.0 I2V requires a start frame or storyboard references.');
       return;
     }
-    if (modelId === 'seedance-2-omni-fal' && !referenceFile && !referenceUrl && !motionReferenceFile && !motionReferenceUrl && storyboardReferenceAssets.length === 0) {
+    if (isSeedanceOmni(modelId) && !referenceFile && !referenceUrl && !motionReferenceFile && !motionReferenceUrl && storyboardReferenceAssets.length === 0) {
       setStatus('Seedance 2.0 Omni requires at least one image or video reference.');
       return;
     }
@@ -953,7 +983,12 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       const endFrameHint = endFrameReference
         ? 'End frame reference provided; match the ending composition and lighting.'
         : '';
-      const finalPrompt = [prompt.trim(), elementHint, elementReferenceHint, endFrameHint].filter(Boolean).join(' ');
+      const activeFormat = productionFormatId ? getProductionFormat(productionFormatId) : null;
+      const structured = smartPromptStructure && prompt.trim()
+        ? structurePromptForModel(`${modelId} ${modelOption?.label || ''}`, prompt.trim(), 'video', { formatSuffix: activeFormat?.lookSuffix, appendDefaultStyle: !activeFormat })
+        : null;
+      const finalPrompt = [structured ? structured.prompt : [prompt.trim(), activeFormat?.lookSuffix].filter(Boolean).join('. '), elementHint, elementReferenceHint, endFrameHint].filter(Boolean).join(' ');
+      if (structured && structured.notes.length > 0) setStatus(structured.notes.join(' '));
       const veoStartReference = reference || veoElementReferences[0];
 
       let item: MediaItem;
@@ -1009,6 +1044,34 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as 'auto' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16') : 'auto',
             resolution: '720p',
+            generateAudio: seedanceOmniGenerateAudio,
+          });
+          break;
+        case 'seedance-25-t2v-fal':
+          item = await generateVideoWithFalSeedance25Text(finalPrompt, {
+            duration: normalizedDurationSeconds,
+            aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as 'auto' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16') : 'auto',
+            resolution: seedanceResolution,
+            generateAudio: seedanceGenerateAudio,
+          });
+          break;
+        case 'seedance-25-i2v-fal':
+          if (!seedanceStoryboardReference) throw new Error('Seedance 2.5 I2V requires a start frame or storyboard reference.');
+          item = await generateVideoWithFalSeedance25Image(finalPrompt, seedanceStoryboardReference, {
+            endImage: endFrameReference,
+            duration: normalizedDurationSeconds,
+            resolution: seedanceResolution,
+            generateAudio: seedanceGenerateAudio,
+          });
+          break;
+        case 'seedance-25-ref-fal':
+          item = await generateVideoWithFalSeedance25Reference(finalPrompt, {
+            images: storyboardReferencePayloads.length > 0 ? storyboardReferencePayloads.slice(0, 30) : undefined,
+            videos: motionReference ? [motionReference] : undefined,
+            audios: optionalAudioReference ? [optionalAudioReference] : undefined,
+            duration: normalizedDurationSeconds,
+            aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as 'auto' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16') : 'auto',
+            resolution: seedanceResolution,
             generateAudio: seedanceOmniGenerateAudio,
           });
           break;
@@ -1352,6 +1415,9 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     <option value="seedance">Seedance 1.5 Pro</option>
                     <option value="seedance-2-fal">Seedance 2.0 I2V (FAL)</option>
                     <option value="seedance-2-omni-fal">Seedance 2.0 Omni (FAL)</option>
+                    <option value="seedance-25-t2v-fal">Seedance 2.5 T2V (FAL)</option>
+                    <option value="seedance-25-i2v-fal">Seedance 2.5 I2V (FAL)</option>
+                    <option value="seedance-25-ref-fal">Seedance 2.5 Omni (FAL)</option>
                     <option value="wan-i2v">Wan 2.2 I2V Fast</option>
                     <option value="pixverse-c1-ref-fal">PixVerse C1 Reference (FAL)</option>
                     <option value="aurora-fal">Creatify Aurora (Avatar)</option>
@@ -1598,7 +1664,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                 <p className="text-[11px] text-gray-500">
                   {usesStoryboardCollageFallback
                     ? 'Add multiple library frames to auto-build a storyboard collage for Seedance multi-shot prompting.'
-                    : modelId === 'seedance-2-omni-fal'
+                    : isSeedanceOmni(modelId)
                       ? 'Start frame, storyboard frames, optional reference video, and optional audio are sent as native Seedance Omni references.'
                       : 'The first image becomes the PixVerse subject; additional frames are sent as background anchors.'}
                 </p>
@@ -1721,9 +1787,9 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
               </div>
             )}
 
-            {modelId === 'seedance-2-fal' && (
+            {modelId === 'seedance-25-t2v-fal' && (
               <div className="app-panel p-4 space-y-3">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Seedance 2.0 Controls</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Seedance 2.5 Text-to-Video</div>
                 <label className="text-xs text-gray-300 flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -1732,15 +1798,60 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                   />
                   Generate synced audio
                 </label>
+                <label className="text-xs text-gray-300 flex items-center justify-between gap-2">
+                  <span>Resolution</span>
+                  <select
+                    className="app-select app-select--compact"
+                    value={seedanceResolution}
+                    onChange={(event) => setSeedanceResolution(event.target.value as SeedanceResolution)}
+                  >
+                    <option value="480p">480p</option>
+                    <option value="720p">720p</option>
+                    <option value="1080p">1080p</option>
+                  </select>
+                </label>
                 <p className="text-[11px] text-gray-500">
-                  Uses FAL Seedance 2.0 image-to-video with start frame, optional end frame, 4-15s duration, and fixed 720p output.
+                  Native 4-30s single-shot generation from text only. Pick an aspect ratio above; audio is generated in sync.
                 </p>
               </div>
             )}
 
-            {modelId === 'seedance-2-omni-fal' && (
+            {isSeedanceI2V(modelId) && (
               <div className="app-panel p-4 space-y-3">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Seedance 2.0 Omni</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">{isSeedance25(modelId) ? 'Seedance 2.5 Controls' : 'Seedance 2.0 Controls'}</div>
+                <label className="text-xs text-gray-300 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={seedanceGenerateAudio}
+                    onChange={(event) => setSeedanceGenerateAudio(event.target.checked)}
+                  />
+                  Generate synced audio
+                </label>
+                {isSeedance25(modelId) && (
+                  <label className="text-xs text-gray-300 flex items-center justify-between gap-2">
+                    <span>Resolution</span>
+                    <select
+                      className="app-select app-select--compact"
+                      value={seedanceResolution}
+                      onChange={(event) => setSeedanceResolution(event.target.value as SeedanceResolution)}
+                    >
+                      <option value="480p">480p</option>
+                      <option value="720p">720p</option>
+                      <option value="1080p">1080p</option>
+                    </select>
+                  </label>
+                )}
+                <p className="text-[11px] text-gray-500">
+                  {isSeedance25(modelId)
+                    ? 'FAL Seedance 2.5 image-to-video: start frame, optional end frame, 4-30s single shot with synced audio, up to 1080p.'
+                    : 'Uses FAL Seedance 2.0 image-to-video with start frame, optional end frame, 4-15s duration, and fixed 720p output.'}
+                </p>
+              </div>
+            )}
+
+            {isSeedanceOmni(modelId) && (
+              <div className="app-panel p-4 space-y-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-400">{isSeedance25(modelId) ? 'Seedance 2.5 Omni' : 'Seedance 2.0 Omni'}</div>
                 <label className="text-xs text-gray-300 flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -1749,8 +1860,24 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                   />
                   Generate synced audio
                 </label>
+                {isSeedance25(modelId) && (
+                  <label className="text-xs text-gray-300 flex items-center justify-between gap-2">
+                    <span>Resolution</span>
+                    <select
+                      className="app-select app-select--compact"
+                      value={seedanceResolution}
+                      onChange={(event) => setSeedanceResolution(event.target.value as SeedanceResolution)}
+                    >
+                      <option value="480p">480p</option>
+                      <option value="720p">720p</option>
+                      <option value="1080p">1080p</option>
+                    </select>
+                  </label>
+                )}
                 <p className="text-[11px] text-gray-500">
-                  Native reference-to-video flow. Uses up to 9 image refs plus an optional reference video and optional audio cue.
+                  {isSeedance25(modelId)
+                    ? 'Native reference-to-video flow. Seedance 2.5 accepts up to 30 image refs, reference videos, and audio cues for 4-30s shots.'
+                    : 'Native reference-to-video flow. Uses up to 9 image refs plus an optional reference video and optional audio cue.'}
                 </p>
               </div>
             )}
@@ -1870,7 +1997,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             {supportsMotionReference && (
               <div>
                 <label className="text-xs uppercase tracking-[0.12em] text-gray-500">
-                  {modelId === 'seedance-2-omni-fal' ? 'Reference Video' : 'Motion Reference Video'}
+                  {isSeedanceOmni(modelId) ? 'Reference Video' : 'Motion Reference Video'}
                 </label>
                 <div className="mt-2 app-panel p-4 border border-dashed border-gray-600 space-y-3">
                   {motionReferencePreviewUrl ? (
@@ -1889,13 +2016,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                           setMotionReferenceUrl(null);
                         }}
                       >
-                        {modelId === 'seedance-2-omni-fal' ? 'Clear reference video' : 'Clear motion reference'}
+                        {isSeedanceOmni(modelId) ? 'Clear reference video' : 'Clear motion reference'}
                       </button>
                     </>
                   ) : (
                     <label className="app-button app-secondary text-xs cursor-pointer inline-flex items-center gap-2">
                       <UploadIcon className="w-4 h-4" />
-                      {modelId === 'seedance-2-omni-fal' ? 'Upload reference video' : 'Upload motion reference'}
+                      {isSeedanceOmni(modelId) ? 'Upload reference video' : 'Upload motion reference'}
                       <input
                         type="file"
                         accept="video/*"
@@ -1913,7 +2040,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                 {modelId === 'kling-o3-pro-fal' && !klingUseReferenceVideoForO3 && (
                   <p className="text-xs text-gray-500 mt-2">Optional for Kling O3. Enable “Use motion reference video” above to require it.</p>
                 )}
-                {modelId === 'seedance-2-omni-fal' && (
+                {isSeedanceOmni(modelId) && (
                   <p className="text-xs text-gray-500 mt-2">Optional: Seedance Omni can use one extra video reference alongside the storyboard images.</p>
                 )}
               </div>
@@ -2205,7 +2332,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                             setMotionReferenceFile(null);
                           }}
                         >
-                          {modelId === 'seedance-2-omni-fal' ? 'Use as Ref Video' : 'Use as Motion Ref'}
+                          {isSeedanceOmni(modelId) ? 'Use as Ref Video' : 'Use as Motion Ref'}
                         </button>
                       ) : (
                         <span className="text-[10px] text-gray-500">Not compatible</span>

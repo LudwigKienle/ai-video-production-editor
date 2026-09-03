@@ -21,7 +21,14 @@ import {
   type UnsplashOrientation,
   type UnsplashStockAsset,
 } from '../services/unsplashService';
-import { BoxIcon, ImageIcon, VideoIcon, MusicNoteIcon, TagIcon, SearchIcon, DownloadIcon, EditIcon, UploadIcon } from '../components/icons';
+import { BoxIcon, ImageIcon, VideoIcon, MusicNoteIcon, TagIcon, SearchIcon, DownloadIcon, EditIcon, UploadIcon, XIcon, GridIcon, ListIcon } from '../components/icons';
+
+/**
+ * Library — browse everything the studio has made or collected. Modelled on
+ * Apple Photos / Magnific: a quiet sidebar of collections, a dense adaptive
+ * grid with hover actions, an inspector for the selected asset, and quick
+ * look on double-click or space.
+ */
 
 type LibraryAssetKind = 'image' | 'video' | 'audio' | 'reference';
 
@@ -29,8 +36,8 @@ const ASSET_PACK_TYPE_LABELS: Record<AssetPackItemType, string> = {
   hdri: 'HDRI',
   model: 'Model',
   material: 'Material',
-  'render-preset': 'Render Preset',
-  'stock-preset': 'Stock Preset',
+  'render-preset': 'Render preset',
+  'stock-preset': 'Stock preset',
 };
 
 type LibraryAsset = {
@@ -45,6 +52,7 @@ type LibraryAsset = {
   source?: string;
   detail?: string;
   generatedBy?: string;
+  createdAt?: string;
 };
 
 interface AssetLibraryWorkspaceProps {
@@ -59,26 +67,17 @@ interface AssetLibraryWorkspaceProps {
   onAddStockImage?: (item: MediaItem) => void;
 }
 
+type Collection = 'all' | 'image' | 'video' | 'audio' | 'reference' | 'shots' | 'generated' | 'stock' | 'packs';
+type Density = 'small' | 'medium' | 'large';
+type Sort = 'recent' | 'name' | 'project';
+
 const toAssetIdSegment = (value: string) =>
-  value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 120) || 'project';
+  value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'project';
 
-const buildAssetIdPrefix = (
-  origin: LibraryAsset['origin'],
-  projectName: string,
-  projectPath: string | null
-) => `${origin}-${toAssetIdSegment(projectPath || projectName)}`;
+const buildAssetIdPrefix = (origin: LibraryAsset['origin'], projectName: string, projectPath: string | null) =>
+  `${origin}-${toAssetIdSegment(projectPath || projectName)}`;
 
-const mapMediaAssets = (
-  items: MediaItem[],
-  projectName: string,
-  projectPath: string | null,
-  origin: LibraryAsset['origin']
-): LibraryAsset[] => {
+const mapMediaAssets = (items: MediaItem[], projectName: string, projectPath: string | null, origin: LibraryAsset['origin']): LibraryAsset[] => {
   const idPrefix = buildAssetIdPrefix(origin, projectName, projectPath);
   return items.map((item, index) => ({
     id: `${idPrefix}-media-${item.id || index}`,
@@ -93,12 +92,7 @@ const mapMediaAssets = (
   }));
 };
 
-const mapReferenceAssets = (
-  references: ReferenceItem[],
-  projectName: string,
-  projectPath: string | null,
-  origin: LibraryAsset['origin']
-): LibraryAsset[] => {
+const mapReferenceAssets = (references: ReferenceItem[], projectName: string, projectPath: string | null, origin: LibraryAsset['origin']): LibraryAsset[] => {
   const idPrefix = buildAssetIdPrefix(origin, projectName, projectPath);
   return references.map((ref, index) => ({
     id: `${idPrefix}-ref-${ref.id || index}`,
@@ -113,112 +107,36 @@ const mapReferenceAssets = (
   }));
 };
 
-const mapShotAssets = (
-  shots: ShotPrompt[],
-  projectName: string,
-  projectPath: string | null,
-  origin: LibraryAsset['origin']
-): LibraryAsset[] => {
+const mapShotAssets = (shots: ShotPrompt[], projectName: string, projectPath: string | null, origin: LibraryAsset['origin']): LibraryAsset[] => {
   const assets: LibraryAsset[] = [];
   const idPrefix = buildAssetIdPrefix(origin, projectName, projectPath);
   shots.forEach((shot, index) => {
     const shotLabel = shot.shot || index + 1;
     const baseId = `${idPrefix}-shot-${shotLabel}-${index}`;
-    const description = shot.description ? ` - ${shot.description.slice(0, 24)}` : '';
-
-    if (shot.imageUrl) {
-      assets.push({
-        id: `${baseId}-storyboard`,
-        name: `Shot ${shotLabel} Storyboard${description}`,
-        kind: 'image',
-        url: shot.imageUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'storyboard',
-        generatedBy: shot.generatedBy,
-      });
-    }
-    if (shot.sketchUrl) {
-      assets.push({
-        id: `${baseId}-sketch`,
-        name: `Shot ${shotLabel} Sketch${description}`,
-        kind: 'image',
-        url: shot.sketchUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'sketch',
-      });
-    }
-    if (shot.startFrameUrl) {
-      assets.push({
-        id: `${baseId}-start-frame`,
-        name: `Shot ${shotLabel} Start Frame${description}`,
-        kind: 'image',
-        url: shot.startFrameUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'start frame',
-      });
-    }
-    if (shot.endFrameUrl) {
-      assets.push({
-        id: `${baseId}-end-frame`,
-        name: `Shot ${shotLabel} End Frame${description}`,
-        kind: 'image',
-        url: shot.endFrameUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'end frame',
-      });
-    }
-    if (shot.motionReferenceUrl) {
-      assets.push({
-        id: `${baseId}-motion-ref`,
-        name: `Shot ${shotLabel} Motion Ref${description}`,
-        kind: 'video',
-        url: shot.motionReferenceUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'motion ref',
-      });
-    }
-    if (shot.videoUrl) {
-      assets.push({
-        id: `${baseId}-video`,
-        name: `Shot ${shotLabel} Video${description}`,
-        kind: 'video',
-        url: shot.videoUrl,
-        projectName,
-        projectPath,
-        origin,
-        category: 'shot',
-        detail: 'storyboard video',
-      });
-    }
+    const description = shot.description ? ` · ${shot.description.slice(0, 32)}` : '';
+    const push = (suffix: string, name: string, kind: LibraryAssetKind, url: string | undefined, detail: string) => {
+      if (!url) return;
+      assets.push({ id: `${baseId}-${suffix}`, name: `Shot ${shotLabel} ${name}${description}`, kind, url, projectName, projectPath, origin, category: 'shot', detail, generatedBy: shot.generatedBy });
+    };
+    push('storyboard', 'Storyboard', 'image', shot.imageUrl, 'storyboard');
+    push('sketch', 'Sketch', 'image', shot.sketchUrl, 'sketch');
+    push('start-frame', 'Start frame', 'image', shot.startFrameUrl, 'start frame');
+    push('end-frame', 'End frame', 'image', shot.endFrameUrl, 'end frame');
+    push('motion-ref', 'Motion ref', 'video', shot.motionReferenceUrl, 'motion ref');
+    push('video', 'Video', 'video', shot.videoUrl, 'storyboard video');
   });
   return assets;
 };
 
 const isLikelyImageUrl = (url: string) => {
   if (!url) return false;
-  if (url.startsWith('data:image')) return true;
-  if (url.startsWith('blob:')) return true;
-  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(url.split('?')[0]);
+  if (url.startsWith('data:image') || url.startsWith('blob:')) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(url.split('?')[0]) || !/\.[a-z0-9]{2,5}(?:$|[?#])/i.test(url);
 };
 
 const isArchiveAsset = (asset: Pick<LibraryAsset, 'url' | 'name' | 'generatedBy'>) =>
-  Boolean(asset.url && /\.(zip|exr)(?:$|[?#])/i.test(asset.url)) ||
-  Boolean(asset.name && /\.zip$/i.test(asset.name)) ||
+  Boolean(asset.url && /\.(zip|exr|glb|gltf|fbx|obj)(?:$|[?#])/i.test(asset.url)) ||
+  Boolean(asset.name && /\.(zip|glb|gltf|fbx|obj)$/i.test(asset.name)) ||
   /EXR|ACES HDR/i.test(asset.generatedBy || '');
 
 const formatBytes = (value?: number) => {
@@ -227,12 +145,8 @@ const formatBytes = (value?: number) => {
   return `${(value / 1_000_000).toFixed(1)} MB`;
 };
 
-const formatPackCounts = (pack: AssetPack) => {
-  const counts = getAssetPackTypeCounts(pack);
-  return Object.entries(counts)
-    .map(([type, count]) => `${count} ${ASSET_PACK_TYPE_LABELS[type as AssetPackItemType] || type}`)
-    .join(' / ');
-};
+const formatPackCounts = (pack: AssetPack) =>
+  Object.entries(getAssetPackTypeCounts(pack)).map(([type, count]) => `${count} ${ASSET_PACK_TYPE_LABELS[type as AssetPackItemType] || type}`).join(' · ');
 
 const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
   currentProjectName,
@@ -247,10 +161,13 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
 }) => {
   const [remoteAssets, setRemoteAssets] = useState<LibraryAsset[]>([]);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | LibraryAssetKind | 'shots'>('all');
+  const [collection, setCollection] = useState<Collection>('all');
+  const [density, setDensity] = useState<Density>('medium');
+  const [sort, setSort] = useState<Sort>('recent');
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [fullView, setFullView] = useState<{ url: string; name: string; kind: LibraryAssetKind } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [quickLook, setQuickLook] = useState<{ url: string; name: string; kind: LibraryAssetKind } | null>(null);
   const [stockQuery, setStockQuery] = useState('cinematic production design');
   const [stockOrientation, setStockOrientation] = useState<UnsplashOrientation>('landscape');
   const [stockResults, setStockResults] = useState<UnsplashStockAsset[]>([]);
@@ -261,13 +178,15 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
   const [packStatus, setPackStatus] = useState<string | null>(null);
   const [selectedPackId, setSelectedPackId] = useState(BUILTIN_ASSET_PACKS[0]?.id || '');
   const packImportInputRef = useRef<HTMLInputElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
 
   const currentAssets = useMemo(() => {
-    const projectLabel = currentProjectName || 'Current Project';
-    const media = mapMediaAssets(mediaItems, projectLabel, currentProjectPath || null, 'current');
-    const refs = mapReferenceAssets(references, projectLabel, currentProjectPath || null, 'current');
-    const shots = mapShotAssets(shotPrompts, projectLabel, currentProjectPath || null, 'current');
-    return [...media, ...refs, ...shots];
+    const projectLabel = currentProjectName || 'Current project';
+    return [
+      ...mapMediaAssets(mediaItems, projectLabel, currentProjectPath || null, 'current'),
+      ...mapReferenceAssets(references, projectLabel, currentProjectPath || null, 'current'),
+      ...mapShotAssets(shotPrompts, projectLabel, currentProjectPath || null, 'current'),
+    ];
   }, [currentProjectName, currentProjectPath, mediaItems, references, shotPrompts]);
 
   useEffect(() => {
@@ -279,147 +198,110 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
         return;
       }
       if (typeof window !== 'undefined' && !window.electron?.project) {
-        setLoadError('Asset library is available in the desktop app.');
+        setLoadError('Assets from other projects are available in the desktop app.');
         setRemoteAssets([]);
         return;
       }
       setIsLoading(true);
       setLoadError(null);
-
       const candidates = recentProjects.filter((project) => project.path && project.path !== currentProjectPath);
-      const results = await Promise.allSettled(
-        candidates.map(async (project) => {
-          const loaded = await loadProjectFromFolder(project.path);
-          const projectName = loaded.name || project.name || 'Untitled Project';
-          return [
-            ...mapMediaAssets(loaded.mediaItems || [], projectName, project.path, 'recent'),
-            ...mapReferenceAssets(loaded.references || [], projectName, project.path, 'recent'),
-            ...mapShotAssets(loaded.projectHub?.shotPrompts || [], projectName, project.path, 'recent'),
-          ];
-        })
-      );
-
+      const results = await Promise.allSettled(candidates.map(async (project) => {
+        const loaded = await loadProjectFromFolder(project.path);
+        const projectName = loaded.name || project.name || 'Untitled project';
+        return [
+          ...mapMediaAssets(loaded.mediaItems || [], projectName, project.path, 'recent'),
+          ...mapReferenceAssets(loaded.references || [], projectName, project.path, 'recent'),
+          ...mapShotAssets(loaded.projectHub?.shotPrompts || [], projectName, project.path, 'recent'),
+        ];
+      }));
       if (!isActive) return;
-      const nextAssets: LibraryAsset[] = [];
-      const failed = results.filter((result) => result.status === 'rejected');
-      results.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          nextAssets.push(...result.value);
-        }
-      });
-
-      if (failed.length > 0 && nextAssets.length === 0) {
-        setLoadError('Could not load assets from recent projects.');
-      }
-      setRemoteAssets(nextAssets);
+      const next: LibraryAsset[] = [];
+      results.forEach((result) => { if (result.status === 'fulfilled') next.push(...result.value); });
+      if (results.some((r) => r.status === 'rejected') && next.length === 0) setLoadError('Could not load assets from recent projects.');
+      setRemoteAssets(next);
       setIsLoading(false);
     };
-
     loadAssets().catch((error) => {
       if (!isActive) return;
       setLoadError(error instanceof Error ? error.message : 'Failed to load assets.');
       setIsLoading(false);
     });
-
-    return () => {
-      isActive = false;
-    };
+    return () => { isActive = false; };
   }, [recentProjects, currentProjectPath]);
 
   useEffect(() => {
-    const updateUnsplashState = () => setUnsplashReady(hasUnsplashAccessKey());
-    window.addEventListener('storage', updateUnsplashState);
-    window.addEventListener('focus', updateUnsplashState);
+    const update = () => setUnsplashReady(hasUnsplashAccessKey());
+    window.addEventListener('storage', update);
+    window.addEventListener('focus', update);
     return () => {
-      window.removeEventListener('storage', updateUnsplashState);
-      window.removeEventListener('focus', updateUnsplashState);
+      window.removeEventListener('storage', update);
+      window.removeEventListener('focus', update);
     };
   }, []);
 
-  const allAssets = useMemo(() => {
-    return [...currentAssets, ...remoteAssets];
-  }, [currentAssets, remoteAssets]);
+  const allAssets = useMemo(() => [...currentAssets, ...remoteAssets], [currentAssets, remoteAssets]);
+
+  const counts = useMemo(() => allAssets.reduce((acc, asset) => {
+    acc.all += 1;
+    acc[asset.kind] += 1;
+    if (asset.category === 'shot') acc.shots += 1;
+    if (asset.source === 'generated' || asset.generatedBy) acc.generated += 1;
+    return acc;
+  }, { all: 0, image: 0, video: 0, audio: 0, reference: 0, shots: 0, generated: 0 }), [allAssets]);
 
   const filteredAssets = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return allAssets.filter((asset) => {
-      if (filter === 'shots') {
-        if (asset.category !== 'shot') return false;
-      } else if (filter !== 'all' && asset.kind !== filter) {
-        return false;
-      }
+    const list = allAssets.filter((asset) => {
+      if (collection === 'shots') { if (asset.category !== 'shot') return false; }
+      else if (collection === 'generated') { if (!(asset.source === 'generated' || asset.generatedBy)) return false; }
+      else if (collection !== 'all' && collection !== 'stock' && collection !== 'packs' && asset.kind !== collection) return false;
       if (!term) return true;
-      return (
-        asset.name.toLowerCase().includes(term) ||
-        asset.projectName.toLowerCase().includes(term) ||
-        (asset.detail || '').toLowerCase().includes(term)
-      );
+      return asset.name.toLowerCase().includes(term) || asset.projectName.toLowerCase().includes(term) || (asset.detail || '').toLowerCase().includes(term) || (asset.generatedBy || '').toLowerCase().includes(term);
     });
-  }, [allAssets, filter, search]);
+    if (sort === 'name') return list.sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === 'project') return list.sort((a, b) => a.projectName.localeCompare(b.projectName) || a.name.localeCompare(b.name));
+    return list;
+  }, [allAssets, collection, search, sort]);
 
-  const counts = useMemo(() => {
-    return allAssets.reduce(
-      (acc, asset) => {
-        acc.total += 1;
-        acc[asset.kind] += 1;
-        if (asset.category === 'shot') acc.shots += 1;
-        return acc;
-      },
-      { total: 0, image: 0, video: 0, audio: 0, reference: 0, shots: 0 }
-    );
-  }, [allAssets]);
+  const selected = useMemo(() => filteredAssets.find((asset) => asset.id === selectedId) || allAssets.find((asset) => asset.id === selectedId) || null, [allAssets, filteredAssets, selectedId]);
 
-  const assetPacks = useMemo(() => (
-    [...BUILTIN_ASSET_PACKS, ...importedPacks]
-  ), [importedPacks]);
-
-  const selectedPack = useMemo(() => (
-    assetPacks.find((pack) => pack.id === selectedPackId) || assetPacks[0]
-  ), [assetPacks, selectedPackId]);
-
+  const assetPacks = useMemo(() => [...BUILTIN_ASSET_PACKS, ...importedPacks], [importedPacks]);
+  const selectedPack = useMemo(() => assetPacks.find((pack) => pack.id === selectedPackId) || assetPacks[0], [assetPacks, selectedPackId]);
   const selectedPackIsImported = Boolean(selectedPack && importedPacks.some((pack) => pack.id === selectedPack.id));
 
   useEffect(() => {
-    if (assetPacks.length > 0 && !assetPacks.some((pack) => pack.id === selectedPackId)) {
-      setSelectedPackId(assetPacks[0].id);
-    }
+    if (assetPacks.length > 0 && !assetPacks.some((pack) => pack.id === selectedPackId)) setSelectedPackId(assetPacks[0].id);
   }, [assetPacks, selectedPackId]);
 
+  // Keyboard: arrows move selection, space quick-looks, escape clears.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (!gridRef.current?.contains(document.activeElement) && document.activeElement !== document.body) return;
+      if (event.key === 'Escape') { setQuickLook(null); setSelectedId(null); return; }
+      if (event.key === ' ' && selected?.url) { event.preventDefault(); setQuickLook(quickLook ? null : { url: selected.url, name: selected.name, kind: selected.kind }); return; }
+      const index = filteredAssets.findIndex((asset) => asset.id === selectedId);
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); setSelectedId(filteredAssets[Math.min(filteredAssets.length - 1, index + 1)]?.id || null); }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); setSelectedId(filteredAssets[Math.max(0, index - 1)]?.id || null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [filteredAssets, quickLook, selected, selectedId]);
+
   const renderPreview = (asset: LibraryAsset) => {
-    if ((asset.kind === 'image' || asset.kind === 'reference') && asset.url && isLikelyImageUrl(asset.url)) {
-      return <img src={asset.url} className="w-full h-full object-cover" alt={asset.name} />;
+    if ((asset.kind === 'image' || asset.kind === 'reference') && asset.url && !isArchiveAsset(asset) && isLikelyImageUrl(asset.url)) {
+      return <img src={asset.url} className="lib-card__media" alt="" loading="lazy" draggable={false} />;
     }
     if (asset.kind === 'video' && asset.url && !isArchiveAsset(asset)) {
-      return <video src={asset.url} className="w-full h-full object-cover" muted playsInline />;
+      return <video src={asset.url} className="lib-card__media" muted playsInline preload="metadata" onMouseEnter={(e) => { void e.currentTarget.play().catch(() => undefined); }} onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }} />;
     }
-    if (isArchiveAsset(asset)) {
-      return (
-        <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-500">
-          <BoxIcon className="w-10 h-10" />
-          <span className="text-[10px] uppercase tracking-[0.18em]">EXR ZIP</span>
-        </div>
-      );
-    }
-    if (asset.kind === 'audio') {
-      return (
-        <div className="w-full h-full flex items-center justify-center text-gray-400">
-          <MusicNoteIcon className="w-10 h-10" />
-        </div>
-      );
-    }
-    return (
-      <div className="w-full h-full flex items-center justify-center text-gray-500">
-        <BoxIcon className="w-10 h-10" />
-      </div>
-    );
+    if (isArchiveAsset(asset)) return <div className="lib-card__placeholder"><BoxIcon className="w-7 h-7" /><span>{/\.(glb|gltf|fbx|obj)/i.test(asset.url || asset.name) ? '3D' : 'Archive'}</span></div>;
+    if (asset.kind === 'audio') return <div className="lib-card__placeholder"><MusicNoteIcon className="w-7 h-7" /><span>Audio</span></div>;
+    return <div className="lib-card__placeholder"><BoxIcon className="w-7 h-7" /></div>;
   };
 
-  const typeIcon = (kind: LibraryAssetKind) => {
-    if (kind === 'image') return ImageIcon;
-    if (kind === 'video') return VideoIcon;
-    if (kind === 'reference') return TagIcon;
-    return MusicNoteIcon;
-  };
+  const kindIcon = (kind: LibraryAssetKind) => (kind === 'image' ? ImageIcon : kind === 'video' ? VideoIcon : kind === 'reference' ? TagIcon : MusicNoteIcon);
 
   const runStockSearch = async (query: string, orientation: UnsplashOrientation) => {
     const hasKey = hasUnsplashAccessKey();
@@ -429,14 +311,11 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
       return;
     }
     setIsStockLoading(true);
-    setStockStatus('Searching Unsplash...');
+    setStockStatus('Searching Unsplash…');
     try {
-      const results = await searchUnsplashPhotos(query, {
-        orientation,
-        perPage: 12,
-      });
+      const results = await searchUnsplashPhotos(query, { orientation, perPage: 18 });
       setStockResults(results);
-      setStockStatus(results.length > 0 ? `${results.length} Unsplash photos loaded.` : 'No Unsplash photos found.');
+      setStockStatus(results.length > 0 ? `${results.length} photos` : 'No photos found.');
     } catch (error) {
       setStockStatus(error instanceof Error ? error.message : 'Unsplash search failed.');
     } finally {
@@ -444,36 +323,29 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
     }
   };
 
-  const handleSearchStock = async () => {
-    await runStockSearch(stockQuery, stockOrientation);
-  };
-
   const handleAddStockImage = async (asset: UnsplashStockAsset) => {
     if (!onAddStockImage) return;
-    setStockStatus(`Adding "${asset.name}" to Library...`);
+    setStockStatus(`Adding "${asset.name}"…`);
     try {
       await trackUnsplashDownload(asset.downloadLocation);
       onAddStockImage(buildUnsplashMediaItem(asset));
-      setStockStatus(`Added "${asset.name}" to Library.`);
+      setStockStatus(`Added "${asset.name}" to the library.`);
     } catch (error) {
       setStockStatus(error instanceof Error ? error.message : 'Could not add Unsplash photo.');
     }
   };
 
   const handleDownloadStockImage = async (asset: UnsplashStockAsset) => {
-    setStockStatus(`Preparing "${asset.name}"...`);
     try {
       const trackedUrl = await trackUnsplashDownload(asset.downloadLocation);
       window.open(trackedUrl || asset.fullUrl || asset.url, '_blank', 'noopener,noreferrer');
-      setStockStatus(`Opened Unsplash download for "${asset.name}".`);
     } catch (error) {
-      setStockStatus(error instanceof Error ? error.message : 'Could not track Unsplash download.');
+      setStockStatus(error instanceof Error ? error.message : 'Could not open download.');
     }
   };
 
   const handleDownloadPackManifest = (pack: AssetPack) => {
-    const manifest = buildAssetPackManifest(pack);
-    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(buildAssetPackManifest(pack), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -488,10 +360,8 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
     const file = event.target.files?.[0];
     event.currentTarget.value = '';
     if (!file) return;
-
     try {
-      const parsed = JSON.parse(await file.text());
-      const pack = normalizeAssetPackManifest(parsed);
+      const pack = normalizeAssetPackManifest(JSON.parse(await file.text()));
       setImportedPacks((current) => {
         const next = upsertImportedAssetPack(current, pack);
         saveImportedAssetPacks(next);
@@ -505,14 +375,11 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
   };
 
   const handleRemoveImportedPack = (packId: string) => {
-    const removed = importedPacks.find((pack) => pack.id === packId);
     const next = importedPacks.filter((pack) => pack.id !== packId);
     setImportedPacks(next);
     saveImportedAssetPacks(next);
-    if (selectedPackId === packId) {
-      setSelectedPackId(BUILTIN_ASSET_PACKS[0]?.id || next[0]?.id || '');
-    }
-    setPackStatus(removed ? `Removed imported pack: ${removed.label}` : 'Imported pack removed.');
+    if (selectedPackId === packId) setSelectedPackId(BUILTIN_ASSET_PACKS[0]?.id || next[0]?.id || '');
+    setPackStatus('Pack removed.');
   };
 
   const handleUsePackItem = (item: AssetPackItem) => {
@@ -520,410 +387,242 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
       const orientation = item.stockPreset.orientation || stockOrientation;
       setStockQuery(item.stockPreset.query);
       setStockOrientation(orientation);
+      setCollection('stock');
       void runStockSearch(item.stockPreset.query, orientation);
       return;
     }
     const url = item.downloadUrl || item.sourcePageUrl || item.url;
-    if (url) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  return (
-    <div className="studio-workspace p-6 h-full overflow-auto">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold">Asset Library</h2>
-            <p className="text-gray-400">Browse assets from every saved project and uploaded media.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="app-pill">{counts.total} assets</span>
-            {isLoading && <span className="app-pill app-pill--warning">Loading</span>}
-          </div>
-        </div>
+  const collections: Array<{ id: Collection; label: string; count?: number; icon: React.FC<{ className?: string }> }> = [
+    { id: 'all', label: 'All assets', count: counts.all, icon: GridIcon },
+    { id: 'image', label: 'Images', count: counts.image, icon: ImageIcon },
+    { id: 'video', label: 'Videos', count: counts.video, icon: VideoIcon },
+    { id: 'audio', label: 'Audio', count: counts.audio, icon: MusicNoteIcon },
+    { id: 'reference', label: 'References', count: counts.reference, icon: TagIcon },
+    { id: 'shots', label: 'Shots', count: counts.shots, icon: ListIcon },
+    { id: 'generated', label: 'Generated', count: counts.generated, icon: BoxIcon },
+  ];
 
-        <div className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr]">
-          <div className="app-panel p-4 space-y-3">
-            <label className="text-xs uppercase tracking-[0.2em] text-gray-400 flex items-center gap-2">
-              <SearchIcon className="w-4 h-4" />
-              Search
-            </label>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search assets, projects, or tags..."
-              className="app-input"
-            />
-            <div className="grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="text-xs uppercase tracking-[0.2em] text-gray-400">Filter</label>
-                <select
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value as 'all' | LibraryAssetKind | 'shots')}
-                  className="app-select mt-1"
-                >
-                  <option value="all">All assets</option>
-                  <option value="image">Images</option>
-                  <option value="video">Videos</option>
-                  <option value="audio">Audio</option>
-                  <option value="reference">References</option>
-                  <option value="shots">Shots</option>
-                </select>
-              </div>
-              <div className="text-xs text-gray-400 flex items-center justify-between border border-gray-700/60 rounded-lg px-3 py-2">
-                <span>Images: {counts.image}</span>
-                <span>Video: {counts.video}</span>
-                <span>Audio: {counts.audio}</span>
-                <span>Refs: {counts.reference}</span>
-                <span>Shots: {counts.shots}</span>
-              </div>
+  const renderStock = () => (
+    <div className="lib-stock">
+      <form className="lib-stock__form" onSubmit={(e) => { e.preventDefault(); void runStockSearch(stockQuery, stockOrientation); }}>
+        <input value={stockQuery} onChange={(e) => setStockQuery(e.target.value)} placeholder="Search Unsplash" className="app-input app-input--compact flex-1" />
+        <select value={stockOrientation} onChange={(e) => setStockOrientation(e.target.value as UnsplashOrientation)} className="app-select app-select--compact">
+          <option value="landscape">Landscape</option>
+          <option value="portrait">Portrait</option>
+          <option value="squarish">Square</option>
+        </select>
+        <button type="submit" className="app-button app-primary text-xs" disabled={isStockLoading || !stockQuery.trim()}>{isStockLoading ? 'Searching…' : 'Search'}</button>
+      </form>
+      {!unsplashReady && <p className="lib-note lib-note--warn">Add your Unsplash Access Key in Settings (Access Key only).</p>}
+      {stockStatus && <p className="lib-note">{stockStatus}</p>}
+      <div className={`lib-grid lib-grid--${density}`}>
+        {stockResults.map((asset) => (
+          <div key={asset.id} className="lib-card">
+            <button type="button" className="lib-card__frame" onClick={() => setQuickLook({ url: asset.url, name: asset.name, kind: 'image' })}>
+              <img src={asset.previewUrl} alt="" className="lib-card__media" loading="lazy" />
+              <span className="lib-card__badge">Unsplash</span>
+            </button>
+            <div className="lib-card__meta">
+              <span className="lib-card__name" title={asset.name}>{asset.name}</span>
+              <span className="lib-card__sub"><a href={asset.photographerUrl} target="_blank" rel="noreferrer">{asset.photographerName}</a></span>
+            </div>
+            <div className="lib-card__actions">
+              <button type="button" className="lib-card__action lib-card__action--primary" onClick={() => void handleAddStockImage(asset)} disabled={!onAddStockImage}>Add</button>
+              <button type="button" className="lib-card__action" onClick={() => void handleDownloadStockImage(asset)}><DownloadIcon className="w-3.5 h-3.5" /></button>
             </div>
           </div>
+        ))}
+      </div>
+    </div>
+  );
 
-          <div className="app-panel p-4 space-y-3 text-sm text-gray-300">
-            <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Library scope</div>
-            <p>Includes media from the current project plus recent saved projects.</p>
-            {loadError && <p className="text-amber-300">{loadError}</p>}
-            {recentProjects.length === 0 && <p className="text-gray-500">Save a project to build your library.</p>}
-          </div>
-        </div>
-
-        <div className="app-panel p-4 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+  const renderPacks = () => (
+    <div className="lib-packs">
+      <div className="lib-packs__list">
+        {assetPacks.map((pack) => (
+          <button key={pack.id} type="button" className={`lib-packs__item ${selectedPack?.id === pack.id ? 'lib-packs__item--active' : ''}`} onClick={() => setSelectedPackId(pack.id)}>
+            <span className="lib-packs__name">{pack.label}</span>
+            <span className="lib-packs__meta">{pack.provider} · {formatPackCounts(pack)}</span>
+          </button>
+        ))}
+        <input ref={packImportInputRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportPackManifest} />
+        <button type="button" className="app-button app-secondary text-xs mt-2" onClick={() => packImportInputRef.current?.click()}><UploadIcon className="w-3.5 h-3.5" /> Import pack</button>
+        {packStatus && <p className="lib-note">{packStatus}</p>}
+      </div>
+      {selectedPack && (
+        <div className="lib-packs__detail">
+          <div className="lib-packs__head">
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Asset Packs</div>
-              <h3 className="text-lg font-semibold text-white">Packs & Presets</h3>
-              <p className="text-xs text-gray-400">Browse bundled HDRIs, stock searches, render presets, material presets and model-pack slots.</p>
+              <h3>{selectedPack.label}</h3>
+              <p>{selectedPack.description}</p>
+              <p className="lib-note">{selectedPack.license}</p>
             </div>
-            {selectedPack && (
-              <div className="flex items-center gap-2">
-                <input
-                  ref={packImportInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  className="hidden"
-                  onChange={handleImportPackManifest}
-                />
-                <button
-                  className="app-button app-secondary text-xs flex items-center gap-2"
-                  onClick={() => packImportInputRef.current?.click()}
-                >
-                  <UploadIcon className="w-3 h-3" />
-                  Import Pack
-                </button>
-                {selectedPack.downloadUrl && (
-                  <button
-                    className="app-button app-secondary text-xs flex items-center gap-2"
-                    onClick={() => window.open(selectedPack.downloadUrl, '_blank', 'noopener,noreferrer')}
-                  >
-                    <DownloadIcon className="w-3 h-3" />
-                    Pack Source
-                  </button>
-                )}
-                <button
-                  className="app-button app-tertiary text-xs flex items-center gap-2"
-                  onClick={() => handleDownloadPackManifest(selectedPack)}
-                >
-                  <BoxIcon className="w-3 h-3" />
-                  Manifest
-                </button>
-                {selectedPackIsImported && (
-                  <button
-                    className="app-button app-tertiary text-xs"
-                    onClick={() => handleRemoveImportedPack(selectedPack.id)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="flex flex-wrap gap-1.5">
+              <a className="app-button app-tertiary text-xs" href={selectedPack.sourceUrl} target="_blank" rel="noreferrer">Source</a>
+              {selectedPack.downloadUrl && <button type="button" className="app-button app-secondary text-xs" onClick={() => window.open(selectedPack.downloadUrl, '_blank', 'noopener,noreferrer')}><DownloadIcon className="w-3.5 h-3.5" /> Download</button>}
+              <button type="button" className="app-button app-tertiary text-xs" onClick={() => handleDownloadPackManifest(selectedPack)}>Manifest</button>
+              {selectedPackIsImported && <button type="button" className="app-button app-tertiary text-xs" onClick={() => handleRemoveImportedPack(selectedPack.id)}>Remove</button>}
+            </div>
           </div>
-          {packStatus && <p className="text-xs text-gray-400">{packStatus}</p>}
+          <div className={`lib-grid lib-grid--${density}`}>
+            {selectedPack.items.map((item) => (
+              <div key={item.id} className="lib-card">
+                <div className="lib-card__frame">
+                  {item.previewUrl ? <img src={item.previewUrl} alt="" className="lib-card__media" loading="lazy" /> : <div className="lib-card__placeholder"><BoxIcon className="w-7 h-7" /></div>}
+                  <span className="lib-card__badge">{ASSET_PACK_TYPE_LABELS[item.type]}</span>
+                </div>
+                <div className="lib-card__meta">
+                  <span className="lib-card__name" title={item.label}>{item.label}</span>
+                  <span className="lib-card__sub">{formatBytes(item.fileSizeBytes) || item.license || item.provider}</span>
+                </div>
+                <div className="lib-card__actions">
+                  <button type="button" className="lib-card__action lib-card__action--primary" onClick={() => handleUsePackItem(item)} disabled={!(item.stockPreset || item.downloadUrl || item.sourcePageUrl || item.url)}>
+                    {item.stockPreset ? 'Search' : item.downloadUrl ? 'Download' : 'Open'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
-          <div className="grid gap-3 lg:grid-cols-[0.85fr_1.15fr]">
-            <div className="space-y-2">
-              {assetPacks.map((pack) => (
-                <button
-                  key={pack.id}
-                  className={`w-full text-left border p-3 transition-colors ${
-                    selectedPack?.id === pack.id
-                      ? 'border-indigo-400 bg-indigo-500/10'
-                      : 'border-gray-800 bg-black/20 hover:border-gray-600'
-                  }`}
-                  onClick={() => setSelectedPackId(pack.id)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{pack.label}</p>
-                      <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{pack.description}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="app-pill">{pack.provider}</span>
-                      {importedPacks.some((imported) => imported.id === pack.id) && (
-                        <span className="text-[10px] text-indigo-300">imported</span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-2">{formatPackCounts(pack)}</p>
+  return (
+    <div className="lib-workspace">
+      <aside className="lib-sidebar">
+        <div className="lib-sidebar__search">
+          <SearchIcon className="w-4 h-4 app-muted" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="lib-sidebar__input" />
+          {search && <button type="button" className="toolbar-button toolbar-button--icon" onClick={() => setSearch('')} aria-label="Clear search"><XIcon className="w-3.5 h-3.5" /></button>}
+        </div>
+        <div className="lib-sidebar__label">Library</div>
+        <ul className="lib-sidebar__list" role="list">
+          {collections.map((entry) => (
+            <li key={entry.id}>
+              <button type="button" className={`lib-sidebar__item ${collection === entry.id ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection(entry.id)}>
+                <entry.icon className="lib-sidebar__icon" />
+                <span className="lib-sidebar__text">{entry.label}</span>
+                {typeof entry.count === 'number' && <span className="lib-sidebar__count">{entry.count}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="lib-sidebar__label">Sources</div>
+        <ul className="lib-sidebar__list" role="list">
+          <li><button type="button" className={`lib-sidebar__item ${collection === 'stock' ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection('stock')}><SearchIcon className="lib-sidebar__icon" /><span className="lib-sidebar__text">Unsplash stock</span></button></li>
+          <li><button type="button" className={`lib-sidebar__item ${collection === 'packs' ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection('packs')}><BoxIcon className="lib-sidebar__icon" /><span className="lib-sidebar__text">Asset packs</span><span className="lib-sidebar__count">{assetPacks.length}</span></button></li>
+        </ul>
+        <div className="lib-sidebar__foot">
+          {isLoading && <span>Loading other projects…</span>}
+          {loadError && <span>{loadError}</span>}
+          {!isLoading && !loadError && recentProjects.length === 0 && <span>Save a project to grow the library across projects.</span>}
+        </div>
+      </aside>
+
+      <div className="lib-main">
+        <div className="lib-toolbar">
+          <div className="lib-toolbar__title">
+            {collection === 'stock' ? 'Unsplash stock' : collection === 'packs' ? 'Asset packs' : collections.find((c) => c.id === collection)?.label}
+            <span className="lib-toolbar__count">{collection === 'stock' ? stockResults.length : collection === 'packs' ? assetPacks.length : filteredAssets.length}</span>
+          </div>
+          <div className="lib-toolbar__controls">
+            {collection !== 'stock' && collection !== 'packs' && (
+              <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="app-select app-select--compact" aria-label="Sort">
+                <option value="recent">Recent first</option>
+                <option value="name">Name</option>
+                <option value="project">Project</option>
+              </select>
+            )}
+            <div className="toolbar-segmented" role="radiogroup" aria-label="Thumbnail size">
+              {(['small', 'medium', 'large'] as Density[]).map((size) => (
+                <button key={size} type="button" role="radio" aria-checked={density === size} className={`toolbar-segmented__item ${density === size ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setDensity(size)} title={`${size} thumbnails`}>
+                  {size === 'small' ? 'S' : size === 'medium' ? 'M' : 'L'}
                 </button>
               ))}
             </div>
+          </div>
+        </div>
 
-            {selectedPack && (
-              <div className="border border-gray-800 bg-black/20 p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">{selectedPack.label}</p>
-                    <p className="text-[10px] text-gray-500">{selectedPack.license}</p>
-                  </div>
-                  <a
-                    className="app-button app-tertiary text-[10px]"
-                    href={selectedPack.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Source
-                  </a>
+        <div className="lib-content" ref={gridRef} tabIndex={0}>
+          {collection === 'stock' ? renderStock() : collection === 'packs' ? renderPacks() : (
+            <>
+              {filteredAssets.length === 0 ? (
+                <div className="lib-empty">
+                  <ImageIcon className="w-8 h-8 app-muted" />
+                  <p className="font-semibold">Nothing here yet</p>
+                  <p className="app-muted text-sm">{search ? 'No assets match your search.' : 'Generate or import media and it shows up here automatically.'}</p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {selectedPack.items.map((item) => {
-                    const sizeLabel = formatBytes(item.fileSizeBytes);
-                    const canUse = Boolean(item.stockPreset || item.downloadUrl || item.sourcePageUrl || item.url);
+              ) : (
+                <div className={`lib-grid lib-grid--${density}`}>
+                  {filteredAssets.map((asset) => {
+                    const Icon = kindIcon(asset.kind);
+                    const isSelected = asset.id === selectedId;
                     return (
-                      <div key={item.id} className="border border-gray-800 bg-gray-950/60 overflow-hidden">
-                        {item.previewUrl ? (
-                          <img src={item.previewUrl} alt={item.label} className="h-28 w-full object-cover" loading="lazy" />
-                        ) : (
-                          <div className="h-28 w-full bg-black/60 flex items-center justify-center text-gray-500">
-                            <BoxIcon className="w-8 h-8" />
+                      <div
+                        key={asset.id}
+                        className={`lib-card ${isSelected ? 'lib-card--selected' : ''}`}
+                        onClick={() => setSelectedId(asset.id)}
+                        onDoubleClick={() => { if (asset.url) setQuickLook({ url: asset.url, name: asset.name, kind: asset.kind }); }}
+                      >
+                        <div className="lib-card__frame">
+                          {renderPreview(asset)}
+                          <span className="lib-card__badge"><Icon className="w-3 h-3" />{asset.detail || asset.kind}</span>
+                          {asset.origin === 'recent' && <span className="lib-card__origin">{asset.projectName}</span>}
+                          <div className="lib-card__hover">
+                            {(asset.kind === 'image' || asset.kind === 'reference') && asset.url && onEditImage && <button type="button" className="lib-card__action" onClick={(e) => { e.stopPropagation(); onEditImage(asset); }} title="Edit in Photo"><EditIcon className="w-3.5 h-3.5" /></button>}
+                            {asset.kind === 'video' && asset.url && !isArchiveAsset(asset) && onEditVideo && <button type="button" className="lib-card__action" onClick={(e) => { e.stopPropagation(); onEditVideo(asset); }} title="Open in Edit"><EditIcon className="w-3.5 h-3.5" /></button>}
+                            {asset.url && <a href={asset.url} download className="lib-card__action" onClick={(e) => e.stopPropagation()} title="Download"><DownloadIcon className="w-3.5 h-3.5" /></a>}
                           </div>
-                        )}
-                        <div className="p-3 space-y-3">
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm font-semibold text-white line-clamp-2">{item.label}</p>
-                              <span className="app-pill">{ASSET_PACK_TYPE_LABELS[item.type]}</span>
-                            </div>
-                            <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{item.description}</p>
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {item.tags.slice(0, 4).map((tag) => (
-                                <span key={tag} className="text-[10px] px-2 py-0.5 bg-gray-800 text-gray-300">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
-                            <span>{item.provider}</span>
-                            <span>{sizeLabel || item.license}</span>
-                          </div>
-                          <button
-                            className="app-button app-secondary text-[10px] w-full flex items-center justify-center gap-2"
-                            onClick={() => handleUsePackItem(item)}
-                            disabled={!canUse}
-                          >
-                            {item.stockPreset ? <SearchIcon className="w-3 h-3" /> : <DownloadIcon className="w-3 h-3" />}
-                            {item.stockPreset ? 'Use Search' : item.downloadUrl ? 'Download' : 'Open'}
-                          </button>
+                        </div>
+                        <div className="lib-card__meta">
+                          <span className="lib-card__name" title={asset.name}>{asset.name}</span>
+                          <span className="lib-card__sub">{asset.generatedBy || asset.source || asset.projectName}</span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="app-panel p-4 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Stock Library</div>
-              <h3 className="text-lg font-semibold text-white">Unsplash</h3>
-              <p className="text-xs text-gray-400">Search hotlinked Unsplash photos and add selected images to this project.</p>
-            </div>
-            <span className={`app-pill ${unsplashReady ? 'app-pill--success' : 'app-pill--warning'}`}>
-              {unsplashReady ? 'API connected' : 'API key needed'}
-            </span>
-          </div>
-          <div className="grid gap-3 md:grid-cols-[1fr_150px_120px]">
-            <input
-              value={stockQuery}
-              onChange={(event) => setStockQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void handleSearchStock();
-              }}
-              placeholder="Search Unsplash stock photos..."
-              className="app-input"
-            />
-            <select
-              value={stockOrientation}
-              onChange={(event) => setStockOrientation(event.target.value as UnsplashOrientation)}
-              className="app-select"
-            >
-              <option value="landscape">Landscape</option>
-              <option value="portrait">Portrait</option>
-              <option value="squarish">Square</option>
-            </select>
-            <button
-              className="app-button app-primary text-xs"
-              onClick={handleSearchStock}
-              disabled={isStockLoading || !stockQuery.trim()}
-            >
-              {isStockLoading ? 'Searching' : 'Search'}
-            </button>
-          </div>
-          {!unsplashReady && (
-            <p className="text-xs text-amber-300">
-              Add your Unsplash Access Key in Settings. Use the Access Key only, not the Secret Key.
-            </p>
-          )}
-          {stockStatus && <p className="text-xs text-gray-300">{stockStatus}</p>}
-          {stockResults.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {stockResults.map((asset) => (
-                <div key={asset.id} className="border border-gray-800 bg-black/20 overflow-hidden flex flex-col">
-                  <button
-                    className="relative aspect-video bg-black text-left"
-                    onClick={() => setFullView({ url: asset.url, name: asset.name, kind: 'image' })}
-                  >
-                    <img src={asset.previewUrl} alt={asset.name} className="w-full h-full object-cover" loading="lazy" />
-                    <span className="absolute top-2 left-2 bg-black/70 text-[10px] text-white px-2 py-1">
-                      Unsplash
-                    </span>
-                  </button>
-                  <div className="p-3 space-y-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white line-clamp-2">{asset.name}</p>
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        Photo by{' '}
-                        <a className="text-indigo-300 hover:text-indigo-200" href={asset.photographerUrl} target="_blank" rel="noreferrer">
-                          {asset.photographerName}
-                        </a>{' '}
-                        on{' '}
-                        <a className="text-indigo-300 hover:text-indigo-200" href={asset.unsplashUrl} target="_blank" rel="noreferrer">
-                          Unsplash
-                        </a>
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="app-button app-secondary text-[10px]"
-                        onClick={() => void handleAddStockImage(asset)}
-                        disabled={!onAddStockImage}
-                      >
-                        Add to Library
-                      </button>
-                      <button
-                        className="app-button app-tertiary text-[10px]"
-                        onClick={() => void handleDownloadStockImage(asset)}
-                      >
-                        Download
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredAssets.map((asset) => {
-            const Icon = typeIcon(asset.kind);
-            return (
-              <div
-                key={asset.id}
-                className="app-card p-3 flex flex-col gap-3"
-                onDoubleClick={() => {
-                  if (asset.url) {
-                    setFullView({ url: asset.url, name: asset.name, kind: asset.kind });
-                  }
-                }}
-              >
-                <div className="relative aspect-video bg-black/60 rounded-lg overflow-hidden">
-                  {renderPreview(asset)}
-                  <div className="absolute top-2 left-2 bg-black/60 text-xs px-2 py-1 rounded-full flex items-center gap-1 text-gray-200">
-                    <Icon className="w-3 h-3" />
-                    {asset.kind}
-                  </div>
-                  {asset.generatedBy && (
-                    <div className="absolute bottom-2 left-2 bg-black/60 text-[10px] text-gray-200 px-2 py-1 rounded">
-                      {asset.generatedBy}
-                    </div>
-                  )}
-                  {asset.url && (
-                    <a
-                      href={asset.url}
-                      download
-                      className="absolute top-2 right-2 bg-black/60 text-xs px-2 py-1 rounded-full flex items-center gap-1 text-gray-200"
-                    >
-                      <DownloadIcon className="w-3 h-3" />
-                      Download
-                    </a>
-                  )}
-                </div>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold truncate">{asset.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{asset.projectName}</p>
-                  </div>
-                  <span className="app-pill">{asset.origin === 'current' ? 'Current' : 'Recent'}</span>
-                </div>
-                {(asset.detail || asset.source) && (
-                  <div className="text-xs text-gray-500 flex items-center justify-between gap-2">
-                    <span>{asset.detail || 'media'}</span>
-                    <span>{asset.source || 'local'}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  {(asset.kind === 'image' || asset.kind === 'reference') && asset.url && onEditImage && (
-                    <button
-                      onClick={() => onEditImage(asset)}
-                      className="flex-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 py-1.5 rounded flex items-center justify-center gap-1"
-                    >
-                      <EditIcon className="w-3 h-3" />
-                      Edit Image
-                    </button>
-                  )}
-                  {asset.kind === 'video' && asset.url && !isArchiveAsset(asset) && onEditVideo && (
-                    <button
-                      onClick={() => onEditVideo(asset)}
-                      className="flex-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 py-1.5 rounded flex items-center justify-center gap-1"
-                    >
-                      <EditIcon className="w-3 h-3" />
-                      Edit Video
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {!isLoading && filteredAssets.length === 0 && (
-          <div className="app-panel p-6 text-center text-gray-400">
-            No assets match your search.
-          </div>
-        )}
       </div>
 
-      {fullView && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-              <div className="text-sm font-semibold text-white">{fullView.name}</div>
-              <button onClick={() => setFullView(null)} className="text-gray-400 hover:text-white text-xl font-bold">&times;</button>
+      {selected && collection !== 'stock' && collection !== 'packs' && (
+        <aside className="lib-inspector">
+          <div className="lib-inspector__preview">{renderPreview(selected)}</div>
+          <div className="lib-inspector__body">
+            <div className="lib-inspector__name">{selected.name}</div>
+            <dl className="lib-inspector__facts">
+              <dt>Type</dt><dd>{selected.detail || selected.kind}</dd>
+              <dt>Project</dt><dd>{selected.projectName}</dd>
+              {selected.generatedBy && <><dt>Made with</dt><dd>{selected.generatedBy}</dd></>}
+              {selected.source && <><dt>Source</dt><dd>{selected.source}</dd></>}
+              {selected.origin === 'recent' && selected.projectPath && <><dt>Path</dt><dd className="truncate" title={selected.projectPath}>{selected.projectPath}</dd></>}
+            </dl>
+            <div className="lib-inspector__actions">
+              {selected.url && <button type="button" className="app-button app-primary text-xs" onClick={() => setQuickLook({ url: selected.url!, name: selected.name, kind: selected.kind })}>Quick look</button>}
+              {(selected.kind === 'image' || selected.kind === 'reference') && selected.url && onEditImage && <button type="button" className="app-button app-secondary text-xs" onClick={() => onEditImage(selected)}>Edit in Photo</button>}
+              {selected.kind === 'video' && selected.url && !isArchiveAsset(selected) && onEditVideo && <button type="button" className="app-button app-secondary text-xs" onClick={() => onEditVideo(selected)}>Open in Edit</button>}
+              {selected.url && <a href={selected.url} download className="app-button app-tertiary text-xs">Download</a>}
             </div>
-            <div className="p-4 flex-1 overflow-auto bg-black/70">
-              {fullView.kind === 'video' ? (
-                <video src={fullView.url} controls className="w-full max-h-[70vh] object-contain" />
-              ) : fullView.kind === 'audio' ? (
-                <audio src={fullView.url} controls className="w-full" />
-              ) : (
-                <img src={fullView.url} alt={fullView.name} className="w-full max-h-[70vh] object-contain" />
-              )}
+          </div>
+        </aside>
+      )}
+
+      {quickLook && (
+        <div className="lib-quicklook" onClick={() => setQuickLook(null)}>
+          <div className="lib-quicklook__panel" onClick={(e) => e.stopPropagation()}>
+            <div className="lib-quicklook__head">
+              <span>{quickLook.name}</span>
+              <button type="button" className="toolbar-button toolbar-button--icon" onClick={() => setQuickLook(null)} aria-label="Close"><XIcon className="w-4 h-4" /></button>
+            </div>
+            <div className="lib-quicklook__body">
+              {quickLook.kind === 'video' ? <video src={quickLook.url} controls autoPlay /> : quickLook.kind === 'audio' ? <audio src={quickLook.url} controls /> : <img src={quickLook.url} alt="" />}
             </div>
           </div>
         </div>

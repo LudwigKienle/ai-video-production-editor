@@ -2,6 +2,7 @@ import { MediaItem } from '../types';
 import { getVideoDuration } from '../utils/helpers';
 import { recordUsage } from '../utils/usageTracker';
 import { byokProxyJson, shouldUseByokProxy } from './byokProxyClient';
+import { startTask, type TaskKind } from './taskCenter';
 
 const MODELS = {
     GROK_IMAGINE_IMAGE_T2I: 'xai/grok-imagine-image',
@@ -29,7 +30,20 @@ const MODELS = {
     PIXVERSE_C1_REFERENCE_TO_VIDEO: 'fal-ai/pixverse/c1/reference-to-video',
     CREATIFY_AURORA: 'fal-ai/creatify/aurora',
     GROK_IMAGINE_I2V: 'xai/grok-imagine-video/image-to-video',
+    SEEDANCE_25_T2V: 'bytedance/seedance-2.5/text-to-video',
+    SEEDANCE_25_I2V: 'bytedance/seedance-2.5/image-to-video',
+    SEEDANCE_25_REFERENCE: 'bytedance/seedance-2.5/reference-to-video',
+    SEEDREAM_V5_PRO_T2I: 'bytedance/seedream/v5/pro/text-to-image',
+    SEEDREAM_V5_PRO_EDIT: 'bytedance/seedream/v5/pro/edit',
+    KREA_2_LARGE_T2I: 'krea/v2/large/text-to-image',
+    KREA_2_TURBO_T2I: 'fal-ai/krea-2/turbo',
+    IDEOGRAM_V4_T2I: 'ideogram/v4',
+    HUNYUAN3D_V3_IMAGE_TO_3D: 'fal-ai/hunyuan3d-v3/image-to-3d',
+    TRELLIS_2_IMAGE_TO_3D: 'fal-ai/trellis-2',
+    RODIN_V25_IMAGE_TO_3D: 'fal-ai/hyper3d/rodin/v2.5',
 };
+
+export const FAL_MODEL_IDS = MODELS;
 
 const getFalKeyOptional = () => {
     return localStorage.getItem('fal_api_key');
@@ -172,7 +186,28 @@ const toOptionalInteger = (value: number | undefined) => {
     return Math.round(value as number);
 };
 
-const runFal = async (model: string, input: Record<string, any>) => {
+
+const describeFalModel = (model: string) => {
+    const tail = model.split('/').filter(Boolean);
+    const name = tail.slice(-3).join(' / ').replace(/-/g, ' ');
+    return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+const falTaskKind = (model: string): TaskKind => {
+    const normalized = model.toLowerCase();
+    if (normalized.includes('3d') || normalized.includes('trellis') || normalized.includes('rodin')) return '3d';
+    const kind = inferFalKind(model);
+    return kind === 'video' ? 'video' : 'image';
+};
+
+const falEstimateMs = (model: string) => {
+    const kind = falTaskKind(model);
+    if (kind === 'video') return 150_000;
+    if (kind === '3d') return 120_000;
+    return 25_000;
+};
+
+const runFalInner = async (model: string, input: Record<string, any>) => {
     const token = getFalKeyOptional();
     const url = `https://fal.run/${model}`;
     if (!token && shouldUseByokProxy('fal')) {
@@ -221,10 +256,23 @@ type FalQueueStatus = {
     error?: string;
 };
 
-const runFalQueue = async (
+const runFal = async (model: string, input: Record<string, any>) => {
+    const task = startTask({ label: describeFalModel(model), kind: falTaskKind(model), provider: 'fal', estimatedMs: falEstimateMs(model), message: 'Generating…' });
+    try {
+        const output = await runFalInner(model, input);
+        task.complete();
+        return output;
+    } catch (error) {
+        task.fail(error);
+        throw error;
+    }
+};
+
+const runFalQueueInner = async (
     model: string,
     input: Record<string, any>,
-    opts?: { pollIntervalMs?: number; maxChecks?: number }
+    opts?: { pollIntervalMs?: number; maxChecks?: number },
+    onStatus?: (status: string, checks: number) => void,
 ) => {
     const token = getFalKeyOptional();
     const url = `https://queue.fal.run/${model}`;
@@ -284,6 +332,7 @@ const runFalQueue = async (
             throw new Error(`FAL Queue failed (${status}).`);
         }
         checks += 1;
+        onStatus?.(status, checks);
         await sleep(pollIntervalMs);
 
         const statusBody = token
@@ -360,6 +409,24 @@ const runFalQueue = async (
     }
 
     return resultResponse.json();
+};
+
+const runFalQueue = async (
+    model: string,
+    input: Record<string, any>,
+    opts?: { pollIntervalMs?: number; maxChecks?: number }
+) => {
+    const task = startTask({ label: describeFalModel(model), kind: falTaskKind(model), provider: 'fal', estimatedMs: falEstimateMs(model), message: 'Queued…' });
+    try {
+        const output = await runFalQueueInner(model, input, opts, (status) => {
+            task.update({ message: status === 'IN_PROGRESS' ? 'Rendering…' : status === 'IN_QUEUE' ? 'Waiting in queue…' : status ? status.toLowerCase() : 'Working…' });
+        });
+        task.complete();
+        return output;
+    } catch (error) {
+        task.fail(error);
+        throw error;
+    }
 };
 
 export const editImageWithFalQwenMultiAngle = async (
@@ -1913,4 +1980,430 @@ export const generateVideoWithFalHappyHorseImage = async (
         source: 'generated',
         duration: resolvedDuration,
     };
+};
+
+
+// ---------------------------------------------------------------------------
+// Seedance 2.5 (ByteDance) - text / image / reference to video, 4-30s, up to 1080p
+// ---------------------------------------------------------------------------
+
+export type FalSeedance25Resolution = '480p' | '720p' | '1080p';
+export type FalSeedance25AspectRatio = FalSeedanceVideoAspectRatio;
+
+const normalizeFalSeedance25Duration = (value: number | 'auto' | undefined): 'auto' | string => {
+    if (value === 'auto' || value === undefined) return 'auto';
+    const normalized = clampDurationRange(typeof value === 'number' ? value : undefined, 10, 4, 30);
+    return String(normalized);
+};
+
+const finalizeFalSeedance25Video = async (
+    output: any,
+    model: string,
+    prompt: string,
+    duration: 'auto' | string,
+    label: string,
+    idPrefix: string,
+): Promise<MediaItem> => {
+    const urls = Array.from(new Set(collectFalVideoUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL ${label} returned no video.`);
+    }
+    const videoUrl = urls[0];
+    const fallbackDuration = duration === 'auto' ? 10 : Number(duration);
+    let resolvedDuration = fallbackDuration;
+    try {
+        resolvedDuration = await getVideoDuration(videoUrl);
+    } catch {
+        resolvedDuration = fallbackDuration;
+    }
+    recordUsage({
+        provider: 'fal',
+        model,
+        kind: 'video',
+        units: resolvedDuration || fallbackDuration,
+        unitLabel: 'second',
+        note: `FAL ${label}`,
+    });
+    return {
+        id: `${idPrefix}-${Date.now()}`,
+        name: `${idPrefix.replace(/-/g, '_')}_${prompt.slice(0, 15) || 'clip'}.mp4`,
+        type: 'video',
+        url: videoUrl,
+        source: 'generated',
+        generatedBy: label,
+        prompt,
+        duration: resolvedDuration,
+    };
+};
+
+export const generateVideoWithFalSeedance25Text = async (
+    prompt: string,
+    opts?: {
+        duration?: number | 'auto';
+        aspectRatio?: FalSeedance25AspectRatio;
+        resolution?: FalSeedance25Resolution;
+        generateAudio?: boolean;
+        highBitrate?: boolean;
+    }
+): Promise<MediaItem> => {
+    const duration = normalizeFalSeedance25Duration(opts?.duration);
+    const input: Record<string, any> = {
+        prompt,
+        resolution: opts?.resolution || '720p',
+        duration,
+        aspect_ratio: opts?.aspectRatio || 'auto',
+        generate_audio: opts?.generateAudio ?? true,
+        bitrate_mode: opts?.highBitrate ? 'high' : 'standard',
+    };
+    const output = await runFalQueue(MODELS.SEEDANCE_25_T2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finalizeFalSeedance25Video(output, MODELS.SEEDANCE_25_T2V, prompt, duration, 'Seedance 2.5 text-to-video', 'fal-seedance-25-t2v');
+};
+
+export const generateVideoWithFalSeedance25Image = async (
+    prompt: string,
+    image: { base64: string; mimeType: string },
+    opts?: {
+        endImage?: { base64: string; mimeType: string };
+        duration?: number | 'auto';
+        resolution?: FalSeedance25Resolution;
+        generateAudio?: boolean;
+        highBitrate?: boolean;
+    }
+): Promise<MediaItem> => {
+    const duration = normalizeFalSeedance25Duration(opts?.duration);
+    const input: Record<string, any> = {
+        prompt,
+        image_url: toDataUri(image),
+        resolution: opts?.resolution || '720p',
+        duration,
+        aspect_ratio: 'auto',
+        generate_audio: opts?.generateAudio ?? true,
+        bitrate_mode: opts?.highBitrate ? 'high' : 'standard',
+    };
+    if (opts?.endImage) {
+        input.end_image_url = toDataUri(opts.endImage);
+    }
+    const output = await runFalQueue(MODELS.SEEDANCE_25_I2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finalizeFalSeedance25Video(output, MODELS.SEEDANCE_25_I2V, prompt, duration, 'Seedance 2.5 image-to-video', 'fal-seedance-25-i2v');
+};
+
+export const generateVideoWithFalSeedance25Reference = async (
+    prompt: string,
+    opts?: {
+        images?: Array<{ base64: string; mimeType: string }>;
+        videos?: Array<{ base64: string; mimeType: string }>;
+        audios?: Array<{ base64: string; mimeType: string }>;
+        duration?: number | 'auto';
+        aspectRatio?: FalSeedance25AspectRatio;
+        resolution?: FalSeedance25Resolution;
+        generateAudio?: boolean;
+        highBitrate?: boolean;
+    }
+): Promise<MediaItem> => {
+    const images = Array.isArray(opts?.images) ? opts.images.slice(0, 30) : [];
+    const videos = Array.isArray(opts?.videos) ? opts.videos.slice(0, 10) : [];
+    const audios = Array.isArray(opts?.audios) ? opts.audios.slice(0, 10) : [];
+    if (images.length === 0 && videos.length === 0) {
+        throw new Error('Seedance 2.5 reference mode needs at least one image or video reference.');
+    }
+    const duration = normalizeFalSeedance25Duration(opts?.duration);
+    const input: Record<string, any> = {
+        prompt,
+        resolution: opts?.resolution || '720p',
+        duration,
+        aspect_ratio: opts?.aspectRatio || 'auto',
+        generate_audio: opts?.generateAudio ?? true,
+        bitrate_mode: opts?.highBitrate ? 'high' : 'standard',
+    };
+    if (images.length > 0) input.image_urls = images.map((image) => toDataUri(image));
+    if (videos.length > 0) input.video_urls = videos.map((video) => toDataUri(video));
+    if (audios.length > 0) input.audio_urls = audios.map((audio) => toDataUri(audio));
+    const output = await runFalQueue(MODELS.SEEDANCE_25_REFERENCE, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finalizeFalSeedance25Video(output, MODELS.SEEDANCE_25_REFERENCE, prompt, duration, 'Seedance 2.5 reference-to-video', 'fal-seedance-25-ref');
+};
+
+// ---------------------------------------------------------------------------
+// Image models: Seedream 5.0 Pro, Krea 2, Ideogram 4
+// ---------------------------------------------------------------------------
+
+type FalStandardImageAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
+
+const mapStandardImageSizePreset = (aspectRatio?: FalStandardImageAspectRatio) => {
+    switch (aspectRatio) {
+        case '16:9':
+            return 'landscape_16_9';
+        case '9:16':
+            return 'portrait_16_9';
+        case '4:3':
+            return 'landscape_4_3';
+        case '3:4':
+            return 'portrait_4_3';
+        case '1:1':
+        default:
+            return 'square_hd';
+    }
+};
+
+const finalizeFalImages = (
+    output: any,
+    model: string,
+    prompt: string,
+    label: string,
+    idPrefix: string,
+    extension: 'png' | 'jpg' = 'png',
+): MediaItem[] => {
+    const urls = Array.from(new Set(collectFalImageUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL ${label} returned no images.`);
+    }
+    recordUsage({
+        provider: 'fal',
+        model,
+        kind: 'image',
+        units: urls.length,
+        unitLabel: 'image',
+        note: `FAL ${label}`,
+    });
+    const stamp = Date.now();
+    return urls.map((url, index) => ({
+        id: `${idPrefix}-${stamp}-${index}`,
+        name: `${idPrefix.replace(/-/g, '_')}_${prompt.slice(0, 16) || 'image'}${index > 0 ? `_${index + 1}` : ''}.${extension}`,
+        type: 'image' as const,
+        url,
+        source: 'generated' as const,
+        generatedBy: label,
+        prompt,
+    }));
+};
+
+export const generateImageWithFalSeedreamV5Pro = async (
+    prompt: string,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; resolution?: '1K' | '2K'; numOutputs?: number; outputFormat?: 'png' | 'jpeg' }
+): Promise<MediaItem> => {
+    const input: Record<string, any> = {
+        prompt,
+        image_size: opts?.aspectRatio ? mapStandardImageSizePreset(opts.aspectRatio) : (opts?.resolution === '1K' ? 'auto_1K' : 'auto_2K'),
+        num_images: opts?.numOutputs || 1,
+        output_format: opts?.outputFormat || 'png',
+    };
+    const output = await runFalQueue(MODELS.SEEDREAM_V5_PRO_T2I, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, MODELS.SEEDREAM_V5_PRO_T2I, prompt, 'Seedream 5.0 Pro text-to-image', 'fal-seedream-v5-pro-t2i')[0];
+};
+
+export const editImageWithFalSeedreamV5Pro = async (
+    prompt: string,
+    images: Array<{ base64: string; mimeType: string }>,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; numOutputs?: number; outputFormat?: 'png' | 'jpeg' }
+): Promise<MediaItem[]> => {
+    const refs = images.slice(0, 10);
+    if (refs.length === 0) {
+        throw new Error('Seedream 5.0 Pro Edit needs at least one reference image.');
+    }
+    const input: Record<string, any> = {
+        prompt,
+        image_urls: refs.map((image) => toDataUri(image)),
+        image_size: opts?.aspectRatio ? mapStandardImageSizePreset(opts.aspectRatio) : 'auto_2K',
+        num_images: opts?.numOutputs || 1,
+        output_format: opts?.outputFormat || 'png',
+    };
+    const output = await runFalQueue(MODELS.SEEDREAM_V5_PRO_EDIT, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, MODELS.SEEDREAM_V5_PRO_EDIT, prompt, 'Seedream 5.0 Pro edit', 'fal-seedream-v5-pro-edit');
+};
+
+export type FalKrea2Variant = 'large' | 'turbo';
+export type FalKrea2AspectRatio = '1:1' | '4:3' | '3:2' | '16:9' | '2.35:1' | '4:5' | '2:3' | '9:16';
+
+export const generateImageWithFalKrea2 = async (
+    prompt: string,
+    opts?: {
+        variant?: FalKrea2Variant;
+        aspectRatio?: FalKrea2AspectRatio;
+        creativity?: 'raw' | 'low' | 'medium' | 'high';
+        styleReferences?: Array<{ base64: string; mimeType: string }>;
+        numOutputs?: number;
+        seed?: number;
+    }
+): Promise<MediaItem> => {
+    const variant = opts?.variant || 'large';
+    if (variant === 'turbo') {
+        const ratio = opts?.aspectRatio || '16:9';
+        const preset = ratio === '9:16' ? 'portrait_16_9'
+            : ratio === '4:3' ? 'landscape_4_3'
+                : ratio === '1:1' ? 'square_hd'
+                    : ratio === '2:3' || ratio === '4:5' ? 'portrait_4_3'
+                        : 'landscape_16_9';
+        const input: Record<string, any> = {
+            prompt,
+            image_size: preset,
+            num_images: opts?.numOutputs || 1,
+            output_format: 'png',
+        };
+        if (typeof opts?.seed === 'number') input.seed = opts.seed;
+        const output = await runFalQueue(MODELS.KREA_2_TURBO_T2I, input, { pollIntervalMs: 2000, maxChecks: 90 });
+        return finalizeFalImages(output, MODELS.KREA_2_TURBO_T2I, prompt, 'Krea 2 Turbo text-to-image', 'fal-krea-2-turbo')[0];
+    }
+    const input: Record<string, any> = {
+        prompt,
+        aspect_ratio: opts?.aspectRatio || '16:9',
+        creativity: opts?.creativity || 'medium',
+    };
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    if (Array.isArray(opts?.styleReferences) && opts.styleReferences.length > 0) {
+        input.image_style_references = opts.styleReferences.slice(0, 10).map((image) => ({
+            url: toDataUri(image),
+            strength: 1,
+        }));
+    }
+    const output = await runFalQueue(MODELS.KREA_2_LARGE_T2I, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, MODELS.KREA_2_LARGE_T2I, prompt, 'Krea 2 Large text-to-image', 'fal-krea-2-large')[0];
+};
+
+export type FalIdeogramRenderingSpeed = 'TURBO' | 'BALANCED' | 'QUALITY';
+
+export const generateImageWithFalIdeogramV4 = async (
+    prompt: string,
+    opts?: {
+        aspectRatio?: FalStandardImageAspectRatio;
+        renderingSpeed?: FalIdeogramRenderingSpeed;
+        promptExpansion?: 'None' | 'Medium' | 'Large';
+        numOutputs?: number;
+        seed?: number;
+    }
+): Promise<MediaItem> => {
+    const input: Record<string, any> = {
+        prompt,
+        image_size: mapStandardImageSizePreset(opts?.aspectRatio),
+        rendering_speed: opts?.renderingSpeed || 'BALANCED',
+        expansion_model: opts?.promptExpansion || 'Medium',
+        num_images: opts?.numOutputs || 1,
+        output_format: 'png',
+    };
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.IDEOGRAM_V4_T2I, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, MODELS.IDEOGRAM_V4_T2I, prompt, 'Ideogram 4 text-to-image', 'fal-ideogram-v4')[0];
+};
+
+// ---------------------------------------------------------------------------
+// Image-to-3D (blockouts): Hunyuan3D v3, Trellis 2, Rodin 2.5
+// ---------------------------------------------------------------------------
+
+export type FalImageTo3dEngine = 'hunyuan3d-v3' | 'trellis-2' | 'rodin-v2.5';
+
+export type FalImageTo3dResult = MediaItem & {
+    meshUrl: string;
+    thumbnailUrl?: string;
+    engine: FalImageTo3dEngine;
+    format: 'glb';
+};
+
+const pickFalMeshUrl = (output: any): { meshUrl: string | null; thumbnailUrl?: string } => {
+    if (!output || typeof output !== 'object') return { meshUrl: null };
+    const candidates = [
+        output.model_glb?.url,
+        output.model_urls?.glb?.url,
+        output.model_mesh?.url,
+        Array.isArray(output.model_meshes) ? output.model_meshes[0]?.url : undefined,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+    return {
+        meshUrl: candidates[0] || null,
+        thumbnailUrl: typeof output.thumbnail?.url === 'string' ? output.thumbnail.url : undefined,
+    };
+};
+
+const finalizeFalMesh = (output: any, engine: FalImageTo3dEngine, model: string, label: string, name: string): FalImageTo3dResult => {
+    const { meshUrl, thumbnailUrl } = pickFalMeshUrl(output);
+    if (!meshUrl) {
+        throw new Error(`FAL ${label} returned no mesh.`);
+    }
+    recordUsage({
+        provider: 'fal',
+        model,
+        kind: 'edit',
+        units: 1,
+        unitLabel: 'request',
+        note: `FAL ${label}`,
+    });
+    return {
+        id: `fal-3d-${engine}-${Date.now()}`,
+        name: `${name.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 40) || 'blockout'}.glb`,
+        type: 'image',
+        url: meshUrl,
+        source: 'generated',
+        generatedBy: label,
+        meshUrl,
+        thumbnailUrl,
+        engine,
+        format: 'glb',
+    };
+};
+
+export const generate3dWithFalHunyuan3dV3 = async (
+    image: { base64: string; mimeType: string },
+    opts?: {
+        name?: string;
+        lowPoly?: boolean;
+        geometryOnly?: boolean;
+        faceCount?: number;
+        enablePbr?: boolean;
+        backImage?: { base64: string; mimeType: string };
+        leftImage?: { base64: string; mimeType: string };
+        rightImage?: { base64: string; mimeType: string };
+    }
+): Promise<FalImageTo3dResult> => {
+    const input: Record<string, any> = {
+        input_image_url: toDataUri(image),
+        generate_type: opts?.geometryOnly ? 'Geometry' : opts?.lowPoly ? 'LowPoly' : 'Normal',
+        polygon_type: 'triangle',
+        enable_pbr: opts?.enablePbr ?? !opts?.lowPoly,
+    };
+    if (typeof opts?.faceCount === 'number') {
+        input.face_count = Math.min(1500000, Math.max(40000, Math.round(opts.faceCount)));
+    }
+    if (opts?.backImage) input.back_image_url = toDataUri(opts.backImage);
+    if (opts?.leftImage) input.left_image_url = toDataUri(opts.leftImage);
+    if (opts?.rightImage) input.right_image_url = toDataUri(opts.rightImage);
+    const output = await runFalQueue(MODELS.HUNYUAN3D_V3_IMAGE_TO_3D, input, { pollIntervalMs: 4000, maxChecks: 240 });
+    return finalizeFalMesh(output, 'hunyuan3d-v3', MODELS.HUNYUAN3D_V3_IMAGE_TO_3D, 'Hunyuan3D v3 image-to-3D', opts?.name || 'hunyuan3d_blockout');
+};
+
+export const generate3dWithFalTrellis2 = async (
+    image: { base64: string; mimeType: string },
+    opts?: { name?: string; resolution?: 512 | 1024 | 1536; textureSize?: 1024 | 2048 | 4096; decimationTarget?: number; seed?: number }
+): Promise<FalImageTo3dResult> => {
+    const input: Record<string, any> = {
+        image_url: toDataUri(image),
+        resolution: opts?.resolution || 1024,
+        texture_size: opts?.textureSize || 2048,
+    };
+    if (typeof opts?.decimationTarget === 'number') input.decimation_target = Math.max(5000, Math.round(opts.decimationTarget));
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.TRELLIS_2_IMAGE_TO_3D, input, { pollIntervalMs: 4000, maxChecks: 240 });
+    return finalizeFalMesh(output, 'trellis-2', MODELS.TRELLIS_2_IMAGE_TO_3D, 'Trellis 2 image-to-3D', opts?.name || 'trellis2_blockout');
+};
+
+export const generate3dWithFalRodinV25 = async (
+    images: Array<{ base64: string; mimeType: string }>,
+    opts?: {
+        name?: string;
+        prompt?: string;
+        tier?: 'Gen-2.5-Low' | 'Gen-2.5-Medium' | 'Gen-2.5-High';
+        material?: 'PBR' | 'Shaded' | 'All' | 'None';
+        seed?: number;
+    }
+): Promise<FalImageTo3dResult> => {
+    const refs = images.slice(0, 5);
+    if (refs.length === 0) {
+        throw new Error('Rodin 2.5 needs at least one reference image.');
+    }
+    const input: Record<string, any> = {
+        prompt: opts?.prompt || '',
+        image_urls: refs.map((image) => toDataUri(image)),
+        tier: opts?.tier || 'Gen-2.5-Medium',
+        geometry_file_format: 'glb',
+        material: opts?.material || 'PBR',
+        quality_mesh_option: 'Auto',
+    };
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.RODIN_V25_IMAGE_TO_3D, input, { pollIntervalMs: 5000, maxChecks: 240 });
+    return finalizeFalMesh(output, 'rodin-v2.5', MODELS.RODIN_V25_IMAGE_TO_3D, 'Rodin 2.5 image-to-3D', opts?.name || 'rodin_blockout');
 };

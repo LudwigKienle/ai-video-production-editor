@@ -34,6 +34,17 @@ window.addEventListener('unhandledrejection', (event) => {
   renderFatalError(event.reason);
 });
 
+const applyPlatformAttributes = () => {
+  const root = document.documentElement;
+  const ua = navigator.userAgent.toLowerCase();
+  const isElectron = ua.includes(' electron/') || Boolean((window as unknown as { electron?: unknown }).electron);
+  const platform = ua.includes('mac') ? 'mac' : ua.includes('win') ? 'windows' : 'linux';
+  root.dataset.runtime = isElectron ? 'electron' : 'web';
+  root.dataset.platform = platform;
+};
+
+applyPlatformAttributes();
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   renderFatalError('Could not find root element to mount to');

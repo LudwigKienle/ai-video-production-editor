@@ -744,9 +744,15 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
   return (
     <div className="studio-workspace h-full w-full bg-gray-900 text-white flex flex-col">
       <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold">Photo Studio</h2>
-          <span className="text-xs text-gray-400">Brush, lasso, stamp, neural filters, inpaint</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <h2 className="text-lg font-bold">Photo</h2>
+          <div className="toolbar-segmented" role="toolbar" aria-label="Quick actions">
+            <button type="button" className={`toolbar-segmented__item ${tool === 'brush' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => { setTool('brush'); document.getElementById('photo-inpaint')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }} title="Paint a mask, then describe what to change">Retouch</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-expand')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Extend the canvas and fill it in">Expand</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-neural')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="One-click neural looks">Neural</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-adjust')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Exposure, contrast, colour">Adjust</button>
+            <button type="button" className="toolbar-segmented__item" onClick={() => document.getElementById('photo-crop')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })} title="Crop and reframe">Crop</button>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <input
@@ -802,7 +808,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
           </div>
 
           <div>
-            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Inpaint</h3>
+            <h3 id="photo-inpaint" className="text-xs uppercase text-gray-400 font-semibold mb-2">Inpaint</h3>
             <textarea
               value={inpaintPrompt}
               onChange={(e) => setInpaintPrompt(e.target.value)}
@@ -866,7 +872,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
           </div>
 
           <div>
-            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Image Expand</h3>
+            <h3 id="photo-expand" className="text-xs uppercase text-gray-400 font-semibold mb-2">Image Expand</h3>
             <label className="block text-xs text-gray-400 mb-1">Padding (px)</label>
             <input
               type="number"
@@ -1025,7 +1031,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
           )}
 
           <div>
-            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Adjustments</h3>
+            <h3 id="photo-adjust" className="text-xs uppercase text-gray-400 font-semibold mb-2">Adjustments</h3>
             <div className="space-y-2">
               {Object.entries(adjustments).map(([key, value]) => {
                 const config = ADJUSTMENT_CONFIG[key];
@@ -1057,7 +1063,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
           </div>
 
           <div>
-            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Neural Filters (Beta)</h3>
+            <h3 id="photo-neural" className="text-xs uppercase text-gray-400 font-semibold mb-2">Neural Filters (Beta)</h3>
             <div className="space-y-3 bg-gray-800/60 border border-gray-700 rounded-lg p-3">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block flex justify-between">
@@ -1152,7 +1158,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
           </div>
 
           <div>
-            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Crop</h3>
+            <h3 id="photo-crop" className="text-xs uppercase text-gray-400 font-semibold mb-2">Crop</h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <input
                 type="number"

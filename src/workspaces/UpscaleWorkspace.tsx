@@ -10,6 +10,8 @@ import {
   upscaleVideoWithTopaz,
 } from '../services/replicateService';
 import { toLtxVideoUri, upscaleVideoToAcesHdrWithLtx } from '../services/ltxService';
+import { trackTask } from '../services/taskCenter';
+import { RUNWAY_RUBY_OUTPUT_FORMATS, convertVideoToHdrWithRunwayRuby, hasRunwayApiKey, type RunwayRubyOutputFormat, type RunwayRubyProresProfile } from '../services/runwayService';
 import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { useLibraryAssets } from '../hooks/useLibraryAssets';
 
@@ -62,6 +64,9 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   currentProjectPath,
 }) => {
   const [mode, setMode] = useState<UpscaleMode>('resolution');
+  const [colorEngine, setColorEngine] = useState<'ltx' | 'runway-ruby'>('ltx');
+  const [rubyOutputFormat, setRubyOutputFormat] = useState<RunwayRubyOutputFormat>('hdr10');
+  const [rubyProresProfile, setRubyProresProfile] = useState<RunwayRubyProresProfile>('422 HQ');
   const [modelId, setModelId] = useState<UpscaleModelId>('crystal');
   const [scaleValue, setScaleValue] = useState<number>(4);
   const [resolutionPreset, setResolutionPreset] = useState<string>('auto');
@@ -176,13 +181,23 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
         return;
       }
       setIsRunning(true);
-      setStatus('Submitting LTX ACES HDR job...');
+      setStatus(colorEngine === 'runway-ruby' ? 'Submitting to Runway Ruby...' : 'Submitting LTX ACES HDR job...');
 
       try {
-        const item = await upscaleVideoToAcesHdrWithLtx(ltxInput);
+        const item = colorEngine === 'runway-ruby'
+          ? await convertVideoToHdrWithRunwayRuby({
+            videoUri: ltxInput.videoUri,
+            sourceName: ltxInput.sourceName,
+            outputFormat: rubyOutputFormat,
+            proresProfile: rubyProresProfile,
+            onStatus: (message) => setStatus(message),
+          })
+          : await trackTask({ label: 'LTX Color Science Upscale', kind: 'video', provider: 'ltx', estimatedMs: 240_000, message: 'Rendering ACES HDR…' }, () => upscaleVideoToAcesHdrWithLtx(ltxInput));
         onAddGeneratedMedia(item);
         setGenerated((prev) => [item, ...prev].slice(0, 12));
-        setStatus('Color Science Upscale completed. EXR frame archive is ready.');
+        setStatus(colorEngine === 'runway-ruby'
+          ? 'Runway Ruby HDR conversion completed. The file is in your Library.'
+          : 'Color Science Upscale completed. EXR frame archive is ready.');
       } catch (error) {
         setStatus(error instanceof Error ? error.message : 'Color Science Upscale failed.');
       } finally {
@@ -351,6 +366,71 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
                 </div>
               </>
             ) : (
+              <div className="space-y-3">
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] text-gray-400">Engine</label>
+                <div className="inline-flex w-full rounded-lg border border-gray-700 bg-gray-950/70 p-1 text-sm mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setColorEngine('ltx')}
+                    className={`flex-1 rounded-md px-3 py-2 font-medium transition-colors ${colorEngine === 'ltx' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    LTX ACES HDR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setColorEngine('runway-ruby')}
+                    className={`flex-1 rounded-md px-3 py-2 font-medium transition-colors ${colorEngine === 'runway-ruby' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    Runway Ruby
+                  </button>
+                </div>
+              </div>
+              {colorEngine === 'runway-ruby' ? (
+                <div className="rounded-lg border border-rose-700/50 bg-rose-950/20 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-rose-300">Runway Ruby</div>
+                      <div className="text-sm font-semibold text-white">SDR to true HDR colour science</div>
+                    </div>
+                    {!hasRunwayApiKey() && (
+                      <span className="text-[10px] text-amber-300">Add your Runway API key in Settings.</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] text-gray-400">Output</label>
+                    <select
+                      value={rubyOutputFormat}
+                      onChange={(event) => setRubyOutputFormat(event.target.value as RunwayRubyOutputFormat)}
+                      className="app-select mt-2"
+                    >
+                      {RUNWAY_RUBY_OUTPUT_FORMATS.map((format) => (
+                        <option key={format.id} value={format.id}>{format.label}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {RUNWAY_RUBY_OUTPUT_FORMATS.find((format) => format.id === rubyOutputFormat)?.hint}
+                    </p>
+                  </div>
+                  {rubyOutputFormat === 'hdr_prores' && (
+                    <div>
+                      <label className="text-xs uppercase tracking-[0.2em] text-gray-400">ProRes profile</label>
+                      <select
+                        value={rubyProresProfile}
+                        onChange={(event) => setRubyProresProfile(event.target.value as RunwayRubyProresProfile)}
+                        className="app-select mt-2"
+                      >
+                        <option value="422">ProRes 422</option>
+                        <option value="422 HQ">ProRes 422 HQ</option>
+                        <option value="4444">ProRes 4444</option>
+                      </select>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-gray-500">
+                    Keeps source pixels and audio, expands brightness and colour to BT.2020. Inputs up to 30s and 4096px per side.
+                  </p>
+                </div>
+              ) : (
               <div className="rounded-lg border border-cyan-700/50 bg-cyan-950/20 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -374,6 +454,8 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
                   </div>
                 </div>
                 <p className="text-xs text-gray-400">Output preserves the input resolution. 1440p inputs are limited to about 4 seconds, 4K inputs to about 2 seconds.</p>
+              </div>
+              )}
               </div>
             )}
 

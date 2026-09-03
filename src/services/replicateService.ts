@@ -3,6 +3,7 @@ import { MediaItem } from '../types';
 import { getVideoDuration } from '../utils/helpers';
 import { recordUsage } from '../utils/usageTracker';
 import { byokProxyBinaryUrl, byokProxyJson, shouldUseByokProxy } from './byokProxyClient';
+import { startTask, type TaskKind } from './taskCenter';
 
 // Models
 const MODELS = {
@@ -478,7 +479,7 @@ const runReplicateViaByok = async (model: string, input: any): Promise<any> => {
     return waitForPredictionViaByok(prediction.urls.get);
 };
 
-const runReplicate = async (model: string, input: any): Promise<any> => {
+const runReplicateInner = async (model: string, input: any): Promise<any> => {
     const token = getReplicateKeyOptional();
     if (!token && shouldUseByokProxy('replicate')) {
         return runReplicateViaByok(model, input);
@@ -528,6 +529,32 @@ const runReplicate = async (model: string, input: any): Promise<any> => {
         const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
         await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 500));
         attempt += 1;
+    }
+};
+
+const describeReplicateModel = (model: string) => {
+    const name = model.split('/').pop() || model;
+    return name.split(/[@:]/)[0].replace(/-/g, ' ').replace(/^\w/, (char) => char.toUpperCase());
+};
+
+const replicateTaskKind = (model: string): TaskKind => {
+    const normalized = model.toLowerCase();
+    if (normalized.includes('3d') || normalized.includes('rodin')) return '3d';
+    if (normalized.includes('video') || normalized.includes('veo') || normalized.includes('kling') || normalized.includes('wan') || normalized.includes('seedance') || normalized.includes('ltx')) return 'video';
+    if (normalized.includes('whisper') || normalized.includes('audio') || normalized.includes('music')) return 'audio';
+    return 'image';
+};
+
+const runReplicate = async (model: string, input: any): Promise<any> => {
+    const kind = replicateTaskKind(model);
+    const task = startTask({ label: describeReplicateModel(model), kind, provider: 'replicate', estimatedMs: kind === 'video' ? 120_000 : 30_000, message: 'Running…' });
+    try {
+        const output = await runReplicateInner(model, input);
+        task.complete();
+        return output;
+    } catch (error) {
+        task.fail(error);
+        throw error;
     }
 };
 

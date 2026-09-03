@@ -39,6 +39,10 @@ import {
   generateImageWithFalNanoBanana2,
   generateImageWithFalQwenImageMax,
   generateImageWithFalSeedreamV5Lite,
+  generateImageWithFalSeedreamV5Pro,
+  editImageWithFalSeedreamV5Pro,
+  generateImageWithFalKrea2,
+  generateImageWithFalIdeogramV4,
   generateImageWithFalWanV27Pro
 } from '../services/falAiService';
 import { generateImageWithGrok } from '../services/xaiService';
@@ -50,6 +54,8 @@ import { LensSelection } from '../components/LensSelection';
 import { CAMERA_PRESETS, LENS_PRESETS } from '../data/cameraData';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
 import { formatSmartModelEta, routeSmartModel, type SmartModelCandidate, type SmartModelRoute } from '../utils/smartModelRouter';
+import { structurePromptForModel } from '../utils/modelPromptGuides';
+import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 
 import { StyleSelection } from '../components/StyleSelection';
 import { STYLE_PRESETS } from '../data/styleData';
@@ -95,6 +101,7 @@ interface ImageGenerationWorkspaceProps {
     credits?: number;
   }) => Promise<{ ok: boolean; message?: string }>;
   onAnimateImage?: (item: MediaItem) => void;
+  productionFormatId?: ProductionFormatId | null;
 }
 
 type ImageModelId =
@@ -109,6 +116,11 @@ type ImageModelId =
   | 'seedream'
   | 'wan-v27-image-pro-replicate'
   | 'seedream-v5-lite-fal'
+  | 'seedream-v5-pro-fal'
+  | 'seedream-v5-pro-fal-edit'
+  | 'krea-2-large-fal'
+  | 'krea-2-turbo-fal'
+  | 'ideogram-v4-fal'
   | 'wan-v27-pro-fal'
   | 'wan-v27-pro-edit-fal'
   | 'nano-banana-2-fal'
@@ -137,6 +149,11 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'seedream', label: 'Seedream 4.5', provider: 'Replicate', icon: logoSeedream, goodFor: 'Exceptional cinematic realism and atmospheric depth' },
   { id: 'wan-v27-image-pro-replicate', label: 'WAN 2.7 Image Pro', provider: 'Replicate', icon: logoBytedance, goodFor: '4K-capable cinematic generation and multi-image editing via one model' },
   { id: 'seedream-v5-lite-fal', label: 'Seedream v5 Lite (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Fast cinematic realism and detailed environments' },
+  { id: 'seedream-v5-pro-fal', label: 'Seedream 5.0 Pro (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Flagship ByteDance realism, dense layouts, and native text in 14 languages' },
+  { id: 'seedream-v5-pro-fal-edit', label: 'Seedream 5.0 Pro Edit (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Region-precise edits that keep the rest of the frame intact (up to 10 refs)' },
+  { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Painterly, aesthetic-first generation with optional style references' },
+  { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick exploration and variations' },
+  { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters, and design-heavy frames with clean text rendering' },
   { id: 'wan-v27-pro-fal', label: 'WAN 2.7 Pro (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'High-detail cinematic image generation with strong composition' },
   { id: 'wan-v27-pro-edit-fal', label: 'WAN 2.7 Pro Edit (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Precise multi-reference image editing and transformations' },
   { id: 'nano-banana-2-fal', label: 'Nano Banana 2 (FAL)', provider: 'FAL', icon: logoNanabanana, goodFor: 'Speed, photorealism, and accurate character generation' },
@@ -170,6 +187,11 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   seedream: [...ASPECT_RATIOS],
   'wan-v27-image-pro-replicate': [...ASPECT_RATIOS],
   'seedream-v5-lite-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'seedream-v5-pro-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'seedream-v5-pro-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'krea-2-large-fal': ['16:9', '9:16', '1:1', '4:3', '235:100'],
+  'krea-2-turbo-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'ideogram-v4-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-edit-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'nano-banana-2-fal': ['21:9', '16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -200,6 +222,11 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   seedream: 8,
   'wan-v27-image-pro-replicate': 9,
   'seedream-v5-lite-fal': 0,
+  'seedream-v5-pro-fal': 0,
+  'seedream-v5-pro-fal-edit': 10,
+  'krea-2-large-fal': 3,
+  'krea-2-turbo-fal': 0,
+  'ideogram-v4-fal': 0,
   'wan-v27-pro-fal': 0,
   'wan-v27-pro-edit-fal': 4,
   'nano-banana-2-fal': 0,
@@ -234,6 +261,11 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   seedream: { provider: 'replicate', kind: 'image', model: 'bytedance/seedream-4.5' },
   'wan-v27-image-pro-replicate': { provider: 'replicate', kind: 'image', model: 'wan-video/wan-2.7-image-pro' },
   'seedream-v5-lite-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/bytedance/seedream/v5/lite/text-to-image' },
+  'seedream-v5-pro-fal': { provider: 'fal', kind: 'image', model: 'bytedance/seedream/v5/pro/text-to-image' },
+  'seedream-v5-pro-fal-edit': { provider: 'fal', kind: 'edit', model: 'bytedance/seedream/v5/pro/edit' },
+  'krea-2-large-fal': { provider: 'fal', kind: 'image', model: 'krea/v2/large/text-to-image' },
+  'krea-2-turbo-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/krea-2/turbo' },
+  'ideogram-v4-fal': { provider: 'fal', kind: 'image', model: 'ideogram/v4' },
   'wan-v27-pro-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/wan/v2.7/pro/text-to-image' },
   'wan-v27-pro-edit-fal': { provider: 'fal', kind: 'edit', model: 'fal-ai/wan/v2.7/pro/edit' },
   'nano-banana-2-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/nano-banana-2' },
@@ -693,6 +725,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
   billingMode = 'hosted',
   onValidateHostedGeneration,
   onAnimateImage,
+  productionFormatId,
 }) => {
   const isBeginnerMode = uiMode === 'beginner';
   const isProMode = uiMode === 'pro';
@@ -708,6 +741,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
   const [directorStatus, setDirectorStatus] = useState<string | null>(null);
   const [isDirecting, setIsDirecting] = useState(false);
   const [prompt, setPrompt] = useState('');
+  const [smartPromptStructure, setSmartPromptStructure] = useState(true);
   const [customStyle, setCustomStyle] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [selectedStyleId, setSelectedStyleId] = useState<string>('');
@@ -880,21 +914,26 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       .join(', ');
   }, [cameraPreset?.prompt, lensPreset?.prompt, customCameraNote, customLensNote]);
 
-  const finalPrompt = useMemo(() => {
-    const parts = [
-      styleReferenceHint,
-      stylePrompt,
-      shotTypePrompt,
-      lightingPrompt,
-      prompt.trim(),
-      cameraLensPrompt,
-      lensAspectHint
-    ];
-    if (negativePrompt.trim()) {
-      parts.push(`Avoid: ${negativePrompt.trim()}`);
+  const structuredPrompt = useMemo(() => {
+    if (!prompt.trim()) return null;
+    const format = productionFormatId ? getProductionFormat(productionFormatId) : null;
+    if (!smartPromptStructure) {
+      const parts = [styleReferenceHint, stylePrompt, shotTypePrompt, lightingPrompt, prompt.trim(), cameraLensPrompt, lensAspectHint, format?.lookSuffix];
+      if (negativePrompt.trim()) parts.push(`Avoid: ${negativePrompt.trim()}`);
+      return { prompt: parts.filter(Boolean).join('. '), notes: [] as string[], guideLabel: 'Plain' };
     }
-    return parts.filter(Boolean).join('. ');
-  }, [negativePrompt, prompt, stylePrompt, shotTypePrompt, lightingPrompt, styleReferenceHint, cameraLensPrompt, lensAspectHint]);
+    const modelLabel = MODEL_OPTIONS.find((option) => option.id === modelId)?.label || modelId;
+    const result = structurePromptForModel(`${modelId} ${modelLabel}`, {
+      style: [styleReferenceHint, stylePrompt].filter(Boolean).join(', ') || undefined,
+      shot: shotTypePrompt || undefined,
+      lighting: lightingPrompt || undefined,
+      subject: prompt.trim(),
+      camera: [cameraLensPrompt, lensAspectHint].filter(Boolean).join(', ') || undefined,
+      negative: negativePrompt.trim() || undefined,
+    }, 'image', { formatSuffix: format?.lookSuffix, appendDefaultStyle: !format });
+    return { prompt: result.prompt, notes: result.notes, guideLabel: result.guide.label };
+  }, [modelId, negativePrompt, prompt, stylePrompt, shotTypePrompt, lightingPrompt, styleReferenceHint, cameraLensPrompt, lensAspectHint, productionFormatId, smartPromptStructure]);
+  const finalPrompt = structuredPrompt?.prompt || '';
 
   const supportsAspect = availableAspectRatios.length > 1;
   const supportsSize = modelId === 'gemini-flash'
@@ -2292,6 +2331,50 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           break;
         case 'seedream-v5-lite-fal':
           item = await generateImageWithFalSeedreamV5Lite(finalPrompt, { aspectRatio: qwenMaxAspectRatio });
+          break;
+        case 'seedream-v5-pro-fal':
+          item = await generateImageWithFalSeedreamV5Pro(finalPrompt, {
+            aspectRatio: qwenMaxAspectRatio,
+            resolution: imageSize === '1K' ? '1K' : '2K',
+            outputFormat: 'png',
+          });
+          break;
+        case 'seedream-v5-pro-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('Seedream 5.0 Pro Edit (FAL) requires at least one reference image.');
+          }
+          {
+            const edited = await editImageWithFalSeedreamV5Pro(finalPrompt, referenceImages.slice(0, 10), {
+              aspectRatio: qwenMaxAspectRatio,
+              numOutputs: 1,
+              outputFormat: 'png',
+            });
+            if (!edited.length) {
+              throw new Error('Seedream 5.0 Pro Edit (FAL) returned no images.');
+            }
+            item = edited[0];
+          }
+          break;
+        case 'krea-2-large-fal':
+          item = await generateImageWithFalKrea2(finalPrompt, {
+            variant: 'large',
+            aspectRatio: effectiveAspectRatio === '235:100'
+              ? '2.35:1'
+              : (['16:9', '9:16', '1:1', '4:3'].includes(effectiveAspectRatio) ? effectiveAspectRatio as '16:9' | '9:16' | '1:1' | '4:3' : '16:9'),
+            styleReferences: referenceImages.length ? referenceImages.slice(0, 3) : undefined,
+          });
+          break;
+        case 'krea-2-turbo-fal':
+          item = await generateImageWithFalKrea2(finalPrompt, {
+            variant: 'turbo',
+            aspectRatio: qwenMaxAspectRatio === '3:4' ? '2:3' : qwenMaxAspectRatio,
+          });
+          break;
+        case 'ideogram-v4-fal':
+          item = await generateImageWithFalIdeogramV4(finalPrompt, {
+            aspectRatio: qwenMaxAspectRatio,
+            renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY',
+          });
           break;
         case 'wan-v27-pro-fal':
           item = await generateImageWithFalWanV27Pro(finalPrompt, { aspectRatio: qwenMaxAspectRatio });

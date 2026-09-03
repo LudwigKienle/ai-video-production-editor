@@ -1,94 +1,113 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { StoryBible } from '../types';
 import {
-    MoodboardCategory,
-    MoodboardItem,
     CategorizedMoodboard,
+    MoodboardCategory,
+    MoodboardConnector,
+    MoodboardItem,
     createDefaultCategorizedMoodboard,
     getCategoryItemCount,
     getItemsByCategory,
 } from '../data/moodboardTypes';
 import { extractFramesFromVideoUrl, isLikelyVideoUrl, resolveImageFromWebUrl, searchWikimediaCommonsImages } from '../services/moodboardResearchService';
-import { UploadIcon, TrashIcon, AddIcon } from '../components/icons';
+import { UploadIcon, TrashIcon, AddIcon, SearchIcon, ImageIcon, TextIcon, GridIcon, XIcon } from '../components/icons';
+
+/**
+ * Moodboard — an infinite canvas in the spirit of PureRef and Miro.
+ *
+ * - Pan with space+drag, middle mouse, two-finger trackpad scroll, or one-finger touch on empty space.
+ * - Zoom with pinch (trackpad/touch), ⌘/ctrl+wheel, or the zoom controls.
+ * - Double-click empty space to add something at that point; double-click an image to preview it.
+ * - Drop files or paste images straight onto the board.
+ */
 
 interface MoodboardWorkspaceProps {
     storyBible: StoryBible;
     setStoryBible: React.Dispatch<React.SetStateAction<StoryBible>>;
 }
 
-type ViewMode = 'grid' | 'canvas';
+type Tool = 'select' | 'hand' | 'note' | 'text' | 'connect';
 
-type DragState = {
-    itemId: string;
-    startClientX: number;
-    startClientY: number;
-    originX: number;
-    originY: number;
-    width: number;
-    height: number;
-};
+type Viewport = { x: number; y: number; zoom: number };
 
-const CANVAS_WIDTH = 2600;
-const CANVAS_HEIGHT = 1600;
+type Layout = NonNullable<MoodboardItem['layout']>;
+
+type DragMode =
+    | { type: 'move'; ids: string[]; origins: Record<string, { x: number; y: number }>; startWorld: { x: number; y: number }; moved: boolean }
+    | { type: 'resize'; id: string; origin: Layout; startWorld: { x: number; y: number }; aspect: number | null }
+    | { type: 'pan'; startClient: { x: number; y: number }; origin: Viewport }
+    | { type: 'marquee'; startWorld: { x: number; y: number }; currentWorld: { x: number; y: number }; additive: boolean };
+
+type QuickAdd = { world: { x: number; y: number }; client: { x: number; y: number } };
+
+const NOTE_COLORS = ['#FFE58F', '#FFC2A8', '#B8E7C8', '#BFE3FF', '#E4C9FF', '#F6F6F6'];
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 4;
+const NUDGE = 10;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const buildId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-const createCanvasLayout = (
-    index: number,
-    kind: 'image' | 'text',
-    zIndex: number
-) => {
-    const col = index % 5;
-    const row = Math.floor(index / 5);
-    const width = kind === 'text' ? 280 : 260;
-    const height = kind === 'text' ? 200 : 220;
-    return {
-        x: 40 + col * 300,
-        y: 40 + row * 250,
-        width,
-        height,
-        zIndex,
-    };
+const defaultSize = (kind: MoodboardItem['kind']) => {
+    if (kind === 'note') return { width: 220, height: 220 };
+    if (kind === 'text') return { width: 320, height: 90 };
+    return { width: 320, height: 240 };
 };
 
-const toImageItem = (entry: {
-    id: string;
-    url?: string;
-    label?: string;
-    categoryId: string;
-    sourceUrl?: string;
-    sourceLabel?: string;
-    sourceType?: 'upload' | 'search' | 'web' | 'video_frame' | 'library';
-    query?: string;
-}, index: number, zIndex: number): MoodboardItem => ({
-    id: entry.id,
-    kind: 'image',
-    url: entry.url,
-    label: entry.label,
-    categoryId: entry.categoryId,
-    createdAt: new Date().toISOString(),
-    sourceUrl: entry.sourceUrl,
-    sourceLabel: entry.sourceLabel,
-    sourceType: entry.sourceType,
-    query: entry.query,
-    layout: createCanvasLayout(index, 'image', zIndex),
-});
+const createLayout = (index: number, kind: MoodboardItem['kind'], zIndex: number): Layout => {
+    const size = defaultSize(kind);
+    const col = index % 5;
+    const row = Math.floor(index / 5);
+    return { x: 80 + col * 360, y: 80 + row * 300, ...size, zIndex };
+};
 
-const MoodboardWorkspace: React.FC<MoodboardWorkspaceProps> = ({
-    storyBible,
-    setStoryBible,
-}) => {
+const layoutOf = (item: MoodboardItem, index = 0): Layout =>
+    item.layout || createLayout(index, item.kind, index + 1);
+
+const isTextLike = (item: MoodboardItem) => item.kind === 'text' || item.kind === 'note';
+
+const rectsIntersect = (a: Layout, b: { x: number; y: number; width: number; height: number }) =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+
+const loadImageSize = (url: string) =>
+    new Promise<{ width: number; height: number }>((resolve) => {
+        const image = new Image();
+        image.onload = () => resolve({ width: image.naturalWidth || 320, height: image.naturalHeight || 240 });
+        image.onerror = () => resolve({ width: 320, height: 240 });
+        image.src = url;
+    });
+
+const fitImageSize = (width: number, height: number, maxSide = 360) => {
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    return { width: Math.max(80, Math.round(width * scale)), height: Math.max(60, Math.round(height * scale)) };
+};
+
+const MoodboardWorkspace: React.FC<MoodboardWorkspaceProps> = ({ storyBible, setStoryBible }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const canvasRef = useRef<HTMLDivElement>(null);
+    const stageRef = useRef<HTMLDivElement>(null);
+    const dragRef = useRef<DragMode | null>(null);
+    const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const pinchRef = useRef<{ distance: number; center: { x: number; y: number }; origin: Viewport } | null>(null);
+    const spaceHeldRef = useRef(false);
+    const viewportsRef = useRef<Record<string, Viewport>>({});
+
     const [selectedCategoryId, setSelectedCategoryId] = useState<string>('color_palette');
     const [isAddingCategory, setIsAddingCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [newCategoryIcon, setNewCategoryIcon] = useState('📌');
-    const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
-    const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [tool, setTool] = useState<Tool>('select');
+    const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [previewItem, setPreviewItem] = useState<MoodboardItem | null>(null);
-    const [viewMode, setViewMode] = useState<ViewMode>('grid');
-    const [dragState, setDragState] = useState<DragState | null>(null);
+    const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [quickAdd, setQuickAdd] = useState<QuickAdd | null>(null);
+    const [quickAddUrl, setQuickAddUrl] = useState('');
+    const [connectFrom, setConnectFrom] = useState<string | null>(null);
+    const [isDropping, setIsDropping] = useState(false);
+    const [status, setStatus] = useState<string | null>(null);
+    const [researchOpen, setResearchOpen] = useState(false);
     const [researchQuery, setResearchQuery] = useState('');
     const [researchUrls, setResearchUrls] = useState('');
     const [isResearching, setIsResearching] = useState(false);
@@ -97,10 +116,10 @@ const MoodboardWorkspace: React.FC<MoodboardWorkspaceProps> = ({
     const [extractFrames, setExtractFrames] = useState(true);
     const [framesPerVideo, setFramesPerVideo] = useState(3);
 
-    const categorizedMoodboard = useMemo((): CategorizedMoodboard => {
-        if (storyBible.categorizedMoodboard) {
-            return storyBible.categorizedMoodboard;
-        }
+    // --- Data -----------------------------------------------------------------
+
+    const board = useMemo((): CategorizedMoodboard => {
+        if (storyBible.categorizedMoodboard) return storyBible.categorizedMoodboard;
         const base = createDefaultCategorizedMoodboard();
         if (storyBible.moodboard && storyBible.moodboard.length > 0) {
             base.items = storyBible.moodboard.map((item, index) => ({
@@ -110,904 +129,1126 @@ const MoodboardWorkspace: React.FC<MoodboardWorkspaceProps> = ({
                 label: item.label,
                 categoryId: 'uncategorized',
                 createdAt: new Date().toISOString(),
-                layout: createCanvasLayout(index, 'image', index + 1),
+                layout: createLayout(index, 'image', index + 1),
             }));
         }
         return base;
     }, [storyBible.categorizedMoodboard, storyBible.moodboard]);
 
-    const updateCategorizedMoodboard = useCallback(
-        (updater: (prev: CategorizedMoodboard) => CategorizedMoodboard) => {
-            setStoryBible((prev) => ({
-                ...prev,
-                categorizedMoodboard: updater(prev.categorizedMoodboard || createDefaultCategorizedMoodboard()),
-            }));
-        },
-        [setStoryBible]
-    );
+    const updateBoard = useCallback((updater: (prev: CategorizedMoodboard) => CategorizedMoodboard) => {
+        setStoryBible((prev) => ({
+            ...prev,
+            categorizedMoodboard: updater(prev.categorizedMoodboard || createDefaultCategorizedMoodboard()),
+        }));
+    }, [setStoryBible]);
 
     useEffect(() => {
-        if (categorizedMoodboard.categories.some((cat) => cat.id === selectedCategoryId)) return;
-        setSelectedCategoryId(categorizedMoodboard.categories[0]?.id || 'uncategorized');
-    }, [categorizedMoodboard.categories, selectedCategoryId]);
+        if (board.categories.some((cat) => cat.id === selectedCategoryId)) return;
+        setSelectedCategoryId(board.categories[0]?.id || 'uncategorized');
+    }, [board.categories, selectedCategoryId]);
 
-    const selectedCategory = useMemo(() => {
-        return categorizedMoodboard.categories.find((cat) => cat.id === selectedCategoryId);
-    }, [categorizedMoodboard.categories, selectedCategoryId]);
+    const selectedCategory = useMemo(
+        () => board.categories.find((cat) => cat.id === selectedCategoryId),
+        [board.categories, selectedCategoryId],
+    );
+    const items = useMemo(() => getItemsByCategory(board.items, selectedCategoryId), [board.items, selectedCategoryId]);
+    const itemMap = useMemo(() => new Map(items.map((item, index) => [item.id, { item, layout: layoutOf(item, index) }])), [items]);
+    const connectors = useMemo(
+        () => (board.connectors || []).filter((c) => c.categoryId === selectedCategoryId && itemMap.has(c.from) && itemMap.has(c.to)),
+        [board.connectors, selectedCategoryId, itemMap],
+    );
+    const maxZ = useMemo(() => items.reduce((max, item) => Math.max(max, item.layout?.zIndex || 0), 0), [items]);
 
-    const categoryItems = useMemo(() => {
-        return getItemsByCategory(categorizedMoodboard.items, selectedCategoryId);
-    }, [categorizedMoodboard.items, selectedCategoryId]);
+    // Remember the viewport per category so switching boards feels stable.
+    useEffect(() => {
+        const stored = viewportsRef.current[selectedCategoryId];
+        setViewport(stored || { x: 0, y: 0, zoom: 1 });
+        setSelectedIds(new Set());
+        setEditingId(null);
+        setConnectFrom(null);
+    }, [selectedCategoryId]);
 
-    const maxCategoryZIndex = useMemo(() => {
-        return categoryItems.reduce((max, item) => Math.max(max, item.layout?.zIndex || 0), 0);
-    }, [categoryItems]);
+    useEffect(() => {
+        viewportsRef.current[selectedCategoryId] = viewport;
+    }, [viewport, selectedCategoryId]);
 
-    const ensureItemLayout = useCallback((item: MoodboardItem, fallbackIndex: number): MoodboardItem => {
-        if (item.layout) return item;
-        return {
-            ...item,
-            layout: createCanvasLayout(fallbackIndex, item.kind === 'text' ? 'text' : 'image', maxCategoryZIndex + fallbackIndex + 1),
-        };
-    }, [maxCategoryZIndex]);
+    // --- Coordinate helpers ------------------------------------------------------
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files || files.length === 0) return;
+    const clientToWorld = useCallback((clientX: number, clientY: number, vp: Viewport = viewport) => {
+        const rect = stageRef.current?.getBoundingClientRect();
+        const localX = clientX - (rect?.left || 0);
+        const localY = clientY - (rect?.top || 0);
+        return { x: (localX - vp.x) / vp.zoom, y: (localY - vp.y) / vp.zoom };
+    }, [viewport]);
 
-        const now = new Date().toISOString();
-        const startZ = maxCategoryZIndex + 1;
-        const newItems: MoodboardItem[] = Array.from(files)
-            .filter((file) => file.type.startsWith('image/'))
-            .map((file, index) =>
-                toImageItem({
-                    id: `mood-${Date.now()}-${index}`,
-                    url: URL.createObjectURL(file),
-                    label: file.name.replace(/\.[^/.]+$/, ''),
-                    categoryId: selectedCategoryId,
-                    sourceType: 'upload',
-                }, categoryItems.length + index, startZ + index)
-            )
-            .map((item) => ({ ...item, createdAt: now }));
+    const zoomAround = useCallback((factor: number, clientX?: number, clientY?: number) => {
+        setViewport((prev) => {
+            const rect = stageRef.current?.getBoundingClientRect();
+            const cx = clientX !== undefined ? clientX - (rect?.left || 0) : (rect?.width || 0) / 2;
+            const cy = clientY !== undefined ? clientY - (rect?.top || 0) : (rect?.height || 0) / 2;
+            const nextZoom = clamp(prev.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+            const scale = nextZoom / prev.zoom;
+            return { zoom: nextZoom, x: cx - (cx - prev.x) * scale, y: cy - (cy - prev.y) * scale };
+        });
+    }, []);
 
-        if (newItems.length > 0) {
-            updateCategorizedMoodboard((prev) => ({
-                ...prev,
-                items: [...prev.items, ...newItems],
-            }));
+    const fitToContent = useCallback(() => {
+        const rect = stageRef.current?.getBoundingClientRect();
+        if (!rect || items.length === 0) {
+            setViewport({ x: 0, y: 0, zoom: 1 });
+            return;
         }
+        const layouts = items.map((item, index) => layoutOf(item, index));
+        const minX = Math.min(...layouts.map((l) => l.x));
+        const minY = Math.min(...layouts.map((l) => l.y));
+        const maxX = Math.max(...layouts.map((l) => l.x + l.width));
+        const maxY = Math.max(...layouts.map((l) => l.y + l.height));
+        const padding = 80;
+        const zoom = clamp(Math.min(rect.width / (maxX - minX + padding * 2), rect.height / (maxY - minY + padding * 2)), MIN_ZOOM, 1.5);
+        setViewport({
+            zoom,
+            x: (rect.width - (maxX - minX) * zoom) / 2 - minX * zoom,
+            y: (rect.height - (maxY - minY) * zoom) / 2 - minY * zoom,
+        });
+    }, [items]);
 
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
+    // --- Mutations -----------------------------------------------------------------
 
-    const updateItem = useCallback((itemId: string, updater: (item: MoodboardItem) => MoodboardItem) => {
-        updateCategorizedMoodboard((prev) => ({
+    const updateItems = useCallback((ids: string[], updater: (item: MoodboardItem) => MoodboardItem) => {
+        const idSet = new Set(ids);
+        updateBoard((prev) => ({ ...prev, items: prev.items.map((item) => (idSet.has(item.id) ? updater(item) : item)) }));
+    }, [updateBoard]);
+
+    const addItems = useCallback((newItems: MoodboardItem[]) => {
+        if (newItems.length === 0) return;
+        updateBoard((prev) => ({ ...prev, items: [...prev.items, ...newItems] }));
+        setSelectedIds(new Set(newItems.map((item) => item.id)));
+    }, [updateBoard]);
+
+    const deleteItems = useCallback((ids: string[]) => {
+        if (ids.length === 0) return;
+        const idSet = new Set(ids);
+        updateBoard((prev) => ({
             ...prev,
-            items: prev.items.map((item) => (item.id === itemId ? updater(item) : item)),
+            items: prev.items.filter((item) => !idSet.has(item.id)),
+            connectors: (prev.connectors || []).filter((c) => !idSet.has(c.from) && !idSet.has(c.to)),
         }));
-    }, [updateCategorizedMoodboard]);
+        setSelectedIds(new Set());
+        setEditingId(null);
+    }, [updateBoard]);
 
-    const bringItemToFront = useCallback((itemId: string) => {
-        updateCategorizedMoodboard((prev) => {
-            const item = prev.items.find((entry) => entry.id === itemId);
-            if (!item) return prev;
-            const relevant = prev.items.filter((entry) => entry.categoryId === item.categoryId);
-            const nextZ = relevant.reduce((max, entry) => Math.max(max, entry.layout?.zIndex || 0), 0) + 1;
+    const bringToFront = useCallback((ids: string[]) => {
+        updateBoard((prev) => {
+            let z = prev.items.filter((item) => item.categoryId === selectedCategoryId).reduce((max, item) => Math.max(max, item.layout?.zIndex || 0), 0);
+            const idSet = new Set(ids);
             return {
                 ...prev,
-                items: prev.items.map((entry) => (
-                    entry.id === itemId
-                        ? { ...entry, layout: { ...(entry.layout || createCanvasLayout(0, entry.kind === 'text' ? 'text' : 'image', nextZ)), zIndex: nextZ } }
-                        : entry
-                )),
+                items: prev.items.map((item, index) => (idSet.has(item.id) ? { ...item, layout: { ...layoutOf(item, index), zIndex: ++z } } : item)),
             };
         });
-    }, [updateCategorizedMoodboard]);
+    }, [updateBoard, selectedCategoryId]);
 
-    const handleDeleteItem = (itemId: string) => {
-        updateCategorizedMoodboard((prev) => ({
-            ...prev,
-            items: prev.items.filter((item) => item.id !== itemId),
-        }));
-        setSelectedItemIds((prev) => {
-            const next = new Set(prev);
-            next.delete(itemId);
-            return next;
-        });
-    };
-
-    const handleDeleteSelected = () => {
-        if (selectedItemIds.size === 0) return;
-        updateCategorizedMoodboard((prev) => ({
-            ...prev,
-            items: prev.items.filter((item) => !selectedItemIds.has(item.id)),
-        }));
-        setSelectedItemIds(new Set());
-    };
-
-    const handleMoveToCategory = (targetCategoryId: string) => {
-        if (selectedItemIds.size === 0) return;
-        updateCategorizedMoodboard((prev) => {
-            const existingTargetItems = prev.items.filter((item) => item.categoryId === targetCategoryId);
-            let zIndex = existingTargetItems.reduce((max, item) => Math.max(max, item.layout?.zIndex || 0), 0) + 1;
+    const sendToBack = useCallback((ids: string[]) => {
+        updateBoard((prev) => {
+            let z = 0;
+            const idSet = new Set(ids);
+            const others = prev.items.filter((item) => item.categoryId === selectedCategoryId && !idSet.has(item.id));
+            const shift = idSet.size;
             return {
                 ...prev,
-                items: prev.items.map((item) => {
-                    if (!selectedItemIds.has(item.id)) return item;
-                    const nextItem = { ...item, categoryId: targetCategoryId };
-                    if (!nextItem.layout) {
-                        nextItem.layout = createCanvasLayout(existingTargetItems.length, nextItem.kind === 'text' ? 'text' : 'image', zIndex++);
-                    } else {
-                        nextItem.layout = { ...nextItem.layout, zIndex: zIndex++ };
-                    }
-                    return nextItem;
+                items: prev.items.map((item, index) => {
+                    if (idSet.has(item.id)) return { ...item, layout: { ...layoutOf(item, index), zIndex: ++z } };
+                    if (others.includes(item)) return { ...item, layout: { ...layoutOf(item, index), zIndex: (item.layout?.zIndex || 1) + shift } };
+                    return item;
                 }),
             };
         });
-        setSelectedItemIds(new Set());
+    }, [updateBoard, selectedCategoryId]);
+
+    const addImagesFromFiles = useCallback(async (files: FileList | File[], world?: { x: number; y: number }) => {
+        const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+        if (imageFiles.length === 0) return;
+        const now = new Date().toISOString();
+        const created: MoodboardItem[] = [];
+        let cursorX = world?.x ?? clientToWorld((stageRef.current?.getBoundingClientRect().left || 0) + 120, (stageRef.current?.getBoundingClientRect().top || 0) + 120).x;
+        const cursorY = world?.y ?? clientToWorld((stageRef.current?.getBoundingClientRect().left || 0) + 120, (stageRef.current?.getBoundingClientRect().top || 0) + 120).y;
+        for (const [index, file] of imageFiles.entries()) {
+            const url = URL.createObjectURL(file);
+            const natural = await loadImageSize(url);
+            const size = fitImageSize(natural.width, natural.height);
+            created.push({
+                id: buildId('mood'),
+                kind: 'image',
+                url,
+                label: file.name.replace(/\.[^/.]+$/, ''),
+                categoryId: selectedCategoryId,
+                createdAt: now,
+                sourceType: 'upload',
+                layout: { x: cursorX, y: cursorY, ...size, zIndex: maxZ + index + 1 },
+            });
+            cursorX += size.width + 24;
+        }
+        addItems(created);
+        setStatus(`${created.length} image${created.length === 1 ? '' : 's'} added.`);
+    }, [addItems, clientToWorld, maxZ, selectedCategoryId]);
+
+    const addImageFromUrl = useCallback(async (url: string, world: { x: number; y: number }) => {
+        const trimmed = url.trim();
+        if (!trimmed) return;
+        setStatus('Fetching image…');
+        try {
+            const resolved = await resolveImageFromWebUrl(trimmed);
+            const finalUrl = resolved?.url || trimmed;
+            const natural = await loadImageSize(finalUrl);
+            const size = fitImageSize(natural.width, natural.height);
+            addItems([{
+                id: buildId('mood'),
+                kind: 'image',
+                url: finalUrl,
+                label: resolved?.title || trimmed.split('/').pop() || 'Image',
+                categoryId: selectedCategoryId,
+                createdAt: new Date().toISOString(),
+                sourceType: 'web',
+                sourceUrl: resolved?.sourcePageUrl || trimmed,
+                sourceLabel: resolved?.sourceLabel,
+                layout: { x: world.x, y: world.y, ...size, zIndex: maxZ + 1 },
+            }]);
+            setStatus('Image added.');
+        } catch (error) {
+            setStatus(error instanceof Error ? error.message : 'Could not load that URL.');
+        }
+    }, [addItems, maxZ, selectedCategoryId]);
+
+    const addNote = useCallback((world: { x: number; y: number }, kind: 'note' | 'text' = 'note') => {
+        const size = defaultSize(kind);
+        const id = buildId(kind === 'note' ? 'mood-note' : 'mood-text');
+        addItems([{
+            id,
+            kind,
+            text: '',
+            label: kind === 'note' ? 'Note' : 'Text',
+            color: kind === 'note' ? NOTE_COLORS[0] : undefined,
+            categoryId: selectedCategoryId,
+            createdAt: new Date().toISOString(),
+            layout: { x: world.x - size.width / 2, y: world.y - size.height / 2, ...size, zIndex: maxZ + 1 },
+        }]);
+        setEditingId(id);
+    }, [addItems, maxZ, selectedCategoryId]);
+
+    const duplicateSelection = useCallback(() => {
+        if (selectedIds.size === 0) return;
+        const copies = items
+            .filter((item) => selectedIds.has(item.id))
+            .map((item, index) => {
+                const layout = layoutOf(item);
+                return { ...item, id: buildId('mood'), layout: { ...layout, x: layout.x + 32, y: layout.y + 32, zIndex: maxZ + index + 1 } };
+            });
+        addItems(copies);
+    }, [addItems, items, maxZ, selectedIds]);
+
+    const nudgeSelection = useCallback((dx: number, dy: number) => {
+        if (selectedIds.size === 0) return;
+        updateItems(Array.from(selectedIds), (item) => {
+            const layout = layoutOf(item);
+            return { ...item, layout: { ...layout, x: layout.x + dx, y: layout.y + dy } };
+        });
+    }, [selectedIds, updateItems]);
+
+    const tidyBoard = useCallback(() => {
+        // PureRef-style packing: rows of similar height, left to right.
+        const sorted = [...items].sort((a, b) => (layoutOf(a).y - layoutOf(b).y) || (layoutOf(a).x - layoutOf(b).x));
+        const gap = 24;
+        const maxRowWidth = 1600;
+        let x = 80;
+        let y = 80;
+        let rowHeight = 0;
+        const positions: Record<string, { x: number; y: number }> = {};
+        sorted.forEach((item) => {
+            const layout = layoutOf(item);
+            if (x + layout.width > maxRowWidth && x > 80) {
+                x = 80;
+                y += rowHeight + gap;
+                rowHeight = 0;
+            }
+            positions[item.id] = { x, y };
+            x += layout.width + gap;
+            rowHeight = Math.max(rowHeight, layout.height);
+        });
+        updateItems(sorted.map((item) => item.id), (item) => ({ ...item, layout: { ...layoutOf(item), ...positions[item.id] } }));
+        window.setTimeout(fitToContent, 0);
+    }, [fitToContent, items, updateItems]);
+
+    const addConnector = useCallback((from: string, to: string) => {
+        if (from === to) return;
+        updateBoard((prev) => {
+            const existing = (prev.connectors || []).some((c) => (c.from === from && c.to === to) || (c.from === to && c.to === from));
+            if (existing) return prev;
+            const connector: MoodboardConnector = { id: buildId('mood-link'), from, to, categoryId: selectedCategoryId, style: 'arrow' };
+            return { ...prev, connectors: [...(prev.connectors || []), connector] };
+        });
+    }, [selectedCategoryId, updateBoard]);
+
+    const removeConnector = useCallback((id: string) => {
+        updateBoard((prev) => ({ ...prev, connectors: (prev.connectors || []).filter((c) => c.id !== id) }));
+    }, [updateBoard]);
+
+    const moveSelectionToCategory = (targetCategoryId: string) => {
+        if (selectedIds.size === 0) return;
+        updateItems(Array.from(selectedIds), (item) => ({ ...item, categoryId: targetCategoryId }));
+        setSelectedIds(new Set());
     };
+
+    // --- Categories -------------------------------------------------------------------
 
     const handleAddCategory = () => {
         if (!newCategoryName.trim()) return;
-        const newCategory: MoodboardCategory = {
+        const category: MoodboardCategory = {
             id: `custom-${Date.now()}`,
             label: newCategoryName.trim(),
             icon: newCategoryIcon || '📌',
-            description: 'Custom category',
+            description: 'Custom board',
             isCustom: true,
         };
-        updateCategorizedMoodboard((prev) => ({
-            ...prev,
-            categories: [...prev.categories, newCategory],
-        }));
+        updateBoard((prev) => ({ ...prev, categories: [...prev.categories, category] }));
         setNewCategoryName('');
         setNewCategoryIcon('📌');
         setIsAddingCategory(false);
-        setSelectedCategoryId(newCategory.id);
+        setSelectedCategoryId(category.id);
     };
 
     const handleDeleteCategory = (categoryId: string) => {
-        const category = categorizedMoodboard.categories.find((c) => c.id === categoryId);
+        const category = board.categories.find((c) => c.id === categoryId);
         if (!category?.isCustom) return;
-
-        const itemCount = getCategoryItemCount(categorizedMoodboard.items, categoryId);
-        if (itemCount > 0) {
-            const confirmDelete = window.confirm(
-                `This category contains ${itemCount} item(s). They will be moved to "Uncategorized". Continue?`
-            );
-            if (!confirmDelete) return;
-        }
-
-        updateCategorizedMoodboard((prev) => ({
-            categories: prev.categories.filter((c) => c.id !== categoryId),
-            items: prev.items.map((item) =>
-                item.categoryId === categoryId ? { ...item, categoryId: 'uncategorized' } : item
-            ),
-        }));
-
-        if (selectedCategoryId === categoryId) {
-            setSelectedCategoryId('color_palette');
-        }
-    };
-
-    const handleAddTextCard = () => {
-        const id = `mood-text-${Date.now()}`;
-        const textItem: MoodboardItem = {
-            id,
-            kind: 'text',
-            text: 'Notes...',
-            label: 'Text Card',
-            categoryId: selectedCategoryId,
-            createdAt: new Date().toISOString(),
-            layout: createCanvasLayout(categoryItems.length, 'text', maxCategoryZIndex + 1),
-        };
-        updateCategorizedMoodboard((prev) => ({
+        const count = getCategoryItemCount(board.items, categoryId);
+        if (count > 0 && !window.confirm(`This board holds ${count} item(s). They will move to "Uncategorized". Continue?`)) return;
+        updateBoard((prev) => ({
             ...prev,
-            items: [...prev.items, textItem],
+            categories: prev.categories.filter((c) => c.id !== categoryId),
+            items: prev.items.map((item) => (item.categoryId === categoryId ? { ...item, categoryId: 'uncategorized' } : item)),
         }));
-        setSelectedItemIds(new Set([id]));
-        setViewMode('canvas');
+        if (selectedCategoryId === categoryId) setSelectedCategoryId('color_palette');
     };
 
-    const toggleSelectItem = (itemId: string, multi = false) => {
-        setSelectedItemIds((prev) => {
-            const next = multi ? new Set(prev) : new Set<string>();
-            if (next.has(itemId)) {
-                next.delete(itemId);
-            } else {
-                next.add(itemId);
-            }
-            return next;
-        });
-    };
-
-    const handleDragOver = (e: React.DragEvent, categoryId: string) => {
-        e.preventDefault();
-        setDragOverCategory(categoryId);
-    };
-
-    const handleDragLeave = () => {
-        setDragOverCategory(null);
-    };
-
-    const handleDropOnCategory = (e: React.DragEvent, categoryId: string) => {
-        e.preventDefault();
-        setDragOverCategory(null);
-
-        if (e.dataTransfer.files.length > 0) {
-            const files = e.dataTransfer.files;
-            const now = new Date().toISOString();
-            const targetItems = categorizedMoodboard.items.filter((item) => item.categoryId === categoryId);
-            let zIndex = targetItems.reduce((max, item) => Math.max(max, item.layout?.zIndex || 0), 0) + 1;
-            const newItems: MoodboardItem[] = Array.from(files)
-                .filter((file) => file.type.startsWith('image/'))
-                .map((file, index) =>
-                    toImageItem({
-                        id: `mood-${Date.now()}-${index}`,
-                        url: URL.createObjectURL(file),
-                        label: file.name.replace(/\.[^/.]+$/, ''),
-                        categoryId,
-                        sourceType: 'upload',
-                    }, targetItems.length + index, zIndex++)
-                )
-                .map((item) => ({ ...item, createdAt: now }));
-
-            if (newItems.length > 0) {
-                updateCategorizedMoodboard((prev) => ({
-                    ...prev,
-                    items: [...prev.items, ...newItems],
-                }));
-            }
-            return;
-        }
-
-        if (selectedItemIds.size > 0) {
-            handleMoveToCategory(categoryId);
-        }
-    };
+    // --- Research import ---------------------------------------------------------------
 
     const handleResearchImport = useCallback(async () => {
         const query = researchQuery.trim();
-        const urls = Array.from(new Set(
-            researchUrls
-                .split(/\r?\n|,/)
-                .map((entry) => entry.trim())
-                .filter(Boolean)
-        ));
+        const urls = Array.from(new Set(researchUrls.split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean)));
         if (!query && urls.length === 0) {
             setResearchStatus('Add a query or at least one URL.');
             return;
         }
-
         setIsResearching(true);
         setResearchStatus(null);
         try {
             const maxResults = clamp(Math.round(researchMaxResults || 8), 1, 24);
             const frameCount = clamp(Math.round(framesPerVideo || 3), 1, 6);
-            const collected: Array<{
-                url: string;
-                title?: string;
-                sourceUrl?: string;
-                sourceLabel?: string;
-                sourceType?: 'search' | 'web' | 'video_frame';
-                query?: string;
-            }> = [];
-
+            const collected: Array<{ url: string; title?: string; sourceUrl?: string; sourceLabel?: string; sourceType?: 'search' | 'web' | 'video_frame'; query?: string }> = [];
             if (query) {
-                const searchResults = await searchWikimediaCommonsImages(query, maxResults);
-                collected.push(...searchResults.map((item) => ({
-                    url: item.url,
-                    title: item.title,
-                    sourceUrl: item.sourcePageUrl || item.url,
-                    sourceLabel: item.sourceLabel,
-                    sourceType: 'search' as const,
-                    query,
-                })));
+                const results = await searchWikimediaCommonsImages(query, maxResults);
+                collected.push(...results.map((item) => ({ url: item.url, title: item.title, sourceUrl: item.sourcePageUrl || item.url, sourceLabel: item.sourceLabel, sourceType: 'search' as const, query })));
             }
-
             for (const sourceUrl of urls) {
                 if (extractFrames && isLikelyVideoUrl(sourceUrl)) {
                     const frames = await extractFramesFromVideoUrl(sourceUrl, frameCount);
-                    collected.push(...frames.map((frame) => ({
-                        url: frame.url,
-                        title: frame.title,
-                        sourceUrl: sourceUrl,
-                        sourceLabel: frame.sourceLabel,
-                        sourceType: 'video_frame' as const,
-                        query: query || undefined,
-                    })));
+                    collected.push(...frames.map((frame) => ({ url: frame.url, title: frame.title, sourceUrl, sourceLabel: frame.sourceLabel, sourceType: 'video_frame' as const, query: query || undefined })));
                     continue;
                 }
                 const resolved = await resolveImageFromWebUrl(sourceUrl);
                 if (!resolved) continue;
-                collected.push({
-                    url: resolved.url,
-                    title: resolved.title,
-                    sourceUrl: resolved.sourcePageUrl || sourceUrl,
-                    sourceLabel: resolved.sourceLabel,
-                    sourceType: 'web',
-                    query: query || undefined,
-                });
+                collected.push({ url: resolved.url, title: resolved.title, sourceUrl: resolved.sourcePageUrl || sourceUrl, sourceLabel: resolved.sourceLabel, sourceType: 'web', query: query || undefined });
             }
-
             const unique = Array.from(new Map(collected.map((item) => [item.url, item])).values()).slice(0, maxResults);
             if (unique.length === 0) {
                 setResearchStatus('No images found for this query/URL input.');
                 return;
             }
-
             const now = new Date().toISOString();
-            const startZ = maxCategoryZIndex + 1;
-            const imported = unique.map((item, index) => (
-                toImageItem({
-                    id: `mood-research-${Date.now()}-${index}`,
-                    url: item.url,
-                    label: item.title || `Research ${index + 1}`,
+            const origin = clientToWorld((stageRef.current?.getBoundingClientRect().left || 0) + 80, (stageRef.current?.getBoundingClientRect().top || 0) + 80);
+            const imported: MoodboardItem[] = [];
+            for (const [index, entry] of unique.entries()) {
+                const natural = await loadImageSize(entry.url);
+                const size = fitImageSize(natural.width, natural.height, 300);
+                imported.push({
+                    id: buildId('mood-research'),
+                    kind: 'image',
+                    url: entry.url,
+                    label: entry.title || `Research ${index + 1}`,
                     categoryId: selectedCategoryId,
-                    sourceUrl: item.sourceUrl || item.url,
-                    sourceLabel: item.sourceLabel,
-                    sourceType: item.sourceType,
-                    query: item.query,
-                }, categoryItems.length + index, startZ + index)
-            )).map((item) => ({ ...item, createdAt: now }));
-
-            updateCategorizedMoodboard((prev) => ({
-                ...prev,
-                items: [...prev.items, ...imported],
-            }));
-
-            setViewMode('canvas');
+                    createdAt: now,
+                    sourceUrl: entry.sourceUrl || entry.url,
+                    sourceLabel: entry.sourceLabel,
+                    sourceType: entry.sourceType,
+                    query: entry.query,
+                    layout: { x: origin.x + (index % 4) * 330, y: origin.y + Math.floor(index / 4) * 260, ...size, zIndex: maxZ + index + 1 },
+                });
+            }
+            addItems(imported);
             setResearchStatus(`Imported ${imported.length} research image(s).`);
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Research import failed.';
-            setResearchStatus(message);
+            setResearchStatus(error instanceof Error ? error.message : 'Research import failed.');
         } finally {
             setIsResearching(false);
         }
-    }, [
-        categoryItems.length,
-        extractFrames,
-        framesPerVideo,
-        maxCategoryZIndex,
-        researchMaxResults,
-        researchQuery,
-        researchUrls,
-        selectedCategoryId,
-        updateCategorizedMoodboard,
-    ]);
+    }, [addItems, clientToWorld, extractFrames, framesPerVideo, maxZ, researchMaxResults, researchQuery, researchUrls, selectedCategoryId]);
 
-    const startCanvasDrag = useCallback((event: React.MouseEvent, item: MoodboardItem) => {
-        event.preventDefault();
+    // --- Pointer interaction ------------------------------------------------------------
+
+    const beginPan = (clientX: number, clientY: number) => {
+        dragRef.current = { type: 'pan', startClient: { x: clientX, y: clientY }, origin: viewport };
+    };
+
+    const handleStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (quickAdd) setQuickAdd(null);
+        pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (pointersRef.current.size === 2) {
+            const [a, b] = Array.from(pointersRef.current.values());
+            pinchRef.current = {
+                distance: Math.hypot(b.x - a.x, b.y - a.y),
+                center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+                origin: viewport,
+            };
+            dragRef.current = null;
+            setMarquee(null);
+            return;
+        }
+        const isPanGesture = event.button === 1 || tool === 'hand' || spaceHeldRef.current || event.pointerType === 'touch';
+        (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
+        if (isPanGesture) {
+            beginPan(event.clientX, event.clientY);
+            return;
+        }
+        if (event.button !== 0) return;
+        const world = clientToWorld(event.clientX, event.clientY);
+        if (tool === 'note' || tool === 'text') {
+            addNote(world, tool);
+            setTool('select');
+            return;
+        }
+        setConnectFrom(null);
+        dragRef.current = { type: 'marquee', startWorld: world, currentWorld: world, additive: event.shiftKey || event.metaKey };
+        if (!event.shiftKey && !event.metaKey) setSelectedIds(new Set());
+        setEditingId(null);
+    };
+
+    const handleItemPointerDown = (event: React.PointerEvent, item: MoodboardItem) => {
+        if (event.button === 1 || tool === 'hand' || spaceHeldRef.current) return;
+        if (event.button !== 0) return;
         event.stopPropagation();
-        const hydrated = ensureItemLayout(item, 0);
-        const layout = hydrated.layout!;
-        bringItemToFront(item.id);
-        setSelectedItemIds(new Set([item.id]));
-        setDragState({
-            itemId: item.id,
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            originX: layout.x,
-            originY: layout.y,
-            width: layout.width,
-            height: layout.height,
+        if (quickAdd) setQuickAdd(null);
+        if (tool === 'connect') {
+            if (!connectFrom) {
+                setConnectFrom(item.id);
+                setStatus('Now click the item to connect to.');
+            } else {
+                addConnector(connectFrom, item.id);
+                setConnectFrom(null);
+                setTool('select');
+                setStatus('Connected.');
+            }
+            return;
+        }
+        if (editingId && editingId !== item.id) setEditingId(null);
+        const additive = event.shiftKey || event.metaKey;
+        let nextSelection: Set<string>;
+        if (additive) {
+            nextSelection = new Set(selectedIds);
+            if (nextSelection.has(item.id)) nextSelection.delete(item.id);
+            else nextSelection.add(item.id);
+        } else if (selectedIds.has(item.id)) {
+            nextSelection = new Set(selectedIds);
+        } else {
+            nextSelection = new Set([item.id]);
+        }
+        setSelectedIds(nextSelection);
+        if (item.locked) return;
+        const ids = Array.from(nextSelection).filter((id) => !itemMap.get(id)?.item.locked);
+        const origins: Record<string, { x: number; y: number }> = {};
+        ids.forEach((id) => {
+            const layout = itemMap.get(id)?.layout;
+            if (layout) origins[id] = { x: layout.x, y: layout.y };
         });
-    }, [bringItemToFront, ensureItemLayout]);
+        (stageRef.current as HTMLDivElement | null)?.setPointerCapture(event.pointerId);
+        dragRef.current = { type: 'move', ids, origins, startWorld: clientToWorld(event.clientX, event.clientY), moved: false };
+        bringToFront([item.id]);
+    };
+
+    const handleResizePointerDown = (event: React.PointerEvent, item: MoodboardItem) => {
+        event.stopPropagation();
+        event.preventDefault();
+        const layout = layoutOf(item);
+        (stageRef.current as HTMLDivElement | null)?.setPointerCapture(event.pointerId);
+        dragRef.current = {
+            type: 'resize',
+            id: item.id,
+            origin: layout,
+            startWorld: clientToWorld(event.clientX, event.clientY),
+            aspect: item.kind === 'image' ? layout.width / layout.height : null,
+        };
+    };
+
+    const handleStagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (pointersRef.current.has(event.pointerId)) {
+            pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        }
+        const pinch = pinchRef.current;
+        if (pinch && pointersRef.current.size >= 2) {
+            const [a, b] = Array.from(pointersRef.current.values());
+            const distance = Math.hypot(b.x - a.x, b.y - a.y);
+            const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const rect = stageRef.current?.getBoundingClientRect();
+            const scale = clamp((distance / Math.max(1, pinch.distance)) * pinch.origin.zoom, MIN_ZOOM, MAX_ZOOM) / pinch.origin.zoom;
+            const cx = pinch.center.x - (rect?.left || 0);
+            const cy = pinch.center.y - (rect?.top || 0);
+            setViewport({
+                zoom: pinch.origin.zoom * scale,
+                x: cx - (cx - pinch.origin.x) * scale + (center.x - pinch.center.x),
+                y: cy - (cy - pinch.origin.y) * scale + (center.y - pinch.center.y),
+            });
+            return;
+        }
+        const drag = dragRef.current;
+        if (!drag) return;
+        if (drag.type === 'pan') {
+            setViewport({
+                ...drag.origin,
+                x: drag.origin.x + (event.clientX - drag.startClient.x),
+                y: drag.origin.y + (event.clientY - drag.startClient.y),
+            });
+            return;
+        }
+        const world = clientToWorld(event.clientX, event.clientY);
+        if (drag.type === 'move') {
+            const dx = world.x - drag.startWorld.x;
+            const dy = world.y - drag.startWorld.y;
+            if (!drag.moved && Math.hypot(dx, dy) * viewport.zoom < 3) return;
+            drag.moved = true;
+            updateItems(drag.ids, (item) => {
+                const origin = drag.origins[item.id];
+                if (!origin) return item;
+                return { ...item, layout: { ...layoutOf(item), x: Math.round(origin.x + dx), y: Math.round(origin.y + dy) } };
+            });
+            return;
+        }
+        if (drag.type === 'resize') {
+            const dx = world.x - drag.startWorld.x;
+            const dy = world.y - drag.startWorld.y;
+            let width = Math.max(60, drag.origin.width + dx);
+            let height = Math.max(40, drag.origin.height + dy);
+            if (drag.aspect && !event.altKey) {
+                height = width / drag.aspect;
+            }
+            updateItems([drag.id], (item) => ({ ...item, layout: { ...layoutOf(item), width: Math.round(width), height: Math.round(height) } }));
+            return;
+        }
+        if (drag.type === 'marquee') {
+            drag.currentWorld = world;
+            const x = Math.min(drag.startWorld.x, world.x);
+            const y = Math.min(drag.startWorld.y, world.y);
+            const rect = { x, y, width: Math.abs(world.x - drag.startWorld.x), height: Math.abs(world.y - drag.startWorld.y) };
+            setMarquee(rect);
+            const hits = items.filter((item, index) => rectsIntersect(layoutOf(item, index), rect)).map((item) => item.id);
+            setSelectedIds((prev) => (drag.additive ? new Set([...prev, ...hits]) : new Set(hits)));
+        }
+    };
+
+    const handleStagePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+        pointersRef.current.delete(event.pointerId);
+        if (pointersRef.current.size < 2) pinchRef.current = null;
+        const drag = dragRef.current;
+        dragRef.current = null;
+        setMarquee(null);
+        if (drag?.type === 'marquee' && marquee === null) {
+            // Plain click on empty canvas: selection already cleared on pointer down.
+        }
+        try {
+            (event.currentTarget as HTMLDivElement).releasePointerCapture(event.pointerId);
+        } catch {
+            // ignore
+        }
+    };
+
+    const handleStageDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget && !(event.target as HTMLElement).classList.contains('mood-stage__world')) return;
+        const world = clientToWorld(event.clientX, event.clientY);
+        const rect = stageRef.current?.getBoundingClientRect();
+        setQuickAdd({ world, client: { x: event.clientX - (rect?.left || 0), y: event.clientY - (rect?.top || 0) } });
+        setQuickAddUrl('');
+    };
+
+    const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+        // Trackpad pinch arrives as wheel + ctrlKey; ⌘/ctrl + wheel is an explicit zoom.
+        if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            const factor = Math.exp(-event.deltaY * 0.01);
+            zoomAround(factor, event.clientX, event.clientY);
+            return;
+        }
+        event.preventDefault();
+        setViewport((prev) => ({ ...prev, x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
+    };
 
     useEffect(() => {
-        if (!dragState) return;
-        const handleMouseMove = (event: MouseEvent) => {
-            const nextX = clamp(dragState.originX + (event.clientX - dragState.startClientX), 0, CANVAS_WIDTH - dragState.width);
-            const nextY = clamp(dragState.originY + (event.clientY - dragState.startClientY), 0, CANVAS_HEIGHT - dragState.height);
-            updateItem(dragState.itemId, (item) => ({
-                ...item,
-                layout: {
-                    ...(item.layout || createCanvasLayout(0, item.kind === 'text' ? 'text' : 'image', 1)),
-                    x: nextX,
-                    y: nextY,
-                },
-            }));
+        const stage = stageRef.current;
+        if (!stage) return;
+        // React's synthetic wheel listener is passive; attach a native non-passive one so preventDefault works.
+        const handler = (event: WheelEvent) => {
+            if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                zoomAround(Math.exp(-event.deltaY * 0.01), event.clientX, event.clientY);
+                return;
+            }
+            event.preventDefault();
+            setViewport((prev) => ({ ...prev, x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
         };
-        const handleMouseUp = () => setDragState(null);
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
+        stage.addEventListener('wheel', handler, { passive: false });
+        return () => stage.removeEventListener('wheel', handler);
+    }, [zoomAround]);
+
+    // --- Keyboard ------------------------------------------------------------------
+
+    useEffect(() => {
+        const isTyping = (target: EventTarget | null) => {
+            const el = target as HTMLElement | null;
+            return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.code === 'Space' && !isTyping(event.target)) {
+                spaceHeldRef.current = true;
+                event.preventDefault();
+                return;
+            }
+            if (isTyping(event.target)) return;
+            const meta = event.metaKey || event.ctrlKey;
+            if (event.key === 'Escape') {
+                setSelectedIds(new Set());
+                setEditingId(null);
+                setQuickAdd(null);
+                setConnectFrom(null);
+                setTool('select');
+                return;
+            }
+            if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.size > 0) {
+                event.preventDefault();
+                deleteItems(Array.from(selectedIds));
+                return;
+            }
+            if (meta && event.key.toLowerCase() === 'a') {
+                event.preventDefault();
+                setSelectedIds(new Set(items.map((item) => item.id)));
+                return;
+            }
+            if (meta && event.key.toLowerCase() === 'd') {
+                event.preventDefault();
+                duplicateSelection();
+                return;
+            }
+            if (meta && (event.key === '=' || event.key === '+')) {
+                event.preventDefault();
+                zoomAround(1.2);
+                return;
+            }
+            if (meta && event.key === '-') {
+                event.preventDefault();
+                zoomAround(1 / 1.2);
+                return;
+            }
+            if (meta && event.key === '0') {
+                event.preventDefault();
+                fitToContent();
+                return;
+            }
+            if (!meta) {
+                if (event.key === 'v') setTool('select');
+                if (event.key === 'h') setTool('hand');
+                if (event.key === 'n') setTool('note');
+                if (event.key === 't') setTool('text');
+                if (event.key === 'c') setTool('connect');
+                if (event.key === 'f' && selectedIds.size > 0) bringToFront(Array.from(selectedIds));
+                if (event.key === 'b' && selectedIds.size > 0) sendToBack(Array.from(selectedIds));
+                if (event.key === 'Enter' && selectedIds.size === 1) {
+                    const only = Array.from(selectedIds)[0];
+                    const entry = itemMap.get(only);
+                    if (entry && isTextLike(entry.item)) setEditingId(only);
+                    else if (entry) setPreviewItem(entry.item);
+                }
+                const step = event.shiftKey ? NUDGE * 5 : NUDGE;
+                if (event.key === 'ArrowLeft') { event.preventDefault(); nudgeSelection(-step, 0); }
+                if (event.key === 'ArrowRight') { event.preventDefault(); nudgeSelection(step, 0); }
+                if (event.key === 'ArrowUp') { event.preventDefault(); nudgeSelection(0, -step); }
+                if (event.key === 'ArrowDown') { event.preventDefault(); nudgeSelection(0, step); }
+            }
+        };
+        const onKeyUp = (event: KeyboardEvent) => {
+            if (event.code === 'Space') spaceHeldRef.current = false;
+        };
+        const onPaste = (event: ClipboardEvent) => {
+            if (isTyping(event.target)) return;
+            const files = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'));
+            if (files.length > 0) {
+                event.preventDefault();
+                const rect = stageRef.current?.getBoundingClientRect();
+                const world = clientToWorld((rect?.left || 0) + (rect?.width || 0) / 2, (rect?.top || 0) + (rect?.height || 0) / 2);
+                void addImagesFromFiles(files, world);
+                return;
+            }
+            const text = event.clipboardData?.getData('text/plain')?.trim();
+            if (text && /^https?:\/\//i.test(text)) {
+                event.preventDefault();
+                const rect = stageRef.current?.getBoundingClientRect();
+                const world = clientToWorld((rect?.left || 0) + (rect?.width || 0) / 2, (rect?.top || 0) + (rect?.height || 0) / 2);
+                void addImageFromUrl(text, world);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+        window.addEventListener('paste', onPaste);
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('keyup', onKeyUp);
+            window.removeEventListener('paste', onPaste);
         };
-    }, [dragState, updateItem]);
+    }, [addImageFromUrl, addImagesFromFiles, bringToFront, clientToWorld, deleteItems, duplicateSelection, fitToContent, itemMap, items, nudgeSelection, selectedIds, sendToBack, zoomAround]);
+
+    // --- Drag & drop from the OS -----------------------------------------------------
+
+    const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        setIsDropping(false);
+        const world = clientToWorld(event.clientX, event.clientY);
+        if (event.dataTransfer.files.length > 0) {
+            void addImagesFromFiles(event.dataTransfer.files, world);
+            return;
+        }
+        const url = event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain');
+        if (url && /^https?:\/\//i.test(url.trim())) {
+            void addImageFromUrl(url, world);
+        }
+    };
+
+    // --- Render helpers -----------------------------------------------------------------
+
+    const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
+    const selectionBounds = useMemo(() => {
+        if (selectedItems.length === 0) return null;
+        const layouts = selectedItems.map((item) => layoutOf(item));
+        const minX = Math.min(...layouts.map((l) => l.x));
+        const minY = Math.min(...layouts.map((l) => l.y));
+        const maxX = Math.max(...layouts.map((l) => l.x + l.width));
+        return { x: minX, y: minY, width: maxX - minX };
+    }, [selectedItems]);
+    const selectedNote = selectedItems.length === 1 && selectedItems[0].kind === 'note' ? selectedItems[0] : null;
+
+    const connectorPath = (connector: MoodboardConnector) => {
+        const from = itemMap.get(connector.from)?.layout;
+        const to = itemMap.get(connector.to)?.layout;
+        if (!from || !to) return null;
+        const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+        const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+        const dx = toCenter.x - fromCenter.x;
+        const dy = toCenter.y - fromCenter.y;
+        const clip = (rect: Layout, center: { x: number; y: number }, dirX: number, dirY: number) => {
+            const halfW = rect.width / 2;
+            const halfH = rect.height / 2;
+            const scale = Math.min(halfW / Math.max(Math.abs(dirX), 1e-6), halfH / Math.max(Math.abs(dirY), 1e-6));
+            return { x: center.x + dirX * scale, y: center.y + dirY * scale };
+        };
+        const start = clip(from, fromCenter, dx, dy);
+        const end = clip(to, toCenter, -dx, -dy);
+        const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+        return { start, end, mid };
+    };
+
+    const toolButtons: Array<{ id: Tool; label: string; hint: string; icon: React.ReactNode }> = [
+        { id: 'select', label: 'Select', hint: 'V · click, drag, marquee', icon: <span className="mood-tool__glyph">↖</span> },
+        { id: 'hand', label: 'Pan', hint: 'H · or hold space', icon: <span className="mood-tool__glyph">✋</span> },
+        { id: 'note', label: 'Note', hint: 'N · click to place a sticky note', icon: <span className="mood-tool__glyph mood-tool__glyph--note" /> },
+        { id: 'text', label: 'Text', hint: 'T · click to place text', icon: <TextIcon className="w-4 h-4" /> },
+        { id: 'connect', label: 'Connect', hint: 'C · click two items', icon: <span className="mood-tool__glyph">⤳</span> },
+    ];
 
     return (
-        <div className="studio-workspace p-6 h-full overflow-hidden flex">
-            <div className="w-72 flex-shrink-0 border-r border-gray-700 pr-4 overflow-y-auto space-y-4">
-                <div>
-                    <div className="flex items-center justify-between mb-3">
-                        <h2 className="text-lg font-bold text-gray-100">Categories</h2>
-                        <button
-                            className="app-button p-2"
-                            onClick={() => setIsAddingCategory(true)}
-                            title="Add custom category"
-                        >
-                            <AddIcon />
+        <div className="mood-workspace">
+            {sidebarOpen && (
+                <aside className="mood-sidebar">
+                    <div className="mood-sidebar__head">
+                        <span className="mood-sidebar__title">Boards</span>
+                        <button className="toolbar-button toolbar-button--icon" onClick={() => setIsAddingCategory(true)} title="New board">
+                            <AddIcon className="w-4 h-4" />
                         </button>
                     </div>
-
                     {isAddingCategory && (
-                        <div className="mb-4 p-3 bg-gray-800 rounded-lg space-y-2">
+                        <div className="mood-sidebar__new">
                             <input
                                 type="text"
-                                placeholder="Category name..."
-                                className="app-input w-full text-sm"
+                                placeholder="Board name"
+                                className="app-input app-input--compact"
                                 value={newCategoryName}
                                 onChange={(e) => setNewCategoryName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); if (e.key === 'Escape') setIsAddingCategory(false); }}
                                 autoFocus
                             />
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                                 <input
                                     type="text"
-                                    placeholder="Icon"
-                                    className="app-input w-16 text-center text-lg"
+                                    className="app-input app-input--compact w-12 text-center"
                                     value={newCategoryIcon}
                                     onChange={(e) => setNewCategoryIcon(e.target.value)}
                                     maxLength={2}
+                                    aria-label="Icon"
                                 />
-                                <button className="app-button flex-1" onClick={handleAddCategory}>
-                                    Add
-                                </button>
-                                <button
-                                    className="app-button app-secondary"
-                                    onClick={() => setIsAddingCategory(false)}
-                                >
-                                    Cancel
-                                </button>
+                                <button className="toolbar-button toolbar-button--text" onClick={handleAddCategory}>Add</button>
+                                <button className="toolbar-button" onClick={() => setIsAddingCategory(false)}>Cancel</button>
                             </div>
                         </div>
                     )}
-
-                    <div className="space-y-1">
-                        {categorizedMoodboard.categories.map((category) => {
-                            const count = getCategoryItemCount(categorizedMoodboard.items, category.id);
+                    <ul className="mood-sidebar__list" role="list">
+                        {board.categories.map((category) => {
+                            const count = getCategoryItemCount(board.items, category.id);
                             const isActive = selectedCategoryId === category.id;
-                            const isDragOver = dragOverCategory === category.id;
+                            return (
+                                <li key={category.id}>
+                                    <button
+                                        type="button"
+                                        className={`mood-sidebar__item ${isActive ? 'mood-sidebar__item--active' : ''}`}
+                                        onClick={() => setSelectedCategoryId(category.id)}
+                                        title={category.description}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            if (selectedIds.size > 0) moveSelectionToCategory(category.id);
+                                        }}
+                                    >
+                                        <span className="mood-sidebar__icon">{category.icon}</span>
+                                        <span className="mood-sidebar__label">{category.label}</span>
+                                        {count > 0 && <span className="mood-sidebar__count">{count}</span>}
+                                        {category.isCustom && (
+                                            <span
+                                                role="button"
+                                                className="mood-sidebar__delete"
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteCategory(category.id); }}
+                                                title="Delete board"
+                                            >
+                                                <TrashIcon className="w-3.5 h-3.5" />
+                                            </span>
+                                        )}
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                    <div className="mood-sidebar__section">
+                        <button type="button" className="mood-sidebar__section-toggle" onClick={() => setResearchOpen((value) => !value)}>
+                            <SearchIcon className="w-4 h-4" />
+                            <span>Research import</span>
+                            <span className="ml-auto text-[10px] app-muted">{researchOpen ? 'Hide' : 'Show'}</span>
+                        </button>
+                        {researchOpen && (
+                            <div className="mood-sidebar__research">
+                                <input value={researchQuery} onChange={(e) => setResearchQuery(e.target.value)} placeholder="Search Wikimedia Commons" className="app-input app-input--compact" />
+                                <textarea value={researchUrls} onChange={(e) => setResearchUrls(e.target.value)} placeholder="Page or video URLs, one per line" className="app-textarea h-20 text-xs" />
+                                <div className="grid grid-cols-2 gap-2 text-[11px] app-muted">
+                                    <label>Max<input type="number" min={1} max={24} value={researchMaxResults} onChange={(e) => setResearchMaxResults(Number(e.target.value) || 8)} className="app-input app-input--compact mt-1" /></label>
+                                    <label>Frames/video<input type="number" min={1} max={6} value={framesPerVideo} onChange={(e) => setFramesPerVideo(Number(e.target.value) || 3)} className="app-input app-input--compact mt-1" /></label>
+                                </div>
+                                <label className="flex items-center gap-2 text-[11px] app-muted">
+                                    <input type="checkbox" checked={extractFrames} onChange={(e) => setExtractFrames(e.target.checked)} />
+                                    Extract stills from video URLs
+                                </label>
+                                <button className="app-button app-primary text-xs w-full justify-center" onClick={handleResearchImport} disabled={isResearching}>
+                                    {isResearching ? 'Importing…' : 'Import to board'}
+                                </button>
+                                {researchStatus && <p className="text-[11px] app-muted">{researchStatus}</p>}
+                            </div>
+                        )}
+                    </div>
+                </aside>
+            )}
 
+            <div className="mood-main">
+                <div className="mood-topbar">
+                    <div className="mood-topbar__left">
+                        <button className="toolbar-button toolbar-button--icon" onClick={() => setSidebarOpen((v) => !v)} title={sidebarOpen ? 'Hide boards' : 'Show boards'}>
+                            <GridIcon className="w-4 h-4" />
+                        </button>
+                        <div className="mood-topbar__title">
+                            <span className="mood-topbar__icon">{selectedCategory?.icon}</span>
+                            <span>{selectedCategory?.label || 'Moodboard'}</span>
+                            <span className="mood-topbar__meta">{items.length} item{items.length === 1 ? '' : 's'}</span>
+                        </div>
+                    </div>
+                    <div className="mood-toolbar" role="toolbar" aria-label="Board tools">
+                        {toolButtons.map((button) => (
+                            <button
+                                key={button.id}
+                                type="button"
+                                className={`mood-tool ${tool === button.id ? 'mood-tool--active' : ''}`}
+                                onClick={() => { setTool(button.id); setConnectFrom(null); }}
+                                title={`${button.label} — ${button.hint}`}
+                                aria-pressed={tool === button.id}
+                            >
+                                {button.icon}
+                                <span className="mood-tool__label">{button.label}</span>
+                            </button>
+                        ))}
+                        <span className="mood-toolbar__divider" />
+                        <button type="button" className="mood-tool" onClick={() => fileInputRef.current?.click()} title="Upload images (or drop / paste them)">
+                            <ImageIcon className="w-4 h-4" />
+                            <span className="mood-tool__label">Image</span>
+                        </button>
+                        <button type="button" className="mood-tool" onClick={tidyBoard} title="Arrange everything into tidy rows" disabled={items.length === 0}>
+                            <span className="mood-tool__glyph">▦</span>
+                            <span className="mood-tool__label">Tidy</span>
+                        </button>
+                    </div>
+                    <div className="mood-topbar__right">
+                        {selectedIds.size > 0 && (
+                            <select
+                                className="app-select app-select--compact"
+                                onChange={(e) => { if (e.target.value) { moveSelectionToCategory(e.target.value); e.target.value = ''; } }}
+                                defaultValue=""
+                                title="Move selection to another board"
+                            >
+                                <option value="" disabled>Move {selectedIds.size} to…</option>
+                                {board.categories.filter((c) => c.id !== selectedCategoryId).map((c) => (
+                                    <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                                ))}
+                            </select>
+                        )}
+                        <div className="mood-zoom">
+                            <button type="button" className="toolbar-button toolbar-button--icon" onClick={() => zoomAround(1 / 1.2)} title="Zoom out (⌘−)">−</button>
+                            <button type="button" className="toolbar-button mood-zoom__value" onClick={fitToContent} title="Fit to content (⌘0)">{Math.round(viewport.zoom * 100)}%</button>
+                            <button type="button" className="toolbar-button toolbar-button--icon" onClick={() => zoomAround(1.2)} title="Zoom in (⌘+)">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files) void addImagesFromFiles(e.target.files); e.target.value = ''; }} />
+
+                <div
+                    ref={stageRef}
+                    className={`mood-stage mood-stage--${tool} ${isDropping ? 'mood-stage--dropping' : ''} ${spaceHeldRef.current ? 'mood-stage--panning' : ''}`}
+                    style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px` }}
+                    onPointerDown={handleStagePointerDown}
+                    onPointerMove={handleStagePointerMove}
+                    onPointerUp={handleStagePointerUp}
+                    onPointerCancel={handleStagePointerUp}
+                    onDoubleClick={handleStageDoubleClick}
+                    onWheel={handleWheel}
+                    onDragOver={(e) => { e.preventDefault(); setIsDropping(true); }}
+                    onDragLeave={() => setIsDropping(false)}
+                    onDrop={handleDrop}
+                    tabIndex={0}
+                >
+                    <div
+                        className="mood-stage__world"
+                        style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}
+                    >
+                        <svg className="mood-connectors" aria-hidden="true">
+                            <defs>
+                                <marker id="mood-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+                                </marker>
+                            </defs>
+                            {connectors.map((connector) => {
+                                const path = connectorPath(connector);
+                                if (!path) return null;
+                                return (
+                                    <g key={connector.id} className="mood-connector">
+                                        <line x1={path.start.x} y1={path.start.y} x2={path.end.x} y2={path.end.y} markerEnd={connector.style === 'line' ? undefined : 'url(#mood-arrow)'} />
+                                        <circle cx={path.mid.x} cy={path.mid.y} r={9 / viewport.zoom} className="mood-connector__handle" onPointerDown={(e) => { e.stopPropagation(); removeConnector(connector.id); }}>
+                                            <title>Remove connection</title>
+                                        </circle>
+                                    </g>
+                                );
+                            })}
+                        </svg>
+
+                        {items.map((rawItem, index) => {
+                            const layout = layoutOf(rawItem, index);
+                            const isSelected = selectedIds.has(rawItem.id);
+                            const isEditing = editingId === rawItem.id;
+                            const isConnectSource = connectFrom === rawItem.id;
+                            const kind = rawItem.kind || 'image';
                             return (
                                 <div
-                                    key={category.id}
-                                    className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${isActive ? 'bg-indigo-600 text-white' : 'hover:bg-gray-800 text-gray-300'
-                                        } ${isDragOver ? 'ring-2 ring-indigo-400' : ''}`}
-                                    onClick={() => setSelectedCategoryId(category.id)}
-                                    onDragOver={(e) => handleDragOver(e, category.id)}
-                                    onDragLeave={handleDragLeave}
-                                    onDrop={(e) => handleDropOnCategory(e, category.id)}
+                                    key={rawItem.id}
+                                    className={`mood-item mood-item--${kind} ${isSelected ? 'mood-item--selected' : ''} ${isConnectSource ? 'mood-item--connect' : ''}`}
+                                    style={{
+                                        transform: `translate(${layout.x}px, ${layout.y}px)`,
+                                        width: layout.width,
+                                        height: layout.height,
+                                        zIndex: layout.zIndex || 1,
+                                        background: kind === 'note' ? rawItem.color || NOTE_COLORS[0] : undefined,
+                                    }}
+                                    onPointerDown={(e) => handleItemPointerDown(e, rawItem)}
+                                    onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isTextLike(rawItem)) setEditingId(rawItem.id);
+                                        else setPreviewItem(rawItem);
+                                    }}
                                 >
-                                    <span className="text-xl" title={category.description}>
-                                        {category.icon}
-                                    </span>
-                                    <span className="flex-1 text-sm font-medium truncate">{category.label}</span>
-                                    <span
-                                        className={`text-xs px-2 py-0.5 rounded-full ${isActive ? 'bg-indigo-500/50' : 'bg-gray-700'
-                                            }`}
-                                    >
-                                        {count}
-                                    </span>
-                                    {category.isCustom && (
-                                        <button
-                                            className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDeleteCategory(category.id);
-                                            }}
-                                            title="Delete category"
-                                        >
-                                            <TrashIcon />
-                                        </button>
+                                    {kind === 'image' && (
+                                        rawItem.url
+                                            ? <img src={rawItem.url} alt={rawItem.label || ''} draggable={false} className="mood-item__image" />
+                                            : <div className="mood-item__missing">Image unavailable</div>
+                                    )}
+                                    {kind === 'image' && rawItem.label && (
+                                        <div className="mood-item__caption">{rawItem.label}</div>
+                                    )}
+                                    {isTextLike(rawItem) && (
+                                        isEditing ? (
+                                            <textarea
+                                                className="mood-item__editor"
+                                                style={{ fontSize: rawItem.fontSize || (kind === 'note' ? 15 : 20) }}
+                                                value={rawItem.text || ''}
+                                                autoFocus
+                                                placeholder={kind === 'note' ? 'Write a note…' : 'Type something…'}
+                                                onChange={(e) => updateItems([rawItem.id], (item) => ({ ...item, text: e.target.value }))}
+                                                onBlur={() => setEditingId(null)}
+                                                onPointerDown={(e) => e.stopPropagation()}
+                                                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); } }}
+                                            />
+                                        ) : (
+                                            <div className="mood-item__text" style={{ fontSize: rawItem.fontSize || (kind === 'note' ? 15 : 20) }}>
+                                                {rawItem.text || <span className="mood-item__placeholder">{kind === 'note' ? 'Double-click to write' : 'Double-click to edit'}</span>}
+                                            </div>
+                                        )
+                                    )}
+                                    {isSelected && !rawItem.locked && (
+                                        <span className="mood-item__resize" onPointerDown={(e) => handleResizePointerDown(e, rawItem)} title="Resize (hold ⌥ for free aspect)" />
                                     )}
                                 </div>
                             );
                         })}
-                    </div>
-                </div>
 
-                <section className="app-card p-3 space-y-3">
-                    <div className="text-xs uppercase tracking-[0.2em] text-gray-400">Research Import</div>
-                    <input
-                        value={researchQuery}
-                        onChange={(e) => setResearchQuery(e.target.value)}
-                        placeholder="Search query (optional)"
-                        className="app-input text-sm"
-                    />
-                    <textarea
-                        value={researchUrls}
-                        onChange={(e) => setResearchUrls(e.target.value)}
-                        placeholder="URL(s), one per line. Video URLs can be frame-extracted."
-                        className="app-textarea h-24 text-xs"
-                    />
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                        <label className="text-gray-400">
-                            Max
-                            <input
-                                type="number"
-                                min={1}
-                                max={24}
-                                value={researchMaxResults}
-                                onChange={(e) => setResearchMaxResults(Number(e.target.value) || 8)}
-                                className="app-input mt-1"
-                            />
-                        </label>
-                        <label className="text-gray-400">
-                            Frames/Video
-                            <input
-                                type="number"
-                                min={1}
-                                max={6}
-                                value={framesPerVideo}
-                                onChange={(e) => setFramesPerVideo(Number(e.target.value) || 3)}
-                                className="app-input mt-1"
-                            />
-                        </label>
-                    </div>
-                    <label className="flex items-center gap-2 text-xs text-gray-300">
-                        <input
-                            type="checkbox"
-                            checked={extractFrames}
-                            onChange={(e) => setExtractFrames(e.target.checked)}
-                        />
-                        Extract still frames from video URLs
-                    </label>
-                    <button
-                        className="app-button w-full"
-                        onClick={handleResearchImport}
-                        disabled={isResearching}
-                    >
-                        {isResearching ? 'Importing...' : 'Import Research'}
-                    </button>
-                    {researchStatus && <div className="text-[10px] text-gray-400">{researchStatus}</div>}
-                </section>
-            </div>
-
-            <div className="flex-1 pl-6 overflow-hidden flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-6 gap-4">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-3">
-                            <span className="text-3xl">{selectedCategory?.icon}</span>
-                            {selectedCategory?.label || 'Moodboard'}
-                        </h1>
-                        <p className="text-sm text-gray-400 mt-1">{selectedCategory?.description}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <div className="inline-flex rounded-lg overflow-hidden border border-gray-700">
-                            <button
-                                className={`px-3 py-2 text-xs ${viewMode === 'grid' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300'}`}
-                                onClick={() => setViewMode('grid')}
-                            >
-                                Grid
-                            </button>
-                            <button
-                                className={`px-3 py-2 text-xs ${viewMode === 'canvas' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300'}`}
-                                onClick={() => setViewMode('canvas')}
-                            >
-                                Canvas
-                            </button>
-                        </div>
-                        {selectedItemIds.size > 0 && (
-                            <>
-                                <select
-                                    className="app-input text-sm"
-                                    onChange={(e) => {
-                                        if (e.target.value) {
-                                            handleMoveToCategory(e.target.value);
-                                            e.target.value = '';
-                                        }
-                                    }}
-                                    defaultValue=""
-                                >
-                                    <option value="" disabled>
-                                        Move to...
-                                    </option>
-                                    {categorizedMoodboard.categories
-                                        .filter((c) => c.id !== selectedCategoryId)
-                                        .map((c) => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.icon} {c.label}
-                                            </option>
-                                        ))}
-                                </select>
-                                <button className="app-button app-secondary text-red-400" onClick={handleDeleteSelected}>
-                                    <TrashIcon /> Delete ({selectedItemIds.size})
-                                </button>
-                            </>
+                        {marquee && (
+                            <div className="mood-marquee" style={{ transform: `translate(${marquee.x}px, ${marquee.y}px)`, width: marquee.width, height: marquee.height }} />
                         )}
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            className="hidden"
-                            onChange={handleFileUpload}
-                        />
-                        <button className="app-button app-secondary" onClick={handleAddTextCard}>
-                            <AddIcon /> Add Text
-                        </button>
-                        <button className="app-button" onClick={() => fileInputRef.current?.click()}>
-                            <UploadIcon /> Upload Images
-                        </button>
-                    </div>
-                </div>
 
-                {viewMode === 'grid' ? (
-                    categoryItems.length === 0 ? (
-                        <div
-                            className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-700 rounded-xl text-gray-500"
-                            onDragOver={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                            }}
-                            onDrop={(e) => handleDropOnCategory(e, selectedCategoryId)}
-                        >
-                            <UploadIcon className="w-12 h-12 mb-4 opacity-50" />
-                            <p className="text-lg font-medium">No items in this category</p>
-                            <p className="text-sm mt-2">Drag & drop images, add text cards, or import research</p>
-                        </div>
-                    ) : (
-                        <div className="overflow-y-auto pr-1">
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                                {categoryItems.map((rawItem, index) => {
-                                    const item = ensureItemLayout(rawItem, index);
-                                    const isSelected = selectedItemIds.has(item.id);
-                                    const isText = item.kind === 'text';
-                                    return (
-                                        <div
-                                            key={item.id}
-                                            className={`group relative rounded-xl overflow-hidden cursor-pointer transition-all ${isSelected ? 'ring-4 ring-indigo-500 scale-[0.98]' : 'hover:ring-2 hover:ring-gray-500'
-                                                } ${isText ? 'bg-gray-800 border border-gray-700 p-3 min-h-[180px]' : 'aspect-square'}`}
-                                            onClick={(e) => toggleSelectItem(item.id, e.shiftKey || e.metaKey)}
-                                            onDoubleClick={() => !isText && setPreviewItem(item)}
-                                            draggable={!isText}
-                                            onDragStart={() => {
-                                                if (!selectedItemIds.has(item.id)) {
-                                                    setSelectedItemIds(new Set([item.id]));
-                                                }
-                                            }}
-                                        >
-                                            {isText ? (
-                                                <div className="h-full flex flex-col">
-                                                    <input
-                                                        value={item.label || ''}
-                                                        onChange={(e) => updateItem(item.id, (prev) => ({ ...prev, label: e.target.value }))}
-                                                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 mb-2"
-                                                        placeholder="Card title"
-                                                    />
-                                                    <textarea
-                                                        value={item.text || ''}
-                                                        onChange={(e) => updateItem(item.id, (prev) => ({ ...prev, text: e.target.value }))}
-                                                        className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-2 text-xs text-gray-200 resize-none"
-                                                        placeholder="Notes..."
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    {item.url ? (
-                                                        <img
-                                                            src={item.url}
-                                                            alt={item.label || 'Moodboard image'}
-                                                            className="w-full h-full object-cover"
-                                                        />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center text-xs text-gray-500">
-                                                            Image unavailable
-                                                        </div>
-                                                    )}
-                                                    <div
-                                                        className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                                                            } transition-opacity`}
-                                                    >
-                                                        <div className="absolute bottom-0 left-0 right-0 p-3">
-                                                            <p className="text-sm font-medium text-white truncate">{item.label}</p>
-                                                            {(item.sourceLabel || item.query) && (
-                                                                <p className="text-[10px] text-gray-300 truncate mt-1">
-                                                                    {item.sourceLabel ? `${item.sourceLabel}` : ''}
-                                                                    {item.sourceLabel && item.query ? ' · ' : ''}
-                                                                    {item.query ? `query: ${item.query}` : ''}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </>
-                                            )}
+                        {selectionBounds && selectedItems.length > 0 && !editingId && (
+                            <div
+                                className="mood-selection-bar"
+                                style={{ transform: `translate(${selectionBounds.x + selectionBounds.width / 2}px, ${selectionBounds.y}px) scale(${1 / viewport.zoom}) translate(-50%, calc(-100% - 10px))` }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
+                                {selectedNote && (
+                                    <div className="mood-selection-bar__colors">
+                                        {NOTE_COLORS.map((color) => (
                                             <button
-                                                className="absolute top-3 right-3 p-1.5 rounded-full bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteItem(item.id);
-                                                }}
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    );
-                                })}
+                                                key={color}
+                                                type="button"
+                                                className={`mood-color ${selectedNote.color === color ? 'mood-color--active' : ''}`}
+                                                style={{ background: color }}
+                                                onClick={() => updateItems([selectedNote.id], (item) => ({ ...item, color }))}
+                                                title="Note colour"
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                                {selectedItems.length === 1 && isTextLike(selectedItems[0]) && (
+                                    <>
+                                        <button type="button" className="mood-selection-bar__button" onClick={() => updateItems([selectedItems[0].id], (item) => ({ ...item, fontSize: Math.max(10, (item.fontSize || (item.kind === 'note' ? 15 : 20)) - 2) }))} title="Smaller text">A−</button>
+                                        <button type="button" className="mood-selection-bar__button" onClick={() => updateItems([selectedItems[0].id], (item) => ({ ...item, fontSize: Math.min(72, (item.fontSize || (item.kind === 'note' ? 15 : 20)) + 2) }))} title="Larger text">A+</button>
+                                    </>
+                                )}
+                                <button type="button" className="mood-selection-bar__button" onClick={() => { setTool('connect'); setConnectFrom(selectedItems[0].id); setStatus('Click the item to connect to.'); }} title="Connect to another item (C)">⤳</button>
+                                <button type="button" className="mood-selection-bar__button" onClick={() => bringToFront(Array.from(selectedIds))} title="Bring to front (F)">↑</button>
+                                <button type="button" className="mood-selection-bar__button" onClick={() => sendToBack(Array.from(selectedIds))} title="Send to back (B)">↓</button>
+                                <button type="button" className="mood-selection-bar__button" onClick={duplicateSelection} title="Duplicate (⌘D)">⧉</button>
+                                <button type="button" className="mood-selection-bar__button" onClick={() => updateItems(Array.from(selectedIds), (item) => ({ ...item, locked: !item.locked }))} title="Lock / unlock">
+                                    {selectedItems.every((item) => item.locked) ? '🔒' : '🔓'}
+                                </button>
+                                <button type="button" className="mood-selection-bar__button mood-selection-bar__button--danger" onClick={() => deleteItems(Array.from(selectedIds))} title="Delete (⌫)">
+                                    <TrashIcon className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {quickAdd && (
+                        <div className="mood-quick-add" style={{ left: quickAdd.client.x, top: quickAdd.client.y }} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                            <div className="mood-quick-add__title">Add here</div>
+                            <button type="button" className="mood-quick-add__item" onClick={() => { addNote(quickAdd.world, 'note'); setQuickAdd(null); }}>
+                                <span className="mood-tool__glyph mood-tool__glyph--note" /> Sticky note
+                            </button>
+                            <button type="button" className="mood-quick-add__item" onClick={() => { addNote(quickAdd.world, 'text'); setQuickAdd(null); }}>
+                                <TextIcon className="w-4 h-4" /> Text
+                            </button>
+                            <button type="button" className="mood-quick-add__item" onClick={() => { fileInputRef.current?.click(); setQuickAdd(null); }}>
+                                <UploadIcon className="w-4 h-4" /> Upload images
+                            </button>
+                            <form
+                                className="mood-quick-add__url"
+                                onSubmit={(e) => { e.preventDefault(); void addImageFromUrl(quickAddUrl, quickAdd.world); setQuickAdd(null); }}
+                            >
+                                <input
+                                    className="app-input app-input--compact"
+                                    placeholder="Paste image or page URL"
+                                    value={quickAddUrl}
+                                    onChange={(e) => setQuickAddUrl(e.target.value)}
+                                    autoFocus
+                                    onKeyDown={(e) => { if (e.key === 'Escape') setQuickAdd(null); }}
+                                />
+                                <button type="submit" className="toolbar-button toolbar-button--text" disabled={!quickAddUrl.trim()}>Add</button>
+                            </form>
+                            <button type="button" className="mood-quick-add__close" onClick={() => setQuickAdd(null)} aria-label="Close">
+                                <XIcon className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    )}
+
+                    {items.length === 0 && (
+                        <div className="mood-empty">
+                            <div className="mood-empty__card">
+                                <ImageIcon className="w-8 h-8 app-muted" />
+                                <p className="mood-empty__title">An empty board</p>
+                                <p className="mood-empty__text">Drop images here, paste from the clipboard, or double-click anywhere to add a note.</p>
+                                <div className="mood-empty__actions">
+                                    <button className="app-button app-primary text-xs" onClick={() => fileInputRef.current?.click()}>Upload images</button>
+                                    <button className="app-button app-secondary text-xs" onClick={() => setResearchOpen(true)}>Import research</button>
+                                </div>
                             </div>
                         </div>
-                    )
-                ) : (
-                    <div className="flex-1 min-h-0 border border-gray-700 rounded-xl bg-gray-950 overflow-auto">
-                        <div
-                            ref={canvasRef}
-                            className="relative"
-                            style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
-                            onClick={() => setSelectedItemIds(new Set())}
-                        >
-                            {categoryItems.map((rawItem, index) => {
-                                const item = ensureItemLayout(rawItem, index);
-                                const isSelected = selectedItemIds.has(item.id);
-                                const isText = item.kind === 'text';
-                                const layout = item.layout!;
-                                return (
-                                    <div
-                                        key={item.id}
-                                        className={`absolute rounded-xl border ${isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/40' : 'border-gray-700'} shadow-xl overflow-hidden bg-gray-900`}
-                                        style={{
-                                            left: layout.x,
-                                            top: layout.y,
-                                            width: layout.width,
-                                            height: layout.height,
-                                            zIndex: layout.zIndex || 1,
-                                        }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleSelectItem(item.id, e.shiftKey || e.metaKey);
-                                            bringItemToFront(item.id);
-                                        }}
-                                    >
-                                        <div
-                                            className="h-8 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-2 cursor-move"
-                                            onMouseDown={(e) => startCanvasDrag(e, item)}
-                                        >
-                                            <span className="text-[10px] text-gray-300 truncate">
-                                                {item.label || (isText ? 'Text Card' : 'Image')}
-                                            </span>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    className="text-[10px] text-gray-400 hover:text-white"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        updateItem(item.id, (prev) => ({
-                                                            ...prev,
-                                                            layout: {
-                                                                ...(prev.layout || createCanvasLayout(0, prev.kind === 'text' ? 'text' : 'image', 1)),
-                                                                width: clamp((prev.layout?.width || 260) - 30, 180, 720),
-                                                                height: clamp((prev.layout?.height || 220) - 30, 120, 720),
-                                                            },
-                                                        }));
-                                                    }}
-                                                >
-                                                    -
-                                                </button>
-                                                <button
-                                                    className="text-[10px] text-gray-400 hover:text-white"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        updateItem(item.id, (prev) => ({
-                                                            ...prev,
-                                                            layout: {
-                                                                ...(prev.layout || createCanvasLayout(0, prev.kind === 'text' ? 'text' : 'image', 1)),
-                                                                width: clamp((prev.layout?.width || 260) + 30, 180, 720),
-                                                                height: clamp((prev.layout?.height || 220) + 30, 120, 720),
-                                                            },
-                                                        }));
-                                                    }}
-                                                >
-                                                    +
-                                                </button>
-                                                <button
-                                                    className="text-[10px] text-red-300 hover:text-red-100"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDeleteItem(item.id);
-                                                    }}
-                                                >
-                                                    ×
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div className="h-[calc(100%-2rem)]">
-                                            {isText ? (
-                                                <div className="p-2 h-full flex flex-col gap-2">
-                                                    <input
-                                                        value={item.label || ''}
-                                                        onChange={(e) => updateItem(item.id, (prev) => ({ ...prev, label: e.target.value }))}
-                                                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100"
-                                                        placeholder="Card title"
-                                                    />
-                                                    <textarea
-                                                        value={item.text || ''}
-                                                        onChange={(e) => updateItem(item.id, (prev) => ({ ...prev, text: e.target.value }))}
-                                                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-2 text-xs text-gray-200 resize-none"
-                                                        placeholder="Notes..."
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <div className="h-full flex flex-col">
-                                                    {item.url ? (
-                                                        <img
-                                                            src={item.url}
-                                                            alt={item.label || 'Moodboard image'}
-                                                            className="w-full flex-1 object-cover"
-                                                            onDoubleClick={() => setPreviewItem(item)}
-                                                        />
-                                                    ) : (
-                                                        <div className="flex-1 flex items-center justify-center text-xs text-gray-500 bg-black/30">
-                                                            Image unavailable
-                                                        </div>
-                                                    )}
-                                                    <input
-                                                        value={item.label || ''}
-                                                        onChange={(e) => updateItem(item.id, (prev) => ({ ...prev, label: e.target.value }))}
-                                                        className="bg-gray-800 border-t border-gray-700 px-2 py-1 text-[11px] text-gray-100"
-                                                        placeholder="Image label"
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            {categoryItems.length === 0 && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
-                                    <p className="text-lg font-medium">Empty Canvas</p>
-                                    <p className="text-sm mt-1">Add images or text cards to arrange freely.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                    )}
+
+                    {isDropping && <div className="mood-drop-hint">Drop to add to {selectedCategory?.label || 'the board'}</div>}
+                </div>
+
+                <div className="mood-statusbar">
+                    <span>{status || (tool === 'connect' ? 'Connect: click two items.' : 'Double-click to add · Space+drag or two fingers to pan · ⌘+scroll or pinch to zoom')}</span>
+                    {selectedIds.size > 0 && <span className="ml-auto">{selectedIds.size} selected</span>}
+                </div>
             </div>
 
             {previewItem && (
-                <div
-                    className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-sm flex items-center justify-center p-6"
-                    onClick={() => setPreviewItem(null)}
-                >
-                    <div
-                        className="max-w-6xl w-full max-h-full bg-gray-900 border border-gray-700 rounded-xl overflow-hidden"
-                        onClick={(event) => event.stopPropagation()}
-                    >
-                        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-gray-700">
+                <div className="mood-preview" onClick={() => setPreviewItem(null)}>
+                    <div className="mood-preview__panel" onClick={(e) => e.stopPropagation()}>
+                        <div className="mood-preview__head">
                             <div className="min-w-0">
-                                <h3 className="text-sm font-semibold text-gray-100 truncate">{previewItem.label || 'Moodboard image'}</h3>
-                                <p className="text-xs text-gray-400 truncate">
-                                    {previewItem.sourceLabel || 'Local'}{previewItem.query ? ` · query: ${previewItem.query}` : ''}
-                                </p>
+                                <div className="mood-preview__title">{previewItem.label || 'Image'}</div>
+                                <div className="mood-preview__meta">{previewItem.sourceLabel || 'Local'}{previewItem.query ? ` · query: ${previewItem.query}` : ''}</div>
                             </div>
                             <div className="flex items-center gap-2">
                                 {previewItem.sourceUrl && (
-                                    <a
-                                        href={previewItem.sourceUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="app-button app-secondary text-xs"
-                                    >
-                                        Open Source
-                                    </a>
+                                    <a href={previewItem.sourceUrl} target="_blank" rel="noopener noreferrer" className="app-button app-secondary text-xs">Open source</a>
                                 )}
-                                <button className="app-button text-xs" onClick={() => setPreviewItem(null)}>
-                                    Close
-                                </button>
+                                <button className="toolbar-button toolbar-button--icon" onClick={() => setPreviewItem(null)} aria-label="Close preview"><XIcon className="w-4 h-4" /></button>
                             </div>
                         </div>
-                        <div className="bg-black max-h-[80vh] overflow-auto flex items-center justify-center">
-                            {previewItem.url ? (
-                                <img
-                                    src={previewItem.url}
-                                    alt={previewItem.label || 'Moodboard preview'}
-                                    className="max-w-full max-h-[80vh] object-contain"
-                                />
-                            ) : (
-                                <div className="p-6 text-sm text-gray-400">Image unavailable</div>
-                            )}
+                        <div className="mood-preview__body">
+                            {previewItem.url ? <img src={previewItem.url} alt={previewItem.label || ''} /> : <div className="p-6 text-sm app-muted">Image unavailable</div>}
                         </div>
+                        <input
+                            className="mood-preview__caption"
+                            value={previewItem.label || ''}
+                            placeholder="Caption"
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setPreviewItem((prev) => (prev ? { ...prev, label: value } : prev));
+                                updateItems([previewItem.id], (item) => ({ ...item, label: value }));
+                            }}
+                        />
                     </div>
                 </div>
             )}

@@ -11,6 +11,9 @@ import {
     ScriptBeat,
     buildAutoCutScriptBeats,
 } from '../services/autoCutService';
+import { buildCleanSpeechSegments, detectSceneSegments, detectSpeechSegments, extractAudioAsWav, type LocalAnalysis } from '../utils/autoCutLocal';
+import { transcribeAudioWithWordTimings } from '../services/geminiService';
+import { trackTask } from '../services/taskCenter';
 import { TimelineClip, MediaItem, TimelineTrack } from '../types';
 import { getRegisteredMediaFile } from '../services/mediaSourceService';
 import { parseScriptDocument } from '../services/documentParsingService';
@@ -95,6 +98,10 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
     const [verificationResults, setVerificationResults] = useState<Map<string, VerificationResult>>(new Map());
     const [error, setError] = useState<string | null>(null);
     const [config, setConfig] = useState<AutoCutConfig>(DEFAULT_AUTO_CUT_CONFIG);
+    const [localMode, setLocalMode] = useState<'silence' | 'scenes' | 'filler'>('silence');
+    const [localBusy, setLocalBusy] = useState<string | null>(null);
+    const [localResult, setLocalResult] = useState<LocalAnalysis | null>(null);
+    const [localSettings, setLocalSettings] = useState({ margin: 0.2, minCut: 0.35, minClip: 0.25, threshold: 12, sceneSensitivity: 3, minScene: 1, removePauses: 1.2 });
     const [selectedClipForAnalysis, setSelectedClipForAnalysis] = useState<string | null>(null);
     const [customModelId, setCustomModelId] = useState<string>('');
     const [analysisScope, setAnalysisScope] = useState<'clip' | 'timeline' | 'pool' | null>(null);
@@ -369,6 +376,73 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
         });
 
         setMediaPoolSelected(selectedByBeat);
+    };
+
+    const runLocalDetection = async () => {
+        if (!selectedMedia?.url || !selectedClip) {
+            setError('Select a video clip on the timeline first.');
+            return;
+        }
+        setError(null);
+        setLocalResult(null);
+        const label = localMode === 'silence' ? 'Silence removal' : localMode === 'scenes' ? 'Scene detection' : 'Filler-word removal';
+        setLocalBusy(`${label}…`);
+        try {
+            const analysis = await trackTask({ label, kind: 'analysis', provider: 'local', estimatedMs: 20_000 }, async (task) => {
+                if (localMode === 'silence') {
+                    return detectSpeechSegments(selectedMedia.url, {
+                        marginSeconds: localSettings.margin,
+                        minCutSeconds: localSettings.minCut,
+                        minClipSeconds: localSettings.minClip,
+                        thresholdAboveFloorDb: localSettings.threshold,
+                    });
+                }
+                if (localMode === 'scenes') {
+                    return detectSceneSegments(selectedMedia.url, {
+                        adaptiveThreshold: localSettings.sceneSensitivity,
+                        minSceneSeconds: localSettings.minScene,
+                    }, (fraction) => task.update({ progress: fraction, message: `Scanning frames ${Math.round(fraction * 100)}%` }));
+                }
+                task.update({ message: 'Extracting audio…' });
+                const wav = await extractAudioAsWav(selectedMedia.url);
+                const base64 = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+                    reader.onerror = () => reject(new Error('Could not read audio.'));
+                    reader.readAsDataURL(wav);
+                });
+                task.update({ message: 'Transcribing with word timings…' });
+                const { words } = await transcribeAudioWithWordTimings({ base64, mimeType: 'audio/wav' });
+                const duration = selectedMedia.duration || Math.max(...words.map((w) => w.end), 0);
+                return buildCleanSpeechSegments(words, duration, { maxPauseSeconds: localSettings.removePauses });
+            });
+            setLocalResult(analysis);
+        } catch (err: any) {
+            setError(err?.message || 'Local detection failed.');
+        } finally {
+            setLocalBusy(null);
+        }
+    };
+
+    const applyLocalResult = () => {
+        if (!selectedClip || !localResult || localResult.segments.length === 0) return;
+        const sourceIn = selectedClip.sourceIn ?? 0;
+        const sourceOut = selectedClip.sourceOut ?? (sourceIn + (selectedClip.end - selectedClip.start));
+        const segments: VideoSegment[] = localResult.segments
+            .map((segment, index) => ({
+                id: `local-${localMode}-${index}`,
+                startTime: Math.max(sourceIn, segment.start),
+                endTime: Math.min(sourceOut, segment.end),
+                score: segment.score,
+                reason: segment.reason,
+                technicalQuality: { focus: 80, exposure: 80, stability: 80 },
+                contentRelevance: segment.score,
+                emotionalImpact: 50,
+            }))
+            .filter((segment) => segment.endTime - segment.startTime > 0.1);
+        if (segments.length === 0) return;
+        onSplitClipWithSegments(selectedClip.id, segments);
+        setLocalResult(null);
     };
 
     const handleAnalyze = async () => {
@@ -1554,6 +1628,59 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
                         </p>
                         <p className="text-xs mt-1">Try lowering the threshold or include used footage.</p>
                     </div>
+                </div>
+            )}
+
+            {status === 'idle' && selectedClip && (
+                <div className="autocut-local">
+                    <div className="autocut-local__head">
+                        <span>Quick cut (offline)</span>
+                        <div className="toolbar-segmented">
+                            {([['silence', 'Silence'], ['scenes', 'Scenes'], ['filler', 'Fillers']] as Array<['silence' | 'scenes' | 'filler', string]>).map(([id, label]) => (
+                                <button key={id} type="button" className={`toolbar-segmented__item ${localMode === id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => { setLocalMode(id); setLocalResult(null); }}>{label}</button>
+                            ))}
+                        </div>
+                    </div>
+                    {localMode === 'silence' && (
+                        <div className="autocut-local__grid">
+                            <label>Margin <input type="number" step={0.05} min={0} value={localSettings.margin} onChange={(e) => setLocalSettings((p) => ({ ...p, margin: Number(e.target.value) }))} /> s</label>
+                            <label>Min cut <input type="number" step={0.05} min={0} value={localSettings.minCut} onChange={(e) => setLocalSettings((p) => ({ ...p, minCut: Number(e.target.value) }))} /> s</label>
+                            <label>Min clip <input type="number" step={0.05} min={0} value={localSettings.minClip} onChange={(e) => setLocalSettings((p) => ({ ...p, minClip: Number(e.target.value) }))} /> s</label>
+                            <label>Threshold <input type="number" step={1} min={2} max={30} value={localSettings.threshold} onChange={(e) => setLocalSettings((p) => ({ ...p, threshold: Number(e.target.value) }))} /> dB</label>
+                        </div>
+                    )}
+                    {localMode === 'scenes' && (
+                        <div className="autocut-local__grid">
+                            <label>Sensitivity <input type="number" step={0.5} min={1.5} max={8} value={localSettings.sceneSensitivity} onChange={(e) => setLocalSettings((p) => ({ ...p, sceneSensitivity: Number(e.target.value) }))} /> ×</label>
+                            <label>Min scene <input type="number" step={0.5} min={0.2} value={localSettings.minScene} onChange={(e) => setLocalSettings((p) => ({ ...p, minScene: Number(e.target.value) }))} /> s</label>
+                        </div>
+                    )}
+                    {localMode === 'filler' && (
+                        <div className="autocut-local__grid">
+                            <label>Cut pauses over <input type="number" step={0.1} min={0} value={localSettings.removePauses} onChange={(e) => setLocalSettings((p) => ({ ...p, removePauses: Number(e.target.value) }))} /> s</label>
+                        </div>
+                    )}
+                    <p className="autocut-local__hint">
+                        {localMode === 'silence' && 'Adaptive loudness threshold with hysteresis, like auto-editor: keeps speech, drops dead air.'}
+                        {localMode === 'scenes' && 'Adaptive frame-difference detector (PySceneDetect style): finds hard cuts, ignores camera moves.'}
+                        {localMode === 'filler' && 'Transcribes with word timings and removes ums, ähs and long pauses (needs a Gemini key).'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <button type="button" className="app-button app-secondary text-xs" onClick={runLocalDetection} disabled={Boolean(localBusy)}>
+                            {localBusy || 'Detect'}
+                        </button>
+                        {localResult && (
+                            <button type="button" className="app-button app-primary text-xs" onClick={applyLocalResult} disabled={localResult.segments.length === 0}>
+                                Apply {localResult.segments.length} segment{localResult.segments.length === 1 ? '' : 's'}
+                            </button>
+                        )}
+                    </div>
+                    {localResult && (
+                        <div className="autocut-local__result">
+                            {localResult.notes.map((note, index) => <p key={index}>{note}</p>)}
+                            {localResult.removedSeconds > 0 && <p>Removes {localResult.removedSeconds.toFixed(1)}s of {localResult.duration.toFixed(1)}s.</p>}
+                        </div>
+                    )}
                 </div>
             )}
 

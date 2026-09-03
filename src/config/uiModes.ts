@@ -34,6 +34,7 @@ const MODE_WORKSPACES: Record<UIMode, Workspace[]> = {
         'EDIT',
         'SOUND',
         'EXPORT',
+        'PLUGINS',
     ],
     advanced: [
         'PROJECT',
@@ -41,6 +42,7 @@ const MODE_WORKSPACES: Record<UIMode, Workspace[]> = {
         'ASSET_LIBRARY',
         'MOODBOARD',
         'NOTEBOOKLM',
+        'PLUGINS',
         'IMPORT',
         'DESIGN',
         'IMAGE_GEN',
@@ -66,6 +68,7 @@ const MODE_WORKSPACES: Record<UIMode, Workspace[]> = {
         'ASSET_LIBRARY',
         'MOODBOARD',
         'NOTEBOOKLM',
+        'PLUGINS',
         'IMPORT',
         'DESIGN',
         'IMAGE_GEN',

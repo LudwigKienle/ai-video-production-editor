@@ -14,10 +14,6 @@ const DesignSystemSheet: React.FC<DesignSystemSheetProps> = ({ isOpen, onClose, 
   const themeOptions: Array<{ id: Theme; label: string }> = [
     { id: 'dark', label: 'Dark' },
     { id: 'light', label: 'Light' },
-    { id: 'fantasy', label: 'Fantasy' },
-    { id: 'cyberpunk', label: 'Neon Racer' },
-    { id: 'studio', label: 'Studio' },
-    { id: 'cinematic', label: 'Cinematic Indigo' },
   ];
 
   return (

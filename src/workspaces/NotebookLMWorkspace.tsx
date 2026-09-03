@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import type { StoryBible } from '../types';
 import ProjectResearchPanel from '../components/ProjectResearchPanel';
+import KnowledgeGraphPanel from '../components/KnowledgeGraphPanel';
 import NotebookLMPanel from '../components/NotebookLMPanel';
-import { BrainCircuitIcon, SearchIcon } from '../components/icons';
+import { BrainCircuitIcon, SearchIcon, GridIcon } from '../components/icons';
 
 type NotebookLMWorkspaceProps = {
     storyBible: StoryBible;
@@ -17,7 +18,7 @@ const NotebookLMWorkspace: React.FC<NotebookLMWorkspaceProps> = ({
     onOpenMoodboard,
     onOpenSettings,
 }) => {
-    const [tab, setTab] = useState<'internal' | 'notebooklm'>('internal');
+    const [tab, setTab] = useState<'internal' | 'graph' | 'notebooklm'>('internal');
 
     return (
         <div className="w-full h-full bg-gray-950 text-white">
@@ -33,6 +34,17 @@ const NotebookLMWorkspace: React.FC<NotebookLMWorkspaceProps> = ({
                     >
                         <SearchIcon className="h-4 w-4" />
                         Internal Research
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setTab('graph')}
+                        className={`inline-flex items-center gap-2 rounded-t-xl border px-4 py-2 text-sm font-medium transition ${tab === 'graph'
+                            ? 'border-cyan-400/30 bg-cyan-500/10 text-cyan-100'
+                            : 'border-white/10 bg-white/5 text-gray-300 hover:border-cyan-400/20 hover:text-white'
+                            }`}
+                    >
+                        <GridIcon className="h-4 w-4" />
+                        Knowledge Graph
                     </button>
                     <button
                         type="button"
@@ -56,6 +68,8 @@ const NotebookLMWorkspace: React.FC<NotebookLMWorkspaceProps> = ({
                         onOpenMoodboard={onOpenMoodboard}
                         onOpenSettings={onOpenSettings}
                     />
+                ) : tab === 'graph' ? (
+                    <KnowledgeGraphPanel storyBible={storyBible} setStoryBible={setStoryBible} />
                 ) : (
                     <NotebookLMPanel />
                 )}

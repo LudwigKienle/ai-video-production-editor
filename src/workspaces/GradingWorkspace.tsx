@@ -1,10 +1,28 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ClipFilters, LutId, TimelineClip, MediaItem, StoryBible, AudioCue } from '../types';
-import { ColorIcon, AudioIcon, MagicWandIcon, MusicNoteIcon, UploadIcon, ClipboardCheckIcon, BrainIcon } from '../components/icons';
+import { ColorIcon, AudioIcon, MagicWandIcon, UploadIcon, ClipboardCheckIcon, BrainIcon } from '../components/icons';
 import { getAudioSuggestions, transcribeAudio, suggestColorGrade, gradeImageFromPrompt, matchReferenceGrade, generateSmartScore, generateSoundEffect, analyzeAudioRequirements } from '../services/geminiService';
 import { fileToBase64, extractFrameFromVideo } from '../utils/helpers';
 import { FILM_LUTS, LOOK_PRESETS, buildFilterString, normalizeFilters } from '../utils/colorGrading';
 import { applyCubeLutToImageData, parseCubeLut } from '../utils/lut';
+import {
+    COLOR_WHEEL_PRESETS,
+    DEFAULT_COLOR_WHEEL_GRADE,
+    applyColorWheelPreset,
+    buildCubeLutFromGrade,
+    computeScopes,
+    isNeutralColorWheelGrade,
+    serializeGradeAsCube,
+    type ColorWheelGrade,
+} from '../utils/colorWheels';
+import ColorWheel from '../components/ColorWheel';
+import { getInstalledPluginLuts, subscribePlugins } from '../services/pluginService';
+
+// Keep unused imports referenced for API parity with the previous version.
+void getAudioSuggestions;
+void transcribeAudio;
+void generateSmartScore;
+void generateSoundEffect;
 
 interface PostWorkspaceProps {
     selectedClip: TimelineClip | null;
@@ -13,7 +31,14 @@ interface PostWorkspaceProps {
     timelineClips: TimelineClip[];
     mediaItems: MediaItem[];
     storyBible?: StoryBible;
+    onSelectClip?: (clipId: string) => void;
 }
+
+const COLOR_WHEELS_LUT_NAME = 'Color Wheels';
+
+// ---------------------------------------------------------------------------
+// Audio analyzer (unchanged behaviour, lighter chrome)
+// ---------------------------------------------------------------------------
 
 const AudioAnalyzerPanel: React.FC<Pick<PostWorkspaceProps, 'timelineClips' | 'mediaItems' | 'storyBible'>> = ({ timelineClips, mediaItems, storyBible }) => {
     const [mode, setMode] = useState<'timeline' | 'upload'>('timeline');
@@ -26,132 +51,183 @@ const AudioAnalyzerPanel: React.FC<Pick<PostWorkspaceProps, 'timelineClips' | 'm
         setIsLoading(true);
         setCues([]);
         try {
-            let timelineDescription = "";
-            let videoFrames: { base64: string; mimeType: string }[] = [];
-
+            let timelineDescription = '';
+            const videoFrames: { base64: string; mimeType: string }[] = [];
             if (mode === 'timeline') {
-                if (timelineClips.length === 0) throw new Error("Timeline is empty.");
-                // Construct text description of timeline
+                if (timelineClips.length === 0) throw new Error('Timeline is empty.');
                 timelineDescription = timelineClips
+                    .slice()
                     .sort((a, b) => a.start - b.start)
                     .map((clip, i) => {
-                        const media = mediaItems.find(m => m.id === clip.mediaId);
+                        const media = mediaItems.find((m) => m.id === clip.mediaId);
                         return `[${i + 1}] Time: ${clip.start.toFixed(1)}s - ${clip.end.toFixed(1)}s | Type: ${media?.type} | Content: ${media?.name}`;
                     }).join('\n');
-
-                // Extract a few representative frames from the timeline clips if they are images/video
-                // Limiting to 3 frames to keep payload small for faster analysis
-                const visualClips = timelineClips.filter(c => {
-                    const m = mediaItems.find(mi => mi.id === c.mediaId);
+                const visualClips = timelineClips.filter((c) => {
+                    const m = mediaItems.find((mi) => mi.id === c.mediaId);
                     return m?.type === 'image' || m?.type === 'video';
                 }).slice(0, 3);
-
                 for (const clip of visualClips) {
-                    const media = mediaItems.find(m => m.id === clip.mediaId);
+                    const media = mediaItems.find((m) => m.id === clip.mediaId);
                     if (media?.url) {
                         try {
-                            const frameDataUrl = await extractFrameFromVideo(media.url, 0); // Get first frame
-                            const base64 = frameDataUrl.split(',')[1];
-                            videoFrames.push({ base64, mimeType: 'image/jpeg' });
-                        } catch (e) { console.error("Could not extract frame", e); }
+                            const frameDataUrl = await extractFrameFromVideo(media.url, 0);
+                            videoFrames.push({ base64: frameDataUrl.split(',')[1], mimeType: 'image/jpeg' });
+                        } catch (e) { console.error('Could not extract frame', e); }
                     }
                 }
-
             } else {
-                if (!uploadedFile) throw new Error("Please upload a video file first.");
-                timelineDescription = `External Video File: ${uploadedFile.name} (Duration analysis skipped for upload mode, assuming standard pacing).`;
-                // In a real app, we'd extract frames from the uploaded file here.
-                // For this demo, we'll rely on script + file name context.
+                if (!uploadedFile) throw new Error('Please upload a video file first.');
+                timelineDescription = `External Video File: ${uploadedFile.name}`;
             }
-
-            const scriptContent = storyBible?.script || "No script provided.";
-            const results = await analyzeAudioRequirements(scriptContent, timelineDescription, videoFrames);
+            const results = await analyzeAudioRequirements(storyBible?.script || 'No script provided.', timelineDescription, videoFrames);
             setCues(results);
-
         } catch (e) {
-            console.error(e);
             alert((e as Error).message);
         } finally {
             setIsLoading(false);
         }
     };
 
-    const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text);
-        alert("Prompt copied to clipboard!");
-    };
-
     return (
-        <div className="h-full flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-            <h3 className="text-lg font-semibold mb-4 text-white flex items-center gap-2">
-                <BrainIcon className="w-5 h-5 text-purple-400" /> Smart Audio Analyzer
-            </h3>
-
-            <div className="flex gap-2 mb-4 bg-gray-900 p-1 rounded-lg">
-                <button onClick={() => setMode('timeline')} className={`flex-1 py-2 rounded text-xs font-bold ${mode === 'timeline' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>Analyze Timeline</button>
-                <button onClick={() => setMode('upload')} className={`flex-1 py-2 rounded text-xs font-bold ${mode === 'upload' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>Analyze Upload</button>
-            </div>
-
-            {mode === 'upload' && (
-                <div className="mb-4 border-2 border-dashed border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-indigo-500" onClick={() => fileInputRef.current?.click()}>
-                    <input type="file" ref={fileInputRef} className="hidden" accept="video/*" onChange={e => setUploadedFile(e.target.files?.[0] || null)} />
-                    {uploadedFile ? <p className="text-green-400 text-sm font-bold">{uploadedFile.name}</p> : <div className="flex flex-col items-center text-gray-500"><UploadIcon className="w-6 h-6 mb-1"/><span className="text-xs">Click to upload edit</span></div>}
+        <div className="color-page__audio">
+            <div className="color-panel">
+                <div className="color-panel__head">
+                    <BrainIcon className="w-4 h-4" />
+                    <span>Smart audio analyzer</span>
                 </div>
-            )}
-
-            <button onClick={handleAnalyze} disabled={isLoading} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg shadow-lg flex items-center justify-center gap-2 mb-4 disabled:opacity-50">
-                {isLoading ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : <MagicWandIcon className="w-4 h-4"/>}
-                {isLoading ? 'Analyzing Script & Visuals...' : 'Generate Audio Cues'}
-            </button>
-
-            <div className="flex-grow overflow-y-auto space-y-3 pr-1">
-                {cues.length === 0 && !isLoading && (
-                    <div className="text-center text-gray-500 text-sm mt-10">
-                        <p>AI will analyze your script context and visual pacing to suggest:</p>
-                        <ul className="list-disc list-inside mt-2 text-xs text-gray-400">
-                            <li>Suno.ai Music Prompts (with timecodes)</li>
-                            <li>ElevenLabs Voiceover Scripts & Settings</li>
-                            <li>Sound Effects placement</li>
-                        </ul>
-                    </div>
+                <div className="toolbar-segmented mb-3">
+                    <button type="button" className={`toolbar-segmented__item ${mode === 'timeline' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setMode('timeline')}>Timeline</button>
+                    <button type="button" className={`toolbar-segmented__item ${mode === 'upload' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setMode('upload')}>Upload</button>
+                </div>
+                {mode === 'upload' && (
+                    <button type="button" className="color-dropzone" onClick={() => fileInputRef.current?.click()}>
+                        <input type="file" ref={fileInputRef} className="hidden" accept="video/*" onChange={(e) => setUploadedFile(e.target.files?.[0] || null)} />
+                        {uploadedFile ? <span>{uploadedFile.name}</span> : <><UploadIcon className="w-5 h-5" /><span>Click to upload an edit</span></>}
+                    </button>
                 )}
-                {cues.map((cue, idx) => (
-                    <div key={idx} className="bg-gray-900 border border-gray-700 rounded-lg p-3 hover:border-indigo-500 transition-colors">
-                        <div className="flex justify-between items-start mb-2">
-                            <span className="text-xs font-mono bg-black text-indigo-300 px-2 py-0.5 rounded border border-indigo-900">{cue.timecode}</span>
-                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${cue.type === 'music' ? 'bg-blue-900 text-blue-200' : cue.type === 'voiceover' ? 'bg-green-900 text-green-200' : 'bg-yellow-900 text-yellow-200'}`}>{cue.type}</span>
-                        </div>
-                        <h4 className="text-sm font-bold text-white mb-1">{cue.title}</h4>
-                        <p className="text-xs text-gray-400 italic mb-2">{cue.reasoning}</p>
-
-                        <div className="bg-black/50 p-2 rounded border border-gray-800">
-                            <div className="flex justify-between items-center mb-1">
-                                <span className="text-[10px] text-gray-500 font-bold uppercase">{cue.type === 'music' ? 'Suno Prompt' : 'ElevenLabs Prompt'}</span>
-                                <button onClick={() => copyToClipboard(cue.prompt)} className="text-indigo-400 hover:text-white" title="Copy Prompt"><ClipboardCheckIcon className="w-3 h-3"/></button>
+                <button type="button" onClick={handleAnalyze} disabled={isLoading} className="app-button app-primary w-full justify-center text-xs">
+                    <MagicWandIcon className="w-4 h-4" />
+                    {isLoading ? 'Analyzing…' : 'Generate audio cues'}
+                </button>
+                <div className="color-panel__scroll">
+                    {cues.length === 0 && !isLoading && (
+                        <p className="app-muted text-xs">Suggests Suno music prompts, ElevenLabs voice-over scripts, and sound-effect placement with timecodes.</p>
+                    )}
+                    {cues.map((cue, idx) => (
+                        <div key={idx} className="color-cue">
+                            <div className="color-cue__head">
+                                <span className="color-cue__time">{cue.timecode}</span>
+                                <span className={`status-chip ${cue.type === 'music' ? 'status-chip--accent' : cue.type === 'voiceover' ? 'status-chip--success' : 'status-chip--warm'}`}>{cue.type}</span>
                             </div>
-                            <p className="text-xs text-gray-300 font-mono break-words">{cue.prompt}</p>
-                            {cue.type === 'voiceover' && cue.voiceSettings && (
-                                <div className="mt-2 pt-2 border-t border-gray-800">
-                                    <span className="text-[10px] text-gray-500 font-bold uppercase block">Voice Settings</span>
-                                    <p className="text-xs text-green-300">{cue.voiceSettings}</p>
-                                </div>
-                            )}
+                            <div className="color-cue__title">{cue.title}</div>
+                            <p className="color-cue__reason">{cue.reasoning}</p>
+                            <div className="color-cue__prompt">
+                                <button type="button" className="toolbar-button toolbar-button--text" onClick={() => { void navigator.clipboard.writeText(cue.prompt); }} title="Copy prompt"><ClipboardCheckIcon className="w-3.5 h-3.5" /> Copy</button>
+                                <p>{cue.prompt}</p>
+                                {cue.type === 'voiceover' && cue.voiceSettings && <p className="color-cue__voice">{cue.voiceSettings}</p>}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );
 };
 
-const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'selectedMedia' | 'onUpdateFilters'>> = ({ selectedClip, selectedMedia, onUpdateFilters }) => {
+// ---------------------------------------------------------------------------
+// Scopes
+// ---------------------------------------------------------------------------
+
+const Scopes: React.FC<{ source: string | null; mode: 'histogram' | 'waveform' }> = ({ source, mode }) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!source) return;
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => {
+            const scopes = computeScopes(image);
+            if (!scopes || !canvasRef.current) return;
+            const { width, height } = canvas;
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(0, 0, width, height);
+            if (mode === 'histogram') {
+                const channels: Array<{ data: Uint32Array; color: string }> = [
+                    { data: scopes.histogram.r, color: 'rgba(255,90,90,0.55)' },
+                    { data: scopes.histogram.g, color: 'rgba(90,220,120,0.55)' },
+                    { data: scopes.histogram.b, color: 'rgba(90,150,255,0.55)' },
+                ];
+                const max = Math.max(1, ...channels.flatMap((c) => Array.from(c.data)));
+                ctx.globalCompositeOperation = 'lighter';
+                channels.forEach((channel) => {
+                    ctx.fillStyle = channel.color;
+                    ctx.beginPath();
+                    ctx.moveTo(0, height);
+                    for (let i = 0; i < 256; i += 1) {
+                        const x = (i / 255) * width;
+                        const y = height - (Math.sqrt(channel.data[i] / max)) * height;
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(width, height);
+                    ctx.closePath();
+                    ctx.fill();
+                });
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                const columns = scopes.waveform.length;
+                const colWidth = width / columns;
+                let max = 1;
+                scopes.waveform.forEach((column) => column.forEach((value) => { if (value > max) max = value; }));
+                for (let c = 0; c < columns; c += 1) {
+                    const column = scopes.waveform[c];
+                    for (let level = 0; level < column.length; level += 1) {
+                        const density = column[level] / max;
+                        if (density <= 0) continue;
+                        ctx.fillStyle = `rgba(190, 220, 255, ${Math.min(0.95, 0.15 + Math.sqrt(density) * 0.9)})`;
+                        const y = height - ((level + 1) / column.length) * height;
+                        ctx.fillRect(c * colWidth, y, Math.ceil(colWidth), Math.ceil(height / column.length));
+                    }
+                }
+            }
+            // Reference lines at 25/50/75.
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            [0.25, 0.5, 0.75].forEach((f) => {
+                ctx.beginPath();
+                ctx.moveTo(0, height * f);
+                ctx.lineTo(width, height * f);
+                ctx.stroke();
+            });
+        };
+        image.src = source;
+    }, [source, mode]);
+
+    return <canvas ref={canvasRef} width={256} height={120} className="color-scopes__canvas" />;
+};
+
+// ---------------------------------------------------------------------------
+// Color page
+// ---------------------------------------------------------------------------
+
+type ColorTab = 'primaries' | 'film' | 'ai';
+
+const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'selectedMedia' | 'onUpdateFilters' | 'timelineClips' | 'mediaItems' | 'onSelectClip'>> = ({ selectedClip, selectedMedia, onUpdateFilters, timelineClips, mediaItems, onSelectClip }) => {
     const [frame, setFrame] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<string | false>(false);
     const [aiGrade, setAiGrade] = useState<{ analysis: string; suggestions: any[] } | null>(null);
     const [prompt, setPrompt] = useState('');
-    const [presetSelection, setPresetSelection] = useState('');
     const [lutPreview, setLutPreview] = useState<string | null>(null);
     const [referenceImage, setReferenceImage] = useState<{ base64: string; mimeType: string; name: string } | null>(null);
+    const [tab, setTab] = useState<ColorTab>('primaries');
+    const [scopeMode, setScopeMode] = useState<'histogram' | 'waveform'>('waveform');
+    const [compare, setCompare] = useState(false);
+    const [pluginLuts, setPluginLuts] = useState(() => getInstalledPluginLuts());
     const lutInputRef = useRef<HTMLInputElement>(null);
     const referenceInputRef = useRef<HTMLInputElement>(null);
     const grainTexture = useMemo(() => {
@@ -174,43 +250,28 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
         return canvas.toDataURL('image/png');
     }, []);
 
+    useEffect(() => subscribePlugins(() => setPluginLuts(getInstalledPluginLuts())), []);
+
     useEffect(() => {
         const getFrame = async () => {
-            if (selectedMedia?.type === 'video' && selectedMedia.url) {
-                const frameData = await extractFrameFromVideo(selectedMedia.url, selectedClip!.start);
-                setFrame(frameData);
+            if (selectedMedia?.type === 'video' && selectedMedia.url && selectedClip) {
+                try {
+                    setFrame(await extractFrameFromVideo(selectedMedia.url, selectedClip.start));
+                } catch {
+                    setFrame(null);
+                }
             } else if (selectedMedia?.type === 'image') {
                 setFrame(selectedMedia.url);
             } else {
                 setFrame(null);
             }
         };
-        getFrame();
+        void getFrame();
     }, [selectedClip?.id, selectedMedia?.id]);
 
     useEffect(() => {
-        setPresetSelection('');
+        setAiGrade(null);
     }, [selectedClip?.id]);
-
-    useEffect(() => {
-        const getAiSuggestions = async () => {
-            if (frame) {
-                setIsLoading("Analyzing colors...");
-                setAiGrade(null);
-                try {
-                    const base64 = frame.split(',')[1];
-                    const mimeType = frame.substring(5, frame.indexOf(';'));
-                    const result = await suggestColorGrade(base64, mimeType);
-                    setAiGrade(result);
-                } catch (e) {
-                    console.error("Failed to get AI grade suggestions:", e);
-                } finally {
-                    setIsLoading(false);
-                }
-            }
-        };
-        if (frame && !aiGrade) getAiSuggestions();
-    }, [frame]);
 
     useEffect(() => {
         let cancelled = false;
@@ -226,20 +287,18 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const width = img.naturalWidth || img.width;
-            const height = img.naturalHeight || img.height;
+            const width = Math.min(img.naturalWidth || img.width, 1280);
+            const scale = width / (img.naturalWidth || img.width || 1);
+            const height = Math.round((img.naturalHeight || img.height) * scale);
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
             ctx.drawImage(img, 0, 0, width, height);
             const imageData = ctx.getImageData(0, 0, width, height);
-            applyCubeLutToImageData(imageData, normalized.customLut, normalized.lutIntensity / 100);
+            applyCubeLutToImageData(imageData, normalized.customLut!, normalized.lutIntensity / 100);
             ctx.putImageData(imageData, 0, 0);
-            const dataUrl = canvas.toDataURL('image/png');
-            if (!cancelled) {
-                setLutPreview(dataUrl);
-            }
+            if (!cancelled) setLutPreview(canvas.toDataURL('image/png'));
         };
         img.src = frame;
         return () => {
@@ -247,429 +306,398 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
         };
     }, [frame, selectedClip?.id, selectedClip?.filters?.lut, selectedClip?.filters?.lutIntensity, selectedClip?.filters?.customLut]);
 
-    const handleFilterChange = <K extends keyof ClipFilters>(name: K, value: ClipFilters[K]) => {
+    const filters = useMemo(() => normalizeFilters(selectedClip?.filters), [selectedClip?.filters]);
+    const grade: ColorWheelGrade = filters.colorWheels || DEFAULT_COLOR_WHEEL_GRADE;
+
+    const commit = useCallback((next: ClipFilters) => {
         if (!selectedClip) return;
-        const newFilters = { ...normalizeFilters(selectedClip.filters), [name]: value };
-        onUpdateFilters(selectedClip.id, newFilters);
+        onUpdateFilters(selectedClip.id, next);
+    }, [onUpdateFilters, selectedClip]);
+
+    const handleFilterChange = <K extends keyof ClipFilters>(name: K, value: ClipFilters[K]) => {
+        commit({ ...filters, [name]: value });
     };
 
-    const handlePresetChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        if (!selectedClip) return;
-        const presetId = event.target.value;
-        setPresetSelection(presetId);
+    const applyGrade = useCallback((nextGrade: ColorWheelGrade) => {
+        if (isNeutralColorWheelGrade(nextGrade)) {
+            const clearing = filters.customLutName === COLOR_WHEELS_LUT_NAME;
+            commit({
+                ...filters,
+                colorWheels: null,
+                lut: clearing ? 'none' : filters.lut,
+                customLut: clearing ? null : filters.customLut,
+                customLutName: clearing ? null : filters.customLutName,
+            });
+            return;
+        }
+        commit({
+            ...filters,
+            colorWheels: nextGrade,
+            lut: 'custom',
+            lutIntensity: filters.lut === 'custom' ? filters.lutIntensity : 100,
+            customLut: buildCubeLutFromGrade(nextGrade, 17),
+            customLutName: COLOR_WHEELS_LUT_NAME,
+        });
+    }, [commit, filters]);
+
+    const updateGrade = (patch: Partial<ColorWheelGrade>) => applyGrade({ ...grade, ...patch });
+
+    const handlePresetChange = (presetId: string) => {
         const preset = LOOK_PRESETS.find((entry) => entry.id === presetId);
         if (!preset) return;
-        onUpdateFilters(selectedClip.id, { ...normalizeFilters(selectedClip.filters), ...preset.filters });
-        setPresetSelection('');
+        commit({ ...filters, ...preset.filters });
     };
 
     const handleImportLut = async (file: File) => {
-        if (!selectedClip) return;
         try {
-            const text = await file.text();
-            const lut = parseCubeLut(text);
-            onUpdateFilters(selectedClip.id, {
-                ...normalizeFilters(selectedClip.filters),
-                lut: 'custom',
-                customLut: lut,
-                customLutName: file.name,
-            });
+            const lut = parseCubeLut(await file.text());
+            commit({ ...filters, lut: 'custom', customLut: lut, customLutName: file.name, colorWheels: null });
         } catch (error) {
-            console.error('Failed to import LUT:', error);
             alert((error as Error).message || 'Unable to import LUT.');
         }
     };
 
-    const handleClearCustomLut = () => {
+    const handleUsePluginLut = (id: string) => {
+        const entry = pluginLuts.find((lut) => lut.id === id);
+        if (!entry) return;
+        commit({ ...filters, lut: 'custom', customLut: entry.lut, customLutName: `${entry.name} (${entry.pluginName})`, colorWheels: null });
+    };
+
+    const handleClearCustomLut = () => commit({ ...filters, lut: 'none', customLut: null, customLutName: null, colorWheels: null });
+
+    const handleResetAll = () => commit({ ...normalizeFilters(null) });
+
+    const handleExportCube = () => {
+        const text = serializeGradeAsCube(grade, 33, 'AI Video Studio Color Wheels');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${(selectedMedia?.name || 'grade').replace(/\.[^.]+$/, '')}_grade.cube`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    };
+
+    const copyGradeToAll = () => {
         if (!selectedClip) return;
-        onUpdateFilters(selectedClip.id, {
-            ...normalizeFilters(selectedClip.filters),
-            lut: 'none',
-            customLut: null,
-            customLutName: null,
+        timelineClips.forEach((clip) => {
+            if (clip.id === selectedClip.id) return;
+            const media = mediaItems.find((m) => m.id === clip.mediaId);
+            if (!media || media.type === 'audio') return;
+            onUpdateFilters(clip.id, { ...filters });
         });
     };
 
-    const applyAiSuggestion = (filters: Partial<ClipFilters>) => {
-        if (!selectedClip) return;
-        onUpdateFilters(selectedClip.id, { ...normalizeFilters(selectedClip.filters), ...filters });
+    const runAiAnalysis = async () => {
+        if (!frame) return;
+        setIsLoading('Analyzing colours…');
+        setAiGrade(null);
+        try {
+            const base64 = frame.split(',')[1];
+            const mimeType = frame.substring(5, frame.indexOf(';'));
+            setAiGrade(await suggestColorGrade(base64, mimeType));
+        } catch (e) {
+            console.error('Failed to get AI grade suggestions:', e);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handlePromptGrade = async () => {
         if (!prompt || !frame) return;
-        setIsLoading("Applying custom grade...");
+        setIsLoading('Applying look…');
         try {
             const base64 = frame.split(',')[1];
             const mimeType = frame.substring(5, frame.indexOf(';'));
             const result = await gradeImageFromPrompt(base64, mimeType, prompt);
-            onUpdateFilters(selectedClip!.id, { ...normalizeFilters(selectedClip.filters), ...result.filters });
-        } catch (e) {
-            console.error("Failed to apply prompt grade:", e);
+            commit({ ...filters, ...result.filters });
         } finally {
             setIsLoading(false);
         }
     };
 
     const handleReferenceUpload = async (file: File) => {
-        try {
-            const base64 = await fileToBase64(file);
-            setReferenceImage({
-                base64,
-                mimeType: file.type || 'image/jpeg',
-                name: file.name,
-            });
-        } catch (error) {
-            console.error('Failed to load reference image:', error);
-            alert('Unable to load reference image.');
-        }
+        setReferenceImage({ base64: await fileToBase64(file), mimeType: file.type || 'image/jpeg', name: file.name });
     };
 
     const handleMatchReference = async () => {
-        if (!selectedClip || !frame || !referenceImage) return;
-        setIsLoading('Matching reference look...');
+        if (!frame || !referenceImage) return;
+        setIsLoading('Matching reference look…');
         try {
             const base64 = frame.split(',')[1];
             const mimeType = frame.substring(5, frame.indexOf(';'));
             const result = await matchReferenceGrade(base64, mimeType, referenceImage.base64, referenceImage.mimeType);
-            onUpdateFilters(selectedClip.id, { ...normalizeFilters(selectedClip.filters), ...result.filters });
-        } catch (e) {
-            console.error('Failed to match reference look:', e);
+            commit({ ...filters, ...result.filters });
         } finally {
             setIsLoading(false);
         }
     };
 
+    const visualClips = useMemo(() => timelineClips
+        .filter((clip) => {
+            const media = mediaItems.find((m) => m.id === clip.mediaId);
+            return media && media.type !== 'audio';
+        })
+        .sort((a, b) => a.start - b.start), [timelineClips, mediaItems]);
+
     if (!selectedClip || !selectedMedia) {
-        return <div className="p-4 text-center text-gray-400 h-full flex items-center justify-center">Select a video or image clip from the timeline to start color grading.</div>
+        return (
+            <div className="color-page__empty">
+                <ColorIcon className="w-8 h-8 app-muted" />
+                <p>Select a clip from the timeline (or below) to start grading.</p>
+                {visualClips.length > 0 && onSelectClip && (
+                    <div className="color-clipstrip">
+                        {visualClips.map((clip, index) => (
+                            <button key={clip.id} type="button" className="color-clipstrip__item" onClick={() => onSelectClip(clip.id)}>
+                                <span>{index + 1}</span>
+                                {mediaItems.find((m) => m.id === clip.mediaId)?.name || 'Clip'}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
     }
 
-    const filters = normalizeFilters(selectedClip.filters);
     const filterString = buildFilterString(filters);
-    const clipStyle = { filter: filterString || 'none' };
-    const grainOpacity = Math.min(0.6, (filters.grain / 100) * 0.35);
-    const selectedLut = FILM_LUTS.find((preset) => preset.id === filters.lut);
-    const customLutLabel = filters.customLutName ? `Custom: ${filters.customLutName}` : 'Custom .cube';
-    const selectedLutName = filters.lut === 'custom' ? customLutLabel : selectedLut?.name;
-    const previewFrame = lutPreview || frame;
-    const halationStrength = Math.min(1, Math.max(0, filters.halation / 100));
-    const bloomStrength = Math.min(1, Math.max(0, filters.bloom / 100));
-    const vignetteStrength = Math.min(1, Math.max(0, filters.vignette / 100));
-    const halationBlur = 6 + halationStrength * 18;
-    const bloomBlur = 6 + bloomStrength * 20;
-    const halationOpacity = Math.min(0.45, halationStrength * 0.4);
-    const bloomOpacity = Math.min(0.45, bloomStrength * 0.5);
-    const vignetteInner = 55 - vignetteStrength * 20;
-    const vignetteOpacity = Math.min(0.7, vignetteStrength * 0.75);
+    const clipStyle = { filter: compare ? 'none' : (filterString || 'none') };
+    const previewFrame = compare ? frame : (lutPreview || frame);
+    const grainOpacity = compare ? 0 : Math.min(0.6, (filters.grain / 100) * 0.35);
+    const halationStrength = compare ? 0 : Math.min(1, Math.max(0, filters.halation / 100));
+    const bloomStrength = compare ? 0 : Math.min(1, Math.max(0, filters.bloom / 100));
+    const vignetteStrength = compare ? 0 : Math.min(1, Math.max(0, filters.vignette / 100));
     const mergeFilter = (base: string, extra: string) => (base ? `${base} ${extra}` : extra);
+    const selectedLut = FILM_LUTS.find((preset) => preset.id === filters.lut);
+    const lutLabel = filters.lut === 'custom' ? (filters.customLutName || 'Custom LUT') : selectedLut?.name || 'None';
+
+    const sliderRow = (label: string, value: number, min: number, max: number, step: number, onChange: (next: number) => void, format: (v: number) => string, reset: number) => (
+        <label className="color-slider" onDoubleClick={() => onChange(reset)}>
+            <span className="color-slider__label">{label}</span>
+            <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+            <span className="color-slider__value">{format(value)}</span>
+        </label>
+    );
 
     return (
-        <div className="p-4 h-full flex flex-col lg:flex-row gap-4 overflow-hidden">
-            <div className="lg:w-1/2 h-1/2 lg:h-full flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-2 text-white text-center">Manual Controls</h3>
-                <div className="relative aspect-video bg-black rounded overflow-hidden mb-4">
-                    {previewFrame ? (
-                        <>
-                            <img src={previewFrame} style={clipStyle} className="w-full h-full object-contain transition-all duration-300"/>
-                            {bloomStrength > 0 ? (
-                                <img
-                                    src={previewFrame}
-                                    className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen"
-                                    style={{ filter: mergeFilter(filterString, `blur(${bloomBlur}px)`), opacity: bloomOpacity }}
-                                />
-                            ) : null}
-                            {halationStrength > 0 ? (
-                                <img
-                                    src={previewFrame}
-                                    className="absolute inset-0 w-full h-full object-contain pointer-events-none mix-blend-screen"
-                                    style={{ filter: mergeFilter(filterString, `blur(${halationBlur}px) saturate(140%) hue-rotate(-8deg)`), opacity: halationOpacity }}
-                                />
-                            ) : null}
-                            {filters.grain > 0 && grainTexture ? (
-                                <div
-                                    className="absolute inset-0 pointer-events-none mix-blend-soft-light"
-                                    style={{ backgroundImage: `url(${grainTexture})`, opacity: grainOpacity, backgroundSize: '140px 140px' }}
-                                />
-                            ) : null}
-                            {vignetteStrength > 0 ? (
-                                <div
-                                    className="absolute inset-0 pointer-events-none mix-blend-multiply"
-                                    style={{ background: `radial-gradient(circle at center, rgba(0,0,0,0) ${vignetteInner}%, rgba(0,0,0,${vignetteOpacity}) 100%)` }}
-                                />
-                            ) : null}
-                        </>
-                    ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-500">Loading Preview...</div>
-                    )}
+        <div className="color-page">
+            <div className="color-page__top">
+                <div className="color-viewer">
+                    <div className="color-viewer__stage">
+                        {previewFrame ? (
+                            <>
+                                <img src={previewFrame} style={clipStyle} className="color-viewer__image" alt="" />
+                                {bloomStrength > 0 && <img src={previewFrame} className="color-viewer__layer mix-blend-screen" style={{ filter: mergeFilter(filterString, `blur(${6 + bloomStrength * 20}px)`), opacity: Math.min(0.45, bloomStrength * 0.5) }} alt="" />}
+                                {halationStrength > 0 && <img src={previewFrame} className="color-viewer__layer mix-blend-screen" style={{ filter: mergeFilter(filterString, `blur(${6 + halationStrength * 18}px) saturate(140%) hue-rotate(-8deg)`), opacity: Math.min(0.45, halationStrength * 0.4) }} alt="" />}
+                                {filters.grain > 0 && grainTexture && !compare && <div className="color-viewer__layer mix-blend-soft-light" style={{ backgroundImage: `url(${grainTexture})`, opacity: grainOpacity, backgroundSize: '140px 140px' }} />}
+                                {vignetteStrength > 0 && <div className="color-viewer__layer mix-blend-multiply" style={{ background: `radial-gradient(circle at center, rgba(0,0,0,0) ${55 - vignetteStrength * 20}%, rgba(0,0,0,${Math.min(0.7, vignetteStrength * 0.75)}) 100%)` }} />}
+                            </>
+                        ) : (
+                            <div className="color-viewer__loading">Loading preview…</div>
+                        )}
+                    </div>
+                    <div className="color-viewer__bar">
+                        <span className="color-viewer__name">{selectedMedia.name}</span>
+                        <span className="color-viewer__meta">{lutLabel}{filters.lut !== 'none' ? ` · ${filters.lutIntensity}%` : ''}</span>
+                        <div className="color-viewer__actions">
+                            <button type="button" className={`toolbar-button ${compare ? 'toolbar-segmented__item--active' : ''}`} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)} title="Hold to see the original">Original</button>
+                            <button type="button" className="toolbar-button" onClick={copyGradeToAll} title="Copy this grade to every visual clip">Apply to all</button>
+                            <button type="button" className="toolbar-button" onClick={handleResetAll} title="Reset all colour settings">Reset</button>
+                        </div>
+                    </div>
                 </div>
-                <div className="space-y-3 overflow-y-auto pr-2 -mr-2 text-sm">
-                    <div>
-                        <label htmlFor="lookPreset" className="mb-1 text-xs text-gray-300 flex justify-between">Look Presets <span className="text-[10px] text-gray-500">Quick start</span></label>
-                        <select
-                            id="lookPreset"
-                            value={presetSelection}
-                            onChange={handlePresetChange}
-                            className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 text-xs text-gray-200"
-                        >
-                            <option value="">Choose a preset</option>
-                            {Array.from(new Set(LOOK_PRESETS.map((preset) => preset.category))).map((category) => {
-                                const presets = LOOK_PRESETS.filter((preset) => preset.category === category);
-                                if (presets.length === 0) return null;
-                                return (
-                                    <optgroup key={category} label={category}>
-                                        {presets.map((preset) => (
-                                            <option key={preset.id} value={preset.id}>{preset.name}</option>
-                                        ))}
-                                    </optgroup>
-                                );
-                            })}
-                        </select>
-                    </div>
-                    <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pt-1">Basic Adjustments</h4>
-                     <div>
-                        <label htmlFor="brightness" className="mb-1 text-xs text-gray-300 flex justify-between">Brightness <span>{filters.brightness}%</span></label>
-                        <input type="range" id="brightness" name="brightness" min="0" max="200" value={filters.brightness} onChange={e => handleFilterChange('brightness', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                    </div>
-                    <div>
-                        <label htmlFor="contrast" className="mb-1 text-xs text-gray-300 flex justify-between">Contrast <span>{filters.contrast}%</span></label>
-                        <input type="range" id="contrast" name="contrast" min="0" max="200" value={filters.contrast} onChange={e => handleFilterChange('contrast', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                    </div>
-                    <div>
-                        <label htmlFor="saturate" className="mb-1 text-xs text-gray-300 flex justify-between">Saturation <span>{filters.saturate}%</span></label>
-                        <input type="range" id="saturate" name="saturate" min="0" max="200" value={filters.saturate} onChange={e => handleFilterChange('saturate', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                    </div>
-                    <div>
-                        <label htmlFor="hueRotate" className="mb-1 text-xs text-gray-300 flex justify-between">Hue <span>{filters.hueRotate}°</span></label>
-                        <input type="range" id="hueRotate" name="hueRotate" min="0" max="360" value={filters.hueRotate} onChange={e => handleFilterChange('hueRotate', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                    </div>
-                    <div className="border-t border-gray-700/80 pt-3 space-y-3">
-                        <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Film Emulation &amp; Grain</h4>
-                        <div>
-                            <label htmlFor="lut" className="mb-1 text-xs text-gray-300 flex justify-between">LUT <span className="text-gray-500">{selectedLutName}</span></label>
-                            <select
-                                id="lut"
-                                value={filters.lut}
-                                onChange={(e) => handleFilterChange('lut', e.target.value as LutId)}
-                                className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 text-xs text-gray-200"
-                            >
-                                {FILM_LUTS.map((lut) => (
-                                    <option key={lut.id} value={lut.id}>{lut.name}</option>
-                                ))}
-                                {filters.customLut ? (
-                                    <option value="custom">{customLutLabel}</option>
-                                ) : (
-                                    <option value="custom" disabled>Custom .cube (import to enable)</option>
-                                )}
-                            </select>
-                            {selectedLut?.description && filters.lut !== 'custom' ? (
-                                <p className="text-[10px] text-gray-500 mt-1">{selectedLut.description}</p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label htmlFor="lutIntensity" className="mb-1 text-xs text-gray-300 flex justify-between">LUT Strength <span>{filters.lutIntensity}%</span></label>
-                            <input
-                                type="range"
-                                id="lutIntensity"
-                                name="lutIntensity"
-                                min="0"
-                                max="100"
-                                value={filters.lutIntensity}
-                                onChange={e => handleFilterChange('lutIntensity', parseInt(e.target.value))}
-                                disabled={filters.lut === 'none'}
-                                className={`w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo ${filters.lut === 'none' ? 'opacity-40 cursor-not-allowed' : ''}`}
-                            />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <input
-                                ref={lutInputRef}
-                                type="file"
-                                accept=".cube"
-                                className="hidden"
-                                onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    if (file) handleImportLut(file);
-                                    event.currentTarget.value = '';
-                                }}
-                            />
-                            <button
-                                type="button"
-                                onClick={() => lutInputRef.current?.click()}
-                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-200 px-3 py-2 rounded border border-gray-600"
-                            >
-                                Import .cube LUT
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleClearCustomLut}
-                                disabled={!filters.customLut}
-                                className="flex-1 bg-gray-700/60 hover:bg-gray-600 text-xs text-gray-200 px-3 py-2 rounded border border-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                Clear LUT
-                            </button>
-                        </div>
-                        <div>
-                            <label htmlFor="grain" className="mb-1 text-xs text-gray-300 flex justify-between">Film Grain <span>{filters.grain}%</span></label>
-                            <input
-                                type="range"
-                                id="grain"
-                                name="grain"
-                                min="0"
-                                max="100"
-                                value={filters.grain}
-                                onChange={e => handleFilterChange('grain', parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                            />
+                <div className="color-scopes">
+                    <div className="color-scopes__head">
+                        <div className="toolbar-segmented">
+                            <button type="button" className={`toolbar-segmented__item ${scopeMode === 'waveform' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setScopeMode('waveform')}>Waveform</button>
+                            <button type="button" className={`toolbar-segmented__item ${scopeMode === 'histogram' ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setScopeMode('histogram')}>Histogram</button>
                         </div>
                     </div>
-                    <div className="border-t border-gray-700/80 pt-3 space-y-3">
-                        <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Glow & Lens</h4>
-                        <div>
-                            <label htmlFor="halation" className="mb-1 text-xs text-gray-300 flex justify-between">Halation <span>{filters.halation}%</span></label>
-                            <input
-                                type="range"
-                                id="halation"
-                                name="halation"
-                                min="0"
-                                max="100"
-                                value={filters.halation}
-                                onChange={e => handleFilterChange('halation', parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                            />
+                    <Scopes source={previewFrame} mode={scopeMode} />
+                    {visualClips.length > 1 && onSelectClip && (
+                        <div className="color-clipstrip color-clipstrip--compact">
+                            {visualClips.map((clip, index) => (
+                                <button key={clip.id} type="button" className={`color-clipstrip__item ${clip.id === selectedClip.id ? 'color-clipstrip__item--active' : ''}`} onClick={() => onSelectClip(clip.id)} title={mediaItems.find((m) => m.id === clip.mediaId)?.name}>
+                                    <span>{index + 1}</span>
+                                </button>
+                            ))}
                         </div>
-                        <div>
-                            <label htmlFor="bloom" className="mb-1 text-xs text-gray-300 flex justify-between">Bloom <span>{filters.bloom}%</span></label>
-                            <input
-                                type="range"
-                                id="bloom"
-                                name="bloom"
-                                min="0"
-                                max="100"
-                                value={filters.bloom}
-                                onChange={e => handleFilterChange('bloom', parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="vignette" className="mb-1 text-xs text-gray-300 flex justify-between">Vignette <span>{filters.vignette}%</span></label>
-                            <input
-                                type="range"
-                                id="vignette"
-                                name="vignette"
-                                min="0"
-                                max="100"
-                                value={filters.vignette}
-                                onChange={e => handleFilterChange('vignette', parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                            />
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
-            <div className="lg:w-1/2 h-1/2 lg:h-full flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-2 text-white text-center flex items-center justify-center gap-2"><MagicWandIcon className="w-5 h-5"/> AI Colorist</h3>
-                 <div className="flex-grow flex flex-col overflow-y-auto pr-2 -mr-2">
-                     {isLoading && <div className="text-center text-yellow-400 p-2">{isLoading}</div>}
-                     {aiGrade ? (
-                        <>
-                            <div className="bg-gray-900/50 p-2 rounded mb-3">
-                                <h4 className="font-semibold text-indigo-300 text-sm">Analysis:</h4>
-                                <p className="text-xs text-gray-300 italic">{aiGrade.analysis}</p>
-                            </div>
-                            <h4 className="font-semibold text-indigo-300 text-sm mb-2">Suggestions:</h4>
-                            <div className="grid gap-2 sm:grid-cols-2">
-                                {aiGrade.suggestions.map((s, i) => (
-                                    <button key={i} onClick={() => applyAiSuggestion(s.filters as Partial<ClipFilters>)} className="w-full text-left bg-gray-700 hover:bg-indigo-800/50 p-3 rounded-lg transition-colors border border-gray-600 hover:border-indigo-500/50 group">
-                                        <span className="text-xs font-bold text-white group-hover:text-indigo-200">{s.name}</span>
-                                        {s.description && <p className="text-[10px] text-gray-400 mt-0.5 line-clamp-2">{s.description}</p>}
-                                    </button>
+
+            <div className="color-page__bottom">
+                <div className="color-tabs">
+                    {([
+                        { id: 'primaries', label: 'Primaries' },
+                        { id: 'film', label: 'Film & LUT' },
+                        { id: 'ai', label: 'AI Colorist' },
+                    ] as Array<{ id: ColorTab; label: string }>).map((entry) => (
+                        <button key={entry.id} type="button" className={`color-tabs__item ${tab === entry.id ? 'color-tabs__item--active' : ''}`} onClick={() => setTab(entry.id)}>{entry.label}</button>
+                    ))}
+                    <div className="color-tabs__spacer" />
+                    <select className="app-select app-select--compact" defaultValue="" onChange={(e) => { handlePresetChange(e.target.value); e.target.value = ''; }} title="Look presets">
+                        <option value="" disabled>Look presets…</option>
+                        {Array.from(new Set(LOOK_PRESETS.map((preset) => preset.category))).map((category) => (
+                            <optgroup key={category} label={category}>
+                                {LOOK_PRESETS.filter((preset) => preset.category === category).map((preset) => (
+                                    <option key={preset.id} value={preset.id}>{preset.name}</option>
                                 ))}
+                            </optgroup>
+                        ))}
+                    </select>
+                </div>
+
+                {tab === 'primaries' && (
+                    <div className="color-primaries">
+                        <div className="color-wheels">
+                            <ColorWheel label="Lift" hint="Shadows" value={grade.lift} onChange={(lift) => updateGrade({ lift })} />
+                            <ColorWheel label="Gamma" hint="Midtones" value={grade.gamma} onChange={(gamma) => updateGrade({ gamma })} />
+                            <ColorWheel label="Gain" hint="Highlights" value={grade.gain} onChange={(gain) => updateGrade({ gain })} />
+                            <ColorWheel label="Offset" hint="Everything" value={grade.offset} onChange={(offset) => updateGrade({ offset })} />
+                        </div>
+                        <div className="color-adjust">
+                            {sliderRow('Temp', grade.temperature, -1, 1, 0.01, (v) => updateGrade({ temperature: v }), (v) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`, 0)}
+                            {sliderRow('Tint', grade.tint, -1, 1, 0.01, (v) => updateGrade({ tint: v }), (v) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`, 0)}
+                            {sliderRow('Contrast', grade.contrast, 0.5, 1.6, 0.01, (v) => updateGrade({ contrast: v }), (v) => v.toFixed(2), 1)}
+                            {sliderRow('Pivot', grade.pivot, 0.1, 0.9, 0.005, (v) => updateGrade({ pivot: v }), (v) => v.toFixed(3), 0.435)}
+                            {sliderRow('Saturation', grade.saturation, 0, 2, 0.01, (v) => updateGrade({ saturation: v }), (v) => `${Math.round(v * 100)}%`, 1)}
+                            {sliderRow('Hue', grade.hue, -180, 180, 1, (v) => updateGrade({ hue: v }), (v) => `${v > 0 ? '+' : ''}${Math.round(v)}°`, 0)}
+                            <div className="color-adjust__divider" />
+                            {sliderRow('Brightness', filters.brightness, 0, 200, 1, (v) => handleFilterChange('brightness', v), (v) => `${v}%`, 100)}
+                            {sliderRow('Contrast (CSS)', filters.contrast, 0, 200, 1, (v) => handleFilterChange('contrast', v), (v) => `${v}%`, 100)}
+                            {sliderRow('Saturation (CSS)', filters.saturate, 0, 200, 1, (v) => handleFilterChange('saturate', v), (v) => `${v}%`, 100)}
+                        </div>
+                        <div className="color-presets">
+                            <div className="color-presets__title">Wheel presets</div>
+                            <div className="color-presets__grid">
+                                {COLOR_WHEEL_PRESETS.map((preset) => (
+                                    <button key={preset.id} type="button" className="color-presets__item" onClick={() => applyGrade(applyColorWheelPreset(DEFAULT_COLOR_WHEEL_GRADE, preset))}>{preset.label}</button>
+                                ))}
+                                <button type="button" className="color-presets__item color-presets__item--ghost" onClick={() => applyGrade(DEFAULT_COLOR_WHEEL_GRADE)}>Reset wheels</button>
                             </div>
-                        </>
-                     ) : !isLoading && <p className="text-gray-500 text-center text-sm">Waiting for AI analysis...</p>}
-                 </div>
-                 <div className="border-t border-gray-700 pt-3 mt-2">
-                    <label className="text-sm font-medium text-gray-300">Match a reference still</label>
-                    <div className="flex items-center gap-2 mt-2">
-                        <input
-                            ref={referenceInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(event) => {
-                                const file = event.target.files?.[0];
-                                if (file) handleReferenceUpload(file);
-                                event.currentTarget.value = '';
-                            }}
-                        />
-                        <button
-                            onClick={() => referenceInputRef.current?.click()}
-                            className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold py-2 rounded-lg"
-                        >
-                            Upload Reference
-                        </button>
-                        <button
-                            onClick={handleMatchReference}
-                            disabled={!referenceImage || !!isLoading}
-                            className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold py-2 rounded-lg disabled:bg-gray-600"
-                        >
-                            Match Look
-                        </button>
+                            <div className="color-presets__title">Export</div>
+                            <button type="button" className="app-button app-secondary text-xs w-full justify-center" onClick={handleExportCube} disabled={isNeutralColorWheelGrade(grade)}>Export .cube LUT</button>
+                            <p className="app-muted text-[11px]">Wheels are baked into a 3D LUT, so exports load in Resolve, Premiere, and Nuke.</p>
+                        </div>
                     </div>
-                    {referenceImage ? (
-                        <p className="text-xs text-gray-400 mt-2 truncate">Using: {referenceImage.name}</p>
-                    ) : (
-                        <p className="text-xs text-gray-500 mt-2">Upload a still or keyframe to match.</p>
-                    )}
-                 </div>
-                 <div className="mt-auto pt-2 border-t border-gray-700">
-                    <label className="text-sm font-medium text-gray-300">Or describe your own look:</label>
-                    <div className="flex gap-2 mt-1">
-                        <input type="text" value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g., Cold, neon-lit cyberpunk" className="w-full bg-gray-900 border border-gray-600 rounded-lg p-2 text-sm"/>
-                        <button onClick={handlePromptGrade} disabled={!prompt || !!isLoading} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 rounded-lg disabled:bg-gray-600">Apply</button>
+                )}
+
+                {tab === 'film' && (
+                    <div className="color-film">
+                        <div className="color-adjust">
+                            <label className="color-slider">
+                                <span className="color-slider__label">LUT</span>
+                                <select className="app-select app-select--compact flex-1" value={filters.lut === 'custom' ? `custom` : filters.lut} onChange={(e) => {
+                                    const value = e.target.value;
+                                    if (value.startsWith('plugin:')) handleUsePluginLut(value.slice(7));
+                                    else if (value === 'custom') { if (!filters.customLut) lutInputRef.current?.click(); }
+                                    else handleFilterChange('lut', value as LutId);
+                                }}>
+                                    {FILM_LUTS.map((lut) => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
+                                    <option value="custom">{filters.customLut ? `Custom: ${filters.customLutName || 'LUT'}` : 'Import .cube…'}</option>
+                                    {pluginLuts.length > 0 && (
+                                        <optgroup label="Plugins">
+                                            {pluginLuts.map((lut) => <option key={lut.id} value={`plugin:${lut.id}`}>{lut.name} · {lut.pluginName}</option>)}
+                                        </optgroup>
+                                    )}
+                                </select>
+                            </label>
+                            {selectedLut?.description && filters.lut !== 'custom' && <p className="app-muted text-[11px] -mt-1 mb-1 pl-[5.5rem]">{selectedLut.description}</p>}
+                            {sliderRow('LUT strength', filters.lutIntensity, 0, 100, 1, (v) => handleFilterChange('lutIntensity', v), (v) => `${v}%`, 100)}
+                            <div className="flex items-center gap-2 pl-[5.5rem]">
+                                <input ref={lutInputRef} type="file" accept=".cube" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImportLut(file); event.currentTarget.value = ''; }} />
+                                <button type="button" onClick={() => lutInputRef.current?.click()} className="app-button app-secondary text-xs">Import .cube</button>
+                                <button type="button" onClick={handleClearCustomLut} disabled={!filters.customLut && filters.lut === 'none'} className="app-button app-tertiary text-xs">Clear LUT</button>
+                            </div>
+                            <div className="color-adjust__divider" />
+                            {sliderRow('Grain', filters.grain, 0, 100, 1, (v) => handleFilterChange('grain', v), (v) => `${v}%`, 0)}
+                            {sliderRow('Halation', filters.halation, 0, 100, 1, (v) => handleFilterChange('halation', v), (v) => `${v}%`, 0)}
+                            {sliderRow('Bloom', filters.bloom, 0, 100, 1, (v) => handleFilterChange('bloom', v), (v) => `${v}%`, 0)}
+                            {sliderRow('Vignette', filters.vignette, 0, 100, 1, (v) => handleFilterChange('vignette', v), (v) => `${v}%`, 0)}
+                            {sliderRow('Hue rotate', filters.hueRotate, 0, 360, 1, (v) => handleFilterChange('hueRotate', v), (v) => `${v}°`, 0)}
+                        </div>
                     </div>
-                 </div>
+                )}
+
+                {tab === 'ai' && (
+                    <div className="color-ai">
+                        <div className="color-ai__column">
+                            <div className="flex items-center gap-2">
+                                <button type="button" className="app-button app-primary text-xs" onClick={runAiAnalysis} disabled={!frame || Boolean(isLoading)}>
+                                    <MagicWandIcon className="w-4 h-4" /> Analyze this frame
+                                </button>
+                                {isLoading && <span className="text-xs app-muted">{isLoading}</span>}
+                            </div>
+                            {aiGrade ? (
+                                <>
+                                    <p className="text-xs app-muted italic">{aiGrade.analysis}</p>
+                                    <div className="color-presets__grid">
+                                        {aiGrade.suggestions.map((s, i) => (
+                                            <button key={i} type="button" className="color-presets__item color-presets__item--wide" onClick={() => commit({ ...filters, ...(s.filters as Partial<ClipFilters>) })}>
+                                                <strong>{s.name}</strong>
+                                                {s.description && <span>{s.description}</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="text-xs app-muted">Gemini looks at the current frame and proposes three looks you can apply with one click.</p>
+                            )}
+                        </div>
+                        <div className="color-ai__column">
+                            <div className="color-presets__title">Match a reference</div>
+                            <div className="flex items-center gap-2">
+                                <input ref={referenceInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleReferenceUpload(file); event.currentTarget.value = ''; }} />
+                                <button type="button" onClick={() => referenceInputRef.current?.click()} className="app-button app-secondary text-xs">Upload still</button>
+                                <button type="button" onClick={handleMatchReference} disabled={!referenceImage || Boolean(isLoading)} className="app-button app-primary text-xs">Match look</button>
+                            </div>
+                            <p className="text-[11px] app-muted">{referenceImage ? `Using ${referenceImage.name}` : 'Upload a frame from a film or a still you like.'}</p>
+                            <div className="color-presets__title">Describe a look</div>
+                            <div className="flex gap-2">
+                                <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. cold neon-lit cyberpunk night" className="app-input app-input--compact flex-1" onKeyDown={(e) => { if (e.key === 'Enter') void handlePromptGrade(); }} />
+                                <button type="button" onClick={handlePromptGrade} disabled={!prompt || Boolean(isLoading)} className="app-button app-primary text-xs">Apply</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
-
 
 const PostWorkspace: React.FC<PostWorkspaceProps> = (props) => {
     const [activeTab, setActiveTab] = useState<'color' | 'audio'>('color');
 
     if (props.timelineClips.length === 0) {
         return (
-            <div className="studio-workspace flex flex-col items-center justify-center h-full text-center text-gray-500 p-8">
-                <div className="p-4 bg-gray-800 rounded-full border border-gray-700 mb-4">
-                    <ColorIcon className="w-12 h-12 text-indigo-500" />
-                </div>
-                <h2 className="text-3xl font-bold text-white mb-2">Post-Production</h2>
-                <p className="max-w-md">Add clips to the timeline in the 'Edit' workspace to begin color grading and audio mixing.</p>
+            <div className="studio-workspace color-page__empty">
+                <ColorIcon className="w-10 h-10 app-muted" />
+                <h2 className="text-xl font-semibold">Color</h2>
+                <p className="app-muted">Add clips to the timeline in Edit to start grading and mixing.</p>
             </div>
         );
     }
 
     return (
-        <div className="studio-workspace h-full flex flex-col">
-            <div className="flex-shrink-0 flex justify-center border-b border-gray-700">
-                <button
-                  onClick={() => setActiveTab('color')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'color' ? 'text-indigo-400 border-indigo-400' : 'text-gray-400 border-transparent hover:text-white'}`}
-                >
-                    <ColorIcon className="w-5 h-5"/> Color Grading
-                </button>
-                <button
-                  onClick={() => setActiveTab('audio')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'audio' ? 'text-indigo-400 border-indigo-400' : 'text-gray-400 border-transparent hover:text-white'}`}
-                >
-                    <AudioIcon className="w-5 h-5"/> Audio Analyzer & Mix
-                </button>
+        <div className="studio-workspace color-workspace">
+            <div className="color-workspace__tabs">
+                <div className="toolbar-segmented">
+                    <button type="button" onClick={() => setActiveTab('color')} className={`toolbar-segmented__item ${activeTab === 'color' ? 'toolbar-segmented__item--active' : ''}`}>
+                        <ColorIcon className="w-4 h-4" /> Color
+                    </button>
+                    <button type="button" onClick={() => setActiveTab('audio')} className={`toolbar-segmented__item ${activeTab === 'audio' ? 'toolbar-segmented__item--active' : ''}`}>
+                        <AudioIcon className="w-4 h-4" /> Audio
+                    </button>
+                </div>
             </div>
-            <div className="flex-grow min-h-0">
+            <div className="color-workspace__body">
                 {activeTab === 'color' && <ColorGradingPanel {...props} />}
                 {activeTab === 'audio' && <AudioAnalyzerPanel {...props} />}
             </div>
         </div>
-    )
+    );
 };
 
 export default PostWorkspace;
