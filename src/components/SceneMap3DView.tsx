@@ -189,6 +189,7 @@ const SceneMap3DView: React.FC<SceneMap3DViewProps> = ({ scene, selectedElementI
   const controlsRef = useRef<OrbitControls | null>(null);
   const groupsRef = useRef<Map<string, THREE.Group>>(new Map());
   const dragRef = useRef<{ id: string; offset: THREE.Vector3 } | null>(null);
+  const framedRef = useRef(false);
   const [viewFromCamera, setViewFromCamera] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
 
@@ -382,6 +383,12 @@ const SceneMap3DView: React.FC<SceneMap3DViewProps> = ({ scene, selectedElementI
         groupsRef.current.delete(id);
       }
     });
+    // Frame the set the first time there is something to look at (after the
+    // first render so world matrices are current).
+    if (!framedRef.current && elements.length > 0) {
+      framedRef.current = true;
+      requestAnimationFrame(() => frameContent());
+    }
   }, [elements]);
 
   // Selection highlight.
@@ -414,14 +421,31 @@ const SceneMap3DView: React.FC<SceneMap3DViewProps> = ({ scene, selectedElementI
     controls.update();
   }, [viewFromCamera, selectedElementId, elements]);
 
-  const resetView = () => {
+  const frameContent = () => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
-    setViewFromCamera(false);
-    camera.position.set(14, 12, 18);
-    controls.target.set(0, 0.5, 0);
+    const box = new THREE.Box3();
+    groupsRef.current.forEach((group) => {
+      group.updateMatrixWorld(true);
+      box.expandByObject(group);
+    });
+    if (box.isEmpty()) {
+      camera.position.set(14, 12, 18);
+      controls.target.set(0, 0.5, 0);
+    } else {
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const radius = Math.max(6, Math.max(size.x, size.z) * 0.9);
+      camera.position.set(center.x + radius * 0.9, radius * 0.75 + 4, center.z + radius * 1.1);
+      controls.target.set(center.x, 0.8, center.z);
+    }
     controls.update();
+  };
+
+  const resetView = () => {
+    setViewFromCamera(false);
+    frameContent();
   };
 
   const prefabCounts = elements.reduce<Record<string, number>>((acc, element) => {

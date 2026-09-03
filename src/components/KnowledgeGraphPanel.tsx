@@ -232,7 +232,11 @@ const KnowledgeGraphPanel: React.FC<{
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     const target = event.target as SVGElement;
     const nodeId = target.closest('[data-node]')?.getAttribute('data-node') || null;
-    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
+    try {
+      (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
+    } catch {
+      // synthetic or already-released pointers have no capture target
+    }
     if (nodeId) {
       dragRef.current = { id: nodeId };
       const node = nodesRef.current.find((n) => n.id === nodeId);

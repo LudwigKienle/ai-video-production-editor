@@ -40,7 +40,8 @@
     "test": "node scripts/run-tests.mjs",
     "check:icons": "node scripts/check-icons.mjs",
     "check:public-release": "node scripts/check-public-release.mjs",
-    "check:public-release:strict": "node scripts/check-public-release.mjs --strict-artifacts"
+    "check:public-release:strict": "node scripts/check-public-release.mjs --strict-artifacts",
+    "capture:screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
