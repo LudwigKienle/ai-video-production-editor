@@ -55,6 +55,7 @@ import { CAMERA_PRESETS, LENS_PRESETS } from '../data/cameraData';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
 import { formatSmartModelEta, routeSmartModel, type SmartModelCandidate, type SmartModelRoute } from '../utils/smartModelRouter';
 import { structurePromptForModel } from '../utils/modelPromptGuides';
+import { pickImageModel } from '../utils/modelAutoSelect';
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 
 import { StyleSelection } from '../components/StyleSelection';
@@ -105,6 +106,7 @@ interface ImageGenerationWorkspaceProps {
 }
 
 type ImageModelId =
+  | 'auto'
   | 'gemini-flash'
   | 'gemini-pro'
   | 'imagen'
@@ -138,6 +140,7 @@ type ImageModelId =
   | 'comfyui';
 
 const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; icon?: string; goodFor?: string }> = [
+  { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'People → Nano Banana / GPT Image 2, creatures and stylised art → Krea 2, environments → Seedream 5 Pro, typography → Ideogram 4' },
   { id: 'gemini-flash', label: 'Nano Banana 2 (fast)', provider: 'Gemini API', icon: logoNanabanana, goodFor: 'Speed, realism and detailed context adherence' },
   { id: 'gemini-pro', label: 'Gemini 3 Pro', provider: 'Gemini', icon: logoGemini, goodFor: 'Prompt adherence, complex reasoning and text layout' },
   { id: 'imagen', label: 'Imagen 4', provider: 'Gemini', icon: logoGemini, goodFor: 'Cinematic quality and highly stylized artistic renders' },
@@ -176,6 +179,7 @@ const IMAGE_SIZES = ['1K', '2K', '4K'] as const;
 const IMAGEN_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
 export type AspectRatioOption = (typeof ASPECT_RATIOS)[number];
 const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
+  auto: ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gemini-flash': [...IMAGEN_ASPECT_RATIOS],
   'gemini-pro': [...ASPECT_RATIOS],
   imagen: [...IMAGEN_ASPECT_RATIOS],
@@ -211,6 +215,7 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
 
 // Camera/Lens data moved to ../data/cameraData.ts
 const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
+  auto: 10,
   'gemini-flash': 10,
   'gemini-pro': 8,
   imagen: 0,
@@ -250,6 +255,7 @@ type ImageModelPricing = {
 };
 
 const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
+  auto: { provider: 'fal', kind: 'image', model: 'bytedance/seedream/v5/pro/text-to-image' },
   'gemini-flash': { provider: 'gemini', kind: 'image', model: 'gemini-3.1-flash-image-preview' },
   'gemini-pro': { provider: 'gemini', kind: 'image', model: 'gemini-3-pro-image-preview' },
   imagen: { provider: 'gemini', kind: 'image', model: 'imagen-4.0-generate-001' },
@@ -748,6 +754,11 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
   const [selectedShotTypeId, setSelectedShotTypeId] = useState<string | null>(null);
   const [selectedLightingId, setSelectedLightingId] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<(typeof ASPECT_RATIOS)[number]>('16:9');
+  useEffect(() => {
+    if (!productionFormatId) return;
+    const target = getProductionFormat(productionFormatId).aspectRatio;
+    if ((ASPECT_RATIOS as readonly string[]).includes(target)) setAspectRatio(target as (typeof ASPECT_RATIOS)[number]);
+  }, [productionFormatId]);
   const [imageSize, setImageSize] = useState<(typeof IMAGE_SIZES)[number]>('2K');
   const [modelId, setModelId] = useState<ImageModelId>(() => storedUiPrefs.modelId || 'gemini-pro');
   const [smartRouterGoal, setSmartRouterGoal] = useState('');
@@ -2258,7 +2269,12 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           ? effectiveAspectRatio
           : '16:9'
       ) as '21:9' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
-      switch (modelId) {
+      const autoPick = modelId === 'auto'
+        ? pickImageModel({ prompt: finalPrompt, hasReferences: referenceImages.length > 0 }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'comfyui'), 'seedream-v5-pro-fal')
+        : null;
+      const resolvedModelId: ImageModelId = autoPick ? autoPick.model : modelId;
+      if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
+      switch (resolvedModelId) {
         case 'gemini-flash':
           if (fallbackGeminiFlashToReplicate) {
             setStatus('No Gemini key found. Using Nano Banana Pro via Replicate...');

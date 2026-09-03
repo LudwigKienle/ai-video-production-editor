@@ -36,6 +36,7 @@ import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
 import { structurePromptForModel } from '../utils/modelPromptGuides';
+import { pickVideoModel } from '../utils/modelAutoSelect';
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 
 interface VideoGenerationWorkspaceProps {
@@ -62,6 +63,7 @@ interface VideoGenerationWorkspaceProps {
 }
 
 type VideoModelId =
+  | 'auto'
   | 'veo-fast'
   | 'veo'
   | 'grok-video'
@@ -111,6 +113,7 @@ type GenerationReadinessItem = {
 const REQUIRED_GUIDE_READINESS_LABELS = new Set(['Start frame', 'Reference', 'Motion ref', 'Ref video', 'Audio']);
 
 const MODEL_OPTIONS: ModelOption[] = [
+  { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', supportsImage: true, supportsAudio: true, supportsEndFrame: true },
   { id: 'veo-fast', label: 'Veo 3.1 Fast', provider: 'Google/Replicate', supportsImage: true },
   { id: 'veo', label: 'Veo 3.1', provider: 'Google/Replicate', supportsImage: true },
   { id: 'grok-video', label: 'Grok Imagine Video', provider: 'xAI', supportsImage: false },
@@ -191,6 +194,7 @@ const writeVideoWorkspaceUiPrefs = (scope: string, patch: VideoWorkspaceUiPrefs)
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9', '2.39:1'] as const;
 type AspectRatioOption = (typeof ASPECT_RATIOS)[number];
 const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
+  auto: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
   'veo-fast': ['16:9', '9:16'],
   veo: ['16:9', '9:16'],
   'grok-video': ['16:9', '9:16', '1:1'],
@@ -228,6 +232,7 @@ type VideoModelPricing = {
 };
 
 const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
+  auto: { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/image-to-video' },
   'veo-fast': { provider: 'gemini', kind: 'video', model: 'veo-3.1-fast-generate-preview' },
   veo: { provider: 'gemini', kind: 'video', model: 'veo-3.1-generate-preview' },
   'grok-video': { provider: 'xai', kind: 'video', model: 'grok-imagine-video' },
@@ -259,6 +264,7 @@ const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
 };
 
 const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options: number[]; fallback: number }> = {
+  auto: { supported: true, options: [4, 5, 6, 8, 10, 12, 15], fallback: 5 },
   'veo-fast': { supported: false, options: [5], fallback: 5 },
   veo: { supported: false, options: [5], fallback: 5 },
   'grok-video': { supported: true, options: [3, 5, 8, 10, 12, 15], fallback: 5 },
@@ -461,6 +467,11 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const [prompt, setPrompt] = useState('');
   const [smartPromptStructure, setSmartPromptStructure] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>('16:9');
+  useEffect(() => {
+    if (!productionFormatId) return;
+    const target = getProductionFormat(productionFormatId).videoAspectRatio as AspectRatioOption;
+    if ((ASPECT_RATIOS as readonly string[]).includes(target)) setAspectRatio(target);
+  }, [productionFormatId]);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [endFrameFile, setEndFrameFile] = useState<File | null>(null);
@@ -992,7 +1003,17 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       const veoStartReference = reference || veoElementReferences[0];
 
       let item: MediaItem;
-      switch (modelId) {
+      const autoPick = modelId === 'auto'
+        ? pickVideoModel({
+          prompt: finalPrompt,
+          hasStartFrame: Boolean(reference || seedanceStoryboardReference),
+          referenceCount: storyboardReferencePayloads.length,
+          durationSeconds: normalizedDurationSeconds,
+        }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedance-25-i2v-fal')
+        : null;
+      const resolvedModelId: VideoModelId = autoPick ? autoPick.model : modelId;
+      if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
+      switch (resolvedModelId) {
         case 'veo-fast':
           item = await generateVideoWithVeo(
             finalPrompt,
@@ -1389,6 +1410,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                   onChange={(event) => setModelId(event.target.value as VideoModelId)}
                   className="app-select mt-2"
                 >
+                  <option value="auto">✨ Auto (best for the shot)</option>
                   <optgroup label="Google">
                     <option value="veo-fast">Veo 3.1 Fast</option>
                     <option value="veo">Veo 3.1 (HQ)</option>
