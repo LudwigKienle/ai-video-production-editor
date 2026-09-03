@@ -104,7 +104,7 @@ credits, cloud rendering, support, and convenience.
 | Node workflows | Node Space for graph-style creative pipelines and production chains |
 | Film planning | Story bible, worldbuilding, Scene Wall, set design, moodboards, and production references |
 | Editing | Timeline, grading, effects, audio, export, OpenTimelineIO/FCPXML-style handoff utilities |
-| Providers | Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto, Brave Search, Supabase, Stripe, and related integrations |
+| Providers | Gemini, FAL, Replicate, xAI, ElevenLabs, Sonauto, Sonilo, Brave Search, Supabase, Stripe, and related integrations |
 | Models | GPT Image, Nano Banana, Seedance, Kling, Happy Horse, Veo, WAN, LTX, Grok, Seedream, Qwen, Flux, and related adapters |
 | Extensibility | Provider services, workspace components, SDK package, hosted BYOK/proxy APIs |
 

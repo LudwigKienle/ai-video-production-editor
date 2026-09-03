@@ -791,6 +791,7 @@ const hasAnyLocalApiKey = () => {
         localStorage.getItem('xai_api_key') ||
         localStorage.getItem('worldlabs_api_key') ||
         localStorage.getItem('sonauto_api_key') ||
+        localStorage.getItem('sonilo_api_key') ||
         localStorage.getItem('unsplash_access_key')
     );
 };
@@ -6236,6 +6237,7 @@ function App() {
         elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
         worldlabs: 'https://platform.worldlabs.ai/',
         sonauto: 'https://sonauto.ai/developers',
+        sonilo: 'https://platform.sonilo.com/dashboard/api-keys',
         unsplash: 'https://unsplash.com/developers',
     } as const;
 
@@ -6608,7 +6610,7 @@ function App() {
                 properties: {
                     provider: {
                         type: Type.STRING,
-                        enum: ['gemini', 'replicate', 'fal', 'ltx', 'xai', 'elevenlabs', 'worldlabs', 'sonauto', 'unsplash'],
+                        enum: ['gemini', 'replicate', 'fal', 'ltx', 'xai', 'elevenlabs', 'worldlabs', 'sonauto', 'sonilo', 'unsplash'],
                     },
                 },
                 required: ['provider'],
@@ -7140,6 +7142,7 @@ function App() {
                 elevenlabs: Boolean(localStorage.getItem('elevenlabs_api_key')),
                 worldlabs: Boolean(localStorage.getItem('worldlabs_api_key')),
                 sonauto: Boolean(localStorage.getItem('sonauto_api_key')),
+                sonilo: Boolean(localStorage.getItem('sonilo_api_key')),
                 unsplash: Boolean(localStorage.getItem('unsplash_access_key')),
             };
             return {
@@ -7168,6 +7171,7 @@ function App() {
                     elevenlabs: Boolean(localStorage.getItem('elevenlabs_api_key')),
                     worldlabs: Boolean(localStorage.getItem('worldlabs_api_key')),
                     sonauto: Boolean(localStorage.getItem('sonauto_api_key')),
+                    sonilo: Boolean(localStorage.getItem('sonilo_api_key')),
                     unsplash: Boolean(localStorage.getItem('unsplash_access_key')),
                 },
                 moodboard: (storyBible.categorizedMoodboard?.items?.length || storyBible.moodboard?.length || 0) > 0,

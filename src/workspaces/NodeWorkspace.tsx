@@ -71,6 +71,7 @@ import {
   upscaleVideoWithTopaz,
 } from '../services/replicateService';
 import { generateImageWithFalGrokImagine, generateImageWithFalQwenImageMax } from '../services/falAiService';
+import { generateMusicFromVideoWithSonilo, generateSfxFromVideoWithSonilo, hasSoniloApiKey } from '../services/soniloService';
 import { getBase64FromUrl } from '../utils/helpers';
 import { FILM_LUTS, buildFilterString, getBloomStrength, getGrainStrength, getHalationStrength, getVignetteStrength, normalizeFilters } from '../utils/colorGrading';
 import { applyCubeLutToImageData, parseCubeLut } from '../utils/lut';
@@ -93,7 +94,9 @@ type NodeKind =
   | 'depth'
   | 'faceRestore'
   | 'bgRemove'
-  | 'rife';
+  | 'rife'
+  | 'music'
+  | 'sfx';
 
 type NodeData = {
   label: string;
@@ -881,6 +884,102 @@ const RifeNode: React.FC<NodeProps<NodeData>> = () => {
   );
 };
 
+const MusicNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
+  const previewUrl = data.params?.previewUrl as string | undefined;
+  const keyReady = hasSoniloApiKey();
+  return (
+    <div className="bg-gray-900 border border-pink-500/40 rounded-lg p-3 min-w-[220px] text-gray-200">
+      <div className="text-xs uppercase tracking-[0.2em] text-pink-300">Music</div>
+      <select
+        value={data.selected || ''}
+        onChange={(event) => data.onChange?.({ selected: event.target.value })}
+        className="mt-2 w-full bg-gray-800 text-white text-xs p-2 rounded border border-gray-700 focus:border-pink-500"
+      >
+        {(data.options || ['Sonilo Video-to-Music']).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <textarea
+        value={data.value || ''}
+        placeholder="Style hint (optional)..."
+        className="mt-2 w-full bg-gray-800 text-white text-xs p-2 rounded border border-gray-700 focus:border-pink-500"
+        rows={2}
+        onChange={(event) => data.onChange?.({ value: event.target.value })}
+      />
+      <div className="mt-2 text-[10px] text-gray-500">
+        Composes an original track matched to the input video (max 6 min).
+      </div>
+      {!keyReady && (
+        <div className="mt-2 text-[10px] text-amber-300">
+          Add a Sonilo API key in Settings to run this node.
+        </div>
+      )}
+      <div className="mt-2 rounded border border-dashed border-gray-700 p-2">
+        {previewUrl ? (
+          <audio controls src={previewUrl} className="w-full" />
+        ) : (
+          <div className="h-10 flex items-center justify-center text-[10px] text-gray-500">
+            Generated track
+          </div>
+        )}
+      </div>
+      <Handle type="target" position={Position.Left} id="video" />
+      <Handle type="target" position={Position.Left} id="prompt" style={{ top: '70%' }} />
+      <Handle type="source" position={Position.Right} id="audio" />
+    </div>
+  );
+};
+
+const SfxNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
+  const previewUrl = data.params?.previewUrl as string | undefined;
+  const keyReady = hasSoniloApiKey();
+  return (
+    <div className="bg-gray-900 border border-teal-500/40 rounded-lg p-3 min-w-[220px] text-gray-200">
+      <div className="text-xs uppercase tracking-[0.2em] text-teal-300">SFX</div>
+      <select
+        value={data.selected || ''}
+        onChange={(event) => data.onChange?.({ selected: event.target.value })}
+        className="mt-2 w-full bg-gray-800 text-white text-xs p-2 rounded border border-gray-700 focus:border-teal-500"
+      >
+        {(data.options || ['Sonilo Video-to-SFX']).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <textarea
+        value={data.value || ''}
+        placeholder="Describe the sound effects (optional)..."
+        className="mt-2 w-full bg-gray-800 text-white text-xs p-2 rounded border border-gray-700 focus:border-teal-500"
+        rows={2}
+        onChange={(event) => data.onChange?.({ value: event.target.value })}
+      />
+      <div className="mt-2 text-[10px] text-gray-500">
+        Sound effects generated from the input video, timed to the picture (max 3 min).
+      </div>
+      {!keyReady && (
+        <div className="mt-2 text-[10px] text-amber-300">
+          Add a Sonilo API key in Settings to run this node.
+        </div>
+      )}
+      <div className="mt-2 rounded border border-dashed border-gray-700 p-2">
+        {previewUrl ? (
+          <audio controls src={previewUrl} className="w-full" />
+        ) : (
+          <div className="h-10 flex items-center justify-center text-[10px] text-gray-500">
+            Generated sound effects
+          </div>
+        )}
+      </div>
+      <Handle type="target" position={Position.Left} id="video" />
+      <Handle type="target" position={Position.Left} id="prompt" style={{ top: '70%' }} />
+      <Handle type="source" position={Position.Right} id="audio" />
+    </div>
+  );
+};
+
 const LlmNode: React.FC<NodeProps<NodeData>> = ({ data }) => {
   const params = data.params || {};
   const updateParam = (key: string, value: string) => {
@@ -933,6 +1032,8 @@ const nodeTypes = {
   faceRestore: FaceRestoreNode,
   bgRemove: BackgroundRemoveNode,
   rife: RifeNode,
+  music: MusicNode,
+  sfx: SfxNode,
   llm: LlmNode,
 };
 
@@ -1039,6 +1140,22 @@ const paletteItems: PaletteItem[] = [
     description: 'Prompt or image-to-video generation with aspect control.',
     portLabel: 'prompt/media -> video',
     tone: 'from-rose-500/24 to-rose-500/5 border-rose-400/35',
+  },
+  {
+    type: 'music',
+    label: 'Music Model',
+    group: 'generation',
+    description: 'Original track generated from a rendered video (Sonilo).',
+    portLabel: 'video -> audio',
+    tone: 'from-pink-500/24 to-pink-500/5 border-pink-400/35',
+  },
+  {
+    type: 'sfx',
+    label: 'SFX Model',
+    group: 'generation',
+    description: 'Royalty-free sound effects generated from a rendered video (Sonilo).',
+    portLabel: 'video -> audio',
+    tone: 'from-teal-500/24 to-teal-500/5 border-teal-400/35',
   },
   {
     type: 'upscale',
@@ -1182,6 +1299,20 @@ const quickTemplateOptions: QuickTemplateOption[] = [
     backend: 'Cloud',
     nodeCount: 3,
   },
+  {
+    id: 'video-soundtrack',
+    label: 'Video Soundtrack',
+    description: 'Rendered cut into a Sonilo-generated original track.',
+    backend: 'Cloud',
+    nodeCount: 2,
+  },
+  {
+    id: 'video-sfx',
+    label: 'Video SFX',
+    description: 'Rendered cut into Sonilo-generated sound effects.',
+    backend: 'Cloud',
+    nodeCount: 2,
+  },
 ];
 
 const IMAGE_MODEL_SET = new Set<string>([
@@ -1223,6 +1354,14 @@ const VIDEO_MODEL_SET = new Set<string>([
   'Wan I2V',
 ]);
 
+const MUSIC_MODEL_SET = new Set<string>([
+  'Sonilo Video-to-Music',
+]);
+
+const SFX_MODEL_SET = new Set<string>([
+  'Sonilo Video-to-SFX',
+]);
+
 const UPSCALE_IMAGE_SET = new Set<string>([
   'Crystal Upscaler',
   'Clarity Upscaler',
@@ -1249,17 +1388,17 @@ const IMAGE_OUTPUT_TYPES = new Set<NodeKind>([
 
 type PipelineTarget = {
   nodeId: string;
-  kind: 'image' | 'video' | 'text';
+  kind: 'image' | 'video' | 'audio' | 'text';
   prompt: string;
   model: string;
   imageInput?: string | null;
   secondaryInput?: string | null;
   params?: Record<string, any>;
-  task?: 'generate' | 'upscale' | 'filter' | 'chroma' | 'blend' | 'sketch' | 'openpose' | 'llm' | 'depth' | 'faceRestore' | 'bgRemove' | 'rife';
+  task?: 'generate' | 'upscale' | 'filter' | 'chroma' | 'blend' | 'sketch' | 'openpose' | 'llm' | 'depth' | 'faceRestore' | 'bgRemove' | 'rife' | 'music' | 'sfx';
 };
 
 type EvaluatedOutput = {
-  kind: 'image' | 'video' | 'text';
+  kind: 'image' | 'video' | 'audio' | 'text';
   item?: MediaItem;
   text?: string;
   sourceType?: NodeKind;
@@ -1339,6 +1478,12 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
         break;
       case 'video':
         defaults = { label: 'Video', selected: 'Veo 3.1 Fast', params: { aspectRatio: '16:9', aspectRatioMode: 'preset', customAspectRatio: '' } };
+        break;
+      case 'music':
+        defaults = { label: 'Music', selected: 'Sonilo Video-to-Music', value: '' };
+        break;
+      case 'sfx':
+        defaults = { label: 'SFX', selected: 'Sonilo Video-to-SFX', value: '' };
         break;
       case 'upscale':
         defaults = { label: 'Upscale', selected: 'Crystal Upscaler', params: { scale: 4, resolution: '' } };
@@ -1838,6 +1983,18 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
       link(interpolate, 'video', upscale, 'image');
     }
 
+    if (templateId === 'video-soundtrack') {
+      const video = add('imageInput', 0, 0, { label: 'Rendered Cut' });
+      const music = add('music', 360, 0, { label: 'Music' });
+      link(video, 'image', music, 'video');
+    }
+
+    if (templateId === 'video-sfx') {
+      const video = add('imageInput', 0, 0, { label: 'Rendered Cut' });
+      const sfx = add('sfx', 360, 0, { label: 'SFX' });
+      link(video, 'image', sfx, 'video');
+    }
+
     if (created.length === 0) return;
     const withHandlers = attachNodeHandlers(created);
     setNodes((prev) => prev.concat(withHandlers));
@@ -1936,6 +2093,8 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
       || node.type === 'faceRestore'
       || node.type === 'bgRemove'
       || node.type === 'rife'
+      || node.type === 'music'
+      || node.type === 'sfx'
       || node.type === 'llm'
     );
     if (outputNodes.length === 0) {
@@ -2205,6 +2364,56 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
             prompt: '',
             model: 'RIFE',
             task: 'rife',
+          });
+        }
+      }
+
+      if (node.type === 'music') {
+        const videoSource = findHandleSource(node.id, 'video');
+        const videoValue = videoSource?.data.value?.trim() || '';
+        const modelLabel = node.data.selected?.trim() || '';
+        if (!modelLabel) {
+          addError(`Music ${node.id} needs a model selection.`);
+        } else if (!MUSIC_MODEL_SET.has(modelLabel)) {
+          addError(`Music ${node.id} uses an unsupported model (${modelLabel}).`);
+        }
+        if (!videoSource) {
+          addError(`Music ${node.id} needs a video input.`);
+        } else if (videoSource?.type === 'imageInput' && videoValue && !isVideoAsset(videoValue)) {
+          addError(`Music ${node.id} requires a video URL.`);
+        }
+        if (isSink) {
+          pipelines.push({
+            nodeId: node.id,
+            kind: 'audio',
+            prompt: '',
+            model: modelLabel || 'Music',
+            task: 'music',
+          });
+        }
+      }
+
+      if (node.type === 'sfx') {
+        const videoSource = findHandleSource(node.id, 'video');
+        const videoValue = videoSource?.data.value?.trim() || '';
+        const modelLabel = node.data.selected?.trim() || '';
+        if (!modelLabel) {
+          addError(`SFX ${node.id} needs a model selection.`);
+        } else if (!SFX_MODEL_SET.has(modelLabel)) {
+          addError(`SFX ${node.id} uses an unsupported model (${modelLabel}).`);
+        }
+        if (!videoSource) {
+          addError(`SFX ${node.id} needs a video input.`);
+        } else if (videoSource?.type === 'imageInput' && videoValue && !isVideoAsset(videoValue)) {
+          addError(`SFX ${node.id} requires a video URL.`);
+        }
+        if (isSink) {
+          pipelines.push({
+            nodeId: node.id,
+            kind: 'audio',
+            prompt: '',
+            model: modelLabel || 'SFX',
+            task: 'sfx',
           });
         }
       }
@@ -2852,6 +3061,30 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
     return interpolateVideoWithRife(payload);
   }, [resolveAssetPayload]);
 
+  const runMusicPipeline = useCallback(async (inputUrl: string, promptText: string, sourceName?: string) => {
+    if (!hasSoniloApiKey()) {
+      throw new Error('Sonilo API key is missing. Add it in Settings.');
+    }
+    return generateMusicFromVideoWithSonilo({
+      videoUrl: inputUrl,
+      videoName: sourceName,
+      prompt: promptText || undefined,
+      onStatus: (message) => setRunStatus(message),
+    });
+  }, []);
+
+  const runSfxPipeline = useCallback(async (inputUrl: string, promptText: string, sourceName?: string) => {
+    if (!hasSoniloApiKey()) {
+      throw new Error('Sonilo API key is missing. Add it in Settings.');
+    }
+    return generateSfxFromVideoWithSonilo({
+      videoUrl: inputUrl,
+      videoName: sourceName,
+      prompt: promptText || undefined,
+      onStatus: (message) => setRunStatus(message),
+    });
+  }, []);
+
   const runLlmPipeline = useCallback(async (promptText: string, params?: Record<string, any>) => {
     const model = params?.model || 'gemini-3-pro-replicate';
     const options = {
@@ -3093,6 +3326,30 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
         setNodePreview(node.id, itemWithMeta);
         return store({ kind: 'video', item: itemWithMeta, sourceType: node.type });
       }
+      case 'music': {
+        const input = await resolveMediaFromHandle(node.id, 'video', ['video']);
+        if (!input) {
+          throw new Error(`Music ${node.id} needs a video input.`);
+        }
+        const promptText = (await resolvePromptText(node.id)) || node.data.value?.trim() || '';
+        const modelLabel = node.data.selected?.trim() || 'Sonilo Video-to-Music';
+        const item = await runMusicPipeline(input.item.url, promptText, input.item.name);
+        const itemWithMeta = { ...item, generatedBy: modelLabel };
+        setNodePreview(node.id, itemWithMeta);
+        return store({ kind: 'audio', item: itemWithMeta, sourceType: node.type });
+      }
+      case 'sfx': {
+        const input = await resolveMediaFromHandle(node.id, 'video', ['video']);
+        if (!input) {
+          throw new Error(`SFX ${node.id} needs a video input.`);
+        }
+        const promptText = (await resolvePromptText(node.id)) || node.data.value?.trim() || '';
+        const modelLabel = node.data.selected?.trim() || 'Sonilo Video-to-SFX';
+        const item = await runSfxPipeline(input.item.url, promptText, input.item.name);
+        const itemWithMeta = { ...item, generatedBy: modelLabel };
+        setNodePreview(node.id, itemWithMeta);
+        return store({ kind: 'audio', item: itemWithMeta, sourceType: node.type });
+      }
       case 'blend': {
         const base = await resolveMediaFromHandle(node.id, 'base', ['image']);
         const overlay = await resolveMediaFromHandle(node.id, 'overlay', ['image']);
@@ -3136,8 +3393,10 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
     runBackgroundRemovePipeline,
     runImagePipeline,
     runLlmPipeline,
+    runMusicPipeline,
     runOpenPosePipeline,
     runRifePipeline,
+    runSfxPipeline,
     runSketchPipeline,
     runUpscalePipeline,
     runVideoPipeline,
@@ -3844,6 +4103,10 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
                           <div className="aspect-video overflow-hidden rounded bg-black/50">
                             {item.type === 'video' ? (
                               <video src={item.url} className="h-full w-full object-cover" />
+                            ) : item.type === 'audio' ? (
+                              <div className="flex h-full items-center justify-center px-2">
+                                <audio controls src={item.url} className="w-full" />
+                              </div>
                             ) : isLikelyImageUrl(item.url) ? (
                               <img src={item.url} alt={item.name} className="h-full w-full object-cover" />
                             ) : (

@@ -37,7 +37,7 @@ first, then come back here when you want code pointers.
 | Smart model routing | Scores model candidates by quality, speed, cost, and balanced intent. | `src/utils/smartModelRouter.ts` |
 | FAL provider integration | Supports image/video model calls through FAL-style APIs. | `src/services/falAiService.ts` |
 | Gemini provider integration | Powers script analysis, Director work, image/text reasoning, continuity and critique flows. | `src/services/geminiService.ts`, `src/services/googleModelProvider.ts` |
-| Replicate, xAI, ElevenLabs, Sonauto, LTX | Provider-specific adapters for image, video, audio, and related generation tasks. | `src/services/replicateService.ts`, `src/services/xaiService.ts`, `src/services/elevenLabsService.ts`, `src/services/sonautoService.ts`, `src/services/ltxService.ts` |
+| Replicate, xAI, ElevenLabs, Sonauto, Sonilo, LTX | Provider-specific adapters for image, video, audio, and related generation tasks. | `src/services/replicateService.ts`, `src/services/xaiService.ts`, `src/services/elevenLabsService.ts`, `src/services/sonautoService.ts`, `src/services/soniloService.ts`, `src/services/ltxService.ts` |
 | BYOK proxy layer | Optional hosted/key-routing layer for teams or managed deployments. | `src/services/byokProxyClient.ts`, `server/byok`, `api` |
 
 ## Workspace Surface
