@@ -224,3 +224,18 @@ Forks must keep copyright and license notices and may not present themselves as
 the official release; see [TRADEMARK.md](TRADEMARK.md).
 
 Copyright (C) 2026 Ludwig Maximillian Kienle.
+
+
+## Example AI Filmmaking Workflow
+
+A practical AI video production workflow can be organized into the following steps:
+
+1. **Start with a script** — Define the story, scenes, dialogue, and required shots.
+2. **Create a Director treatment** — Establish the visual direction, tone, and style of the project.
+3. **Create character and environment references** — Define important visual details before generating shots.
+4. **Build the storyboard** — Plan the composition, camera angles, and sequence of each shot.
+5. **Generate video shots** — Create the individual shots using the available AI video generation tools.
+6. **Review continuity** — Check character appearance, environments, props, camera position, and other visual details between shots.
+7. **Re-film inconsistent shots** — Regenerate shots that introduce unwanted changes or continuity problems.
+8. **Assemble the final sequence** — Select the best generated shots and arrange them into the final timeline.
+9. **Export the project** — Review the completed sequence and export the final video.
