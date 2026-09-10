@@ -415,3 +415,87 @@ export const XIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
     </svg>
 );
+
+/* ─── Editor transport & timeline icons ─── */
+
+export const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <rect x="6" y="5" width="4" height="14" rx="1" />
+        <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+);
+
+export const SkipBackIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 5v14M18 6.5v11a.75.75 0 01-1.17.62l-8-5.5a.75.75 0 010-1.24l8-5.5A.75.75 0 0118 6.5z" />
+    </svg>
+);
+
+export const SkipForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 5v14M6 6.5v11a.75.75 0 001.17.62l8-5.5a.75.75 0 000-1.24l-8-5.5A.75.75 0 006 6.5z" />
+    </svg>
+);
+
+export const StepBackIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 6l-6 6 6 6" />
+        <path strokeLinecap="round" d="M9 6v12" className="opacity-60" />
+    </svg>
+);
+
+export const StepForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+        <path strokeLinecap="round" d="M15 6v12" className="opacity-60" />
+    </svg>
+);
+
+export const MaximizeIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.6} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 9V5.5A1.5 1.5 0 015.5 4H9M15 4h3.5A1.5 1.5 0 0120 5.5V9M20 15v3.5a1.5 1.5 0 01-1.5 1.5H15M9 20H5.5A1.5 1.5 0 014 18.5V15" />
+    </svg>
+);
+
+export const KeyboardIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.6} stroke="currentColor" className={className}>
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path strokeLinecap="round" d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" />
+    </svg>
+);
+
+export const ZoomInIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10.5 7.5v6M7.5 10.5h6M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
+    </svg>
+);
+
+export const ZoomOutIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M7.5 10.5h6M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
+    </svg>
+);
+
+export const FitViewIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4M17 12h4M7 8l-4 4 4 4M17 8l4 4-4 4" />
+    </svg>
+);
+
+export const SoloIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 010 7" />
+    </svg>
+);
+
+export const MarkInIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 5v14M7 12h10M13 8l4 4-4 4" />
+    </svg>
+);
+
+export const MarkOutIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 5v14M17 12H7M11 8l-4 4 4 4" />
+    </svg>
+);

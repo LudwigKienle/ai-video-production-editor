@@ -29,7 +29,9 @@ import TransitionsPanel from '../components/TransitionsPanel';
 import ImageEditorModal from '../components/ImageEditorModal';
 import EditorAgentPanel from '../components/EditorAgentPanel';
 import TitlesPanel, { TitlePreset } from '../components/TitlesPanel';
-import { ChevronLeftIcon, ChevronRightIcon, BrushIcon } from '../components/icons';
+import { ChevronLeftIcon, ChevronRightIcon, BrushIcon, MaximizeIcon, KeyboardIcon, PaletteIcon, FilmIcon, TextIcon, EffectsIcon, TransitionsIcon, MusicNoteIcon, ScissorsIcon, BrainIcon } from '../components/icons';
+import EditTransportBar from '../components/EditTransportBar';
+import { formatTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
 import AutoCutPanel from '../components/AutoCutPanel';
 import { VideoSegment } from '../services/autoCutService';
 import { generateMusicPromptForTimeline } from '../services/geminiService';
@@ -143,10 +145,10 @@ interface EditWorkspaceProps {
 /* ─── Sub-panels ─── */
 
 const LookbookPanel: React.FC<any> = ({ references, onGenerateVideoFromRef, onEditImageRef }) => (
-    <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-        <h3 className="text-lg font-semibold mb-4 text-white">Lookbook</h3>
+    <div className="edit-subpanel">
+        <h3 className="edit-panel-title">Lookbook</h3>
         <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-2">
-            {references.length === 0 && <p className="text-gray-500 text-center">Run the &apos;Automated Production Pipeline&apos; in the &apos;Project&apos; tab to generate references.</p>}
+            {references.length === 0 && <p className="edit-empty-note">No references yet. Run the production pipeline in the Project workspace to generate characters and environments.</p>}
             {references.map((ref: ReferenceItem) => (
                 <div key={ref.id} className="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
                     <p className="font-semibold capitalize text-indigo-300">{ref.type}: {ref.name}</p>
@@ -206,8 +208,8 @@ const MusicAssistantPanel: React.FC<{
     };
 
     return (
-        <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-            <h3 className="text-lg font-semibold mb-4 text-white">Music Assistant</h3>
+        <div className="edit-subpanel overflow-y-auto">
+            <h3 className="edit-panel-title">Music Assistant</h3>
             <div className="space-y-3 text-xs text-gray-300">
                 <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg">
                     {isAnalyzing ? 'Analyzing Timeline...' : 'Analyze Edit'}
@@ -237,21 +239,29 @@ const MusicAssistantPanel: React.FC<{
     );
 };
 
-type LibraryTabId = 'lookbook' | 'media' | 'titles' | 'effects' | 'transitions' | 'music' | 'autocut' | 'agent';
-const LIBRARY_TAB_META: Array<{ id: LibraryTabId; label: string; description: string }> = [
-    { id: 'lookbook', label: 'Lookbook', description: 'References, characters, environments.' },
-    { id: 'media', label: 'Media', description: 'Source files and generated assets.' },
-    { id: 'titles', label: 'Titles', description: 'Lower thirds, subtitles, kinetic text, review.' },
-    { id: 'effects', label: 'Effects', description: 'Visual effects and generators.' },
-    { id: 'transitions', label: 'Transitions', description: 'Cut, fade, wipe transitions.' },
-    { id: 'music', label: 'Music', description: 'Music prompt analysis and generation.' },
-    { id: 'autocut', label: 'Auto Cut', description: 'AI segment selection and verification.' },
-    { id: 'agent', label: 'Agent', description: 'Plan and apply safe AI edit suggestions.' },
+type LibraryTabId = 'media' | 'lookbook' | 'titles' | 'effects' | 'transitions' | 'music' | 'autocut' | 'agent';
+const LIBRARY_TAB_META: Array<{ id: LibraryTabId; label: string; description: string; icon: React.FC<{ className?: string }> }> = [
+    { id: 'media', label: 'Media', description: 'Source files and generated assets', icon: FilmIcon },
+    { id: 'lookbook', label: 'Lookbook', description: 'References, characters, environments', icon: PaletteIcon },
+    { id: 'titles', label: 'Titles', description: 'Lower thirds, subtitles, kinetic text', icon: TextIcon },
+    { id: 'effects', label: 'Effects', description: 'Visual effects and generators', icon: EffectsIcon },
+    { id: 'transitions', label: 'Transitions', description: 'Cut, fade and wipe transitions', icon: TransitionsIcon },
+    { id: 'music', label: 'Music', description: 'Music prompt analysis and generation', icon: MusicNoteIcon },
+    { id: 'autocut', label: 'Auto Cut', description: 'AI segment selection and verification', icon: ScissorsIcon },
+    { id: 'agent', label: 'Agent', description: 'Plan and apply safe AI edit suggestions', icon: BrainIcon },
 ];
+const LIBRARY_TAB_KEY = 'edit_workspace_browser_tab_v1';
 
 const LibraryPanel: React.FC<any> = (props) => {
-    const [activeTab, setActiveTab] = useState<LibraryTabId>('effects');
-    const [navigationView, setNavigationView] = useState<'tabs' | 'list'>('tabs');
+    const [activeTab, setActiveTabState] = useState<LibraryTabId>(() => {
+        if (typeof window === 'undefined') return 'media';
+        const saved = window.localStorage?.getItem(LIBRARY_TAB_KEY) as LibraryTabId | null;
+        return saved && LIBRARY_TAB_META.some((tab) => tab.id === saved) ? saved : 'media';
+    });
+    const setActiveTab = (id: LibraryTabId) => {
+        setActiveTabState(id);
+        try { window.localStorage?.setItem(LIBRARY_TAB_KEY, id); } catch { /* ignore */ }
+    };
 
     const renderTabContent = () => {
         switch (activeTab) {
@@ -316,8 +326,8 @@ const LibraryPanel: React.FC<any> = (props) => {
                 return <MusicAssistantPanel timelineClips={props.timelineClips} mediaItems={props.mediaItems} onAddGeneratedMedia={props.onAddGeneratedMedia} apiKeyReady={props.apiKeyReady} />;
             case 'autocut':
                 return (
-                    <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-                        <h3 className="text-lg font-semibold mb-4 text-white">Auto Cut</h3>
+                    <div className="edit-subpanel overflow-y-auto">
+                        <h3 className="edit-panel-title">Auto Cut</h3>
                         <AutoCutPanel
                             timelineClips={props.timelineClips}
                             timelineTracks={props.timelineTracks}
@@ -364,37 +374,27 @@ const LibraryPanel: React.FC<any> = (props) => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-gray-800/50 border border-gray-700/60 rounded-lg overflow-hidden">
-            <div className="flex-shrink-0 border-b border-gray-700/50">
-                <div className="flex items-center justify-between px-2.5 py-1">
-                    <span className="text-[10px] uppercase tracking-widest text-gray-500 font-medium">Browser</span>
-                    <div className="flex items-center gap-0.5 text-[9px]">
-                        <button onClick={() => setNavigationView('tabs')} className={`px-1.5 py-0.5 rounded ${navigationView === 'tabs' ? 'bg-indigo-600/20 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}>Tabs</button>
-                        <button onClick={() => setNavigationView('list')} className={`px-1.5 py-0.5 rounded ${navigationView === 'list' ? 'bg-indigo-600/20 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}>List</button>
-                    </div>
-                </div>
-                {navigationView === 'tabs' ? (
-                    <div className="flex overflow-x-auto">
-                        {LIBRARY_TAB_META.map((tab) => (
-                            <button key={tab.id} onClick={() => setActiveTab(tab.id)} title={tab.description}
-                                className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id ? 'text-indigo-400 border-indigo-400 bg-gray-700/30' : 'text-gray-500 border-transparent hover:text-gray-300 hover:bg-gray-700/20'}`}
-                            >{tab.label}</button>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="px-2 pb-2 space-y-1">
-                        {LIBRARY_TAB_META.map((tab) => (
-                            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                                className={`w-full text-left rounded-md px-3 py-2 border ${activeTab === tab.id ? 'border-indigo-500/70 bg-indigo-700/20' : 'border-gray-700 bg-gray-900/40 hover:border-gray-600'}`}
-                            >
-                                <div className="text-sm font-semibold text-white">{tab.label}</div>
-                                <div className="text-[11px] text-gray-400">{tab.description}</div>
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-            <div className="flex-grow min-h-0 flex flex-col">{renderTabContent()}</div>
+        <div className="edit-browser">
+            <nav className="edit-browser__rail" aria-label="Browser panels">
+                {LIBRARY_TAB_META.map((tab) => {
+                    const Icon = tab.icon;
+                    const active = activeTab === tab.id;
+                    return (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`edit-browser__rail-btn ${active ? 'edit-browser__rail-btn--active' : ''}`}
+                            title={`${tab.label} · ${tab.description}`}
+                            aria-label={tab.label}
+                            aria-pressed={active}
+                        >
+                            <Icon className="w-[18px] h-[18px]" />
+                        </button>
+                    );
+                })}
+            </nav>
+            <div className="edit-browser__content">{renderTabContent()}</div>
         </div>
     );
 };
@@ -415,9 +415,9 @@ const DraggableDivider: React.FC<{ onDrag: (delta: number) => void; onDoubleClic
         window.addEventListener('mouseup', up);
     };
     return (
-        <div className={`w-[5px] h-full cursor-col-resize flex items-center justify-center group relative ${active ? 'bg-indigo-500/20' : ''}`} onMouseDown={handleMouseDown} onDoubleClick={onDoubleClick} title="Drag to resize · Double-click to reset">
+        <div className={`edit-divider-v ${active ? 'edit-divider-v--active' : ''}`} onMouseDown={handleMouseDown} onDoubleClick={onDoubleClick} title="Drag to resize · Double-click to reset">
             <div className="absolute inset-y-0 -left-1 -right-1 z-10" />
-            <div className={`w-[3px] rounded-full transition-all duration-150 ${active ? 'bg-indigo-400 h-16' : 'bg-gray-600/50 h-10 group-hover:bg-indigo-400/60 group-hover:h-14'}`} />
+            <div className="edit-divider-v__grip" />
         </div>
     );
 };
@@ -436,9 +436,9 @@ const HorizontalDraggableDivider: React.FC<{ onDrag: (delta: number) => void; on
         window.addEventListener('mouseup', up);
     };
     return (
-        <div className={`h-[5px] w-full cursor-row-resize flex items-center justify-center group relative ${active ? 'bg-indigo-500/20' : ''}`} onMouseDown={handleMouseDown} onDoubleClick={onDoubleClick} title="Drag to resize · Double-click to reset">
+        <div className={`edit-divider-h ${active ? 'edit-divider-h--active' : ''}`} onMouseDown={handleMouseDown} onDoubleClick={onDoubleClick} title="Drag to resize · Double-click to reset">
             <div className="absolute -top-1 -bottom-1 inset-x-0 z-10" />
-            <div className={`h-[3px] rounded-full transition-all duration-150 ${active ? 'bg-indigo-400 w-20' : 'bg-gray-600/50 w-14 group-hover:bg-indigo-400/60 group-hover:w-20'}`} />
+            <div className="edit-divider-h__grip" />
         </div>
     );
 };
@@ -489,12 +489,11 @@ const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: Array<{ keys: string;
         ],
     },
     {
-        title: 'Monitors & I/O',
+        title: 'Monitors',
         shortcuts: [
-            { keys: 'I', desc: 'Mark In point' },
-            { keys: 'O', desc: 'Mark Out point' },
-            { keys: 'F11', desc: 'Fullscreen monitor' },
+            { keys: 'F11', desc: 'Fullscreen program monitor' },
             { keys: 'Esc', desc: 'Exit fullscreen / close' },
+            { keys: 'Ctrl+Wheel', desc: 'Zoom timeline around cursor' },
         ],
     },
     {
@@ -515,29 +514,29 @@ const ShortcutsOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }, [onClose]);
 
     return (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+        <div className="edit-overlay" onClick={onClose}>
+            <div className="edit-sheet" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-lg font-semibold text-white">Keyboard Shortcuts</h2>
-                    <button onClick={onClose} className="text-gray-500 hover:text-white text-sm px-2 py-1 rounded border border-gray-700 hover:border-gray-500">Esc</button>
+                    <h2 className="edit-sheet__title">Keyboard shortcuts</h2>
+                    <button onClick={onClose} className="edit-text-btn edit-text-btn--outline">Close</button>
                 </div>
-                <div className="grid grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
                     {SHORTCUT_SECTIONS.map(sec => (
                         <div key={sec.title}>
-                            <h3 className="text-xs uppercase tracking-widest text-indigo-400 font-semibold mb-2">{sec.title}</h3>
-                            <div className="space-y-1">
+                            <h3 className="edit-sheet__section">{sec.title}</h3>
+                            <div>
                                 {sec.shortcuts.map(s => (
-                                    <div key={s.keys} className="flex items-center justify-between text-[11px] py-0.5">
-                                        <span className="text-gray-400">{s.desc}</span>
-                                        <kbd className="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300 font-mono ml-3 whitespace-nowrap">{s.keys}</kbd>
+                                    <div key={s.keys} className="edit-sheet__row">
+                                        <span>{s.desc}</span>
+                                        <kbd className="edit-kbd">{s.keys}</kbd>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     ))}
                 </div>
-                <div className="mt-5 pt-3 border-t border-gray-700 text-[10px] text-gray-600 text-center">
-                    Press <kbd className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-gray-400 font-mono">?</kbd> to toggle this overlay
+                <div className="mt-5 pt-3 border-t text-center text-xs" style={{ borderColor: 'var(--edit-hairline)', color: 'var(--app-muted)' }}>
+                    Press <kbd className="edit-kbd">?</kbd> to toggle this sheet
                 </div>
             </div>
         </div>
@@ -563,8 +562,8 @@ const FullscreenMonitor: React.FC<{
             <div className="flex-1 min-h-0 flex items-center justify-center" onClick={e => e.stopPropagation()}>
                 {children}
             </div>
-            <div className="flex-shrink-0 flex items-center justify-center py-2 bg-gray-900/80 text-[10px] text-gray-500">
-                Double-click or press <kbd className="mx-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-gray-400 font-mono">Esc</kbd> to exit fullscreen
+            <div className="flex-shrink-0 flex items-center justify-center gap-1 py-2 text-xs" style={{ color: 'rgb(255 255 255 / 0.55)' }}>
+                Double-click or press <kbd className="edit-kbd">Esc</kbd> to exit fullscreen
             </div>
         </div>
     );
@@ -577,18 +576,17 @@ interface LayoutPreset {
     panelWidths: number[];
     collapsed: { left: boolean; right: boolean };
     tlHeight: number;
-    toolbarOpen: boolean;
 }
 
 const LAYOUTS_STORAGE_KEY = 'edit_workspace_saved_layouts_v1';
 const ACTIVE_LAYOUT_KEY = 'edit_workspace_active_layout_v1';
 
 const BUILTIN_LAYOUTS: LayoutPreset[] = [
-    { name: 'Default', panelWidths: [14, 72, 14], collapsed: { left: false, right: false }, tlHeight: 38, toolbarOpen: true },
-    { name: 'Wide Monitor', panelWidths: [10, 80, 10], collapsed: { left: false, right: false }, tlHeight: 32, toolbarOpen: false },
-    { name: 'Edit Focus', panelWidths: [14, 72, 14], collapsed: { left: true, right: true }, tlHeight: 55, toolbarOpen: false },
-    { name: 'Color Review', panelWidths: [14, 72, 14], collapsed: { left: true, right: false }, tlHeight: 28, toolbarOpen: false },
-    { name: 'Media Import', panelWidths: [22, 60, 18], collapsed: { left: false, right: false }, tlHeight: 30, toolbarOpen: true },
+    { name: 'Default', panelWidths: [18, 64, 18], collapsed: { left: false, right: false }, tlHeight: 38 },
+    { name: 'Wide Monitor', panelWidths: [12, 76, 12], collapsed: { left: false, right: false }, tlHeight: 32 },
+    { name: 'Edit Focus', panelWidths: [18, 64, 18], collapsed: { left: true, right: true }, tlHeight: 55 },
+    { name: 'Color Review', panelWidths: [18, 60, 22], collapsed: { left: true, right: false }, tlHeight: 28 },
+    { name: 'Media Import', panelWidths: [26, 54, 20], collapsed: { left: false, right: false }, tlHeight: 30 },
 ];
 
 const loadSavedLayouts = (): LayoutPreset[] => {
@@ -621,23 +619,16 @@ const parseRatio = (value: string) => {
     return null;
 };
 
-const formatEditTime = (seconds: number | null | undefined) => {
-    if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '--:--:--';
-    const s = Math.max(0, seconds);
-    return `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}:${Math.floor((s % 1) * 100).toString().padStart(2, '0')}`;
-};
 
 /* ─── Persistence ─── */
 
-const PANEL_WIDTHS_KEY = 'edit_workspace_panel_widths_v2';
+const PANEL_WIDTHS_KEY = 'edit_workspace_panel_widths_v3';
 const PANEL_COLLAPSE_KEY = 'edit_workspace_panel_collapsed_v1';
-const WORKFLOW_VIEW_KEY = 'edit_workspace_flow_view_v1';
 const TIMELINE_HEIGHT_KEY = 'edit_workspace_timeline_height_v3';
-const TOOLBAR_COLLAPSED_KEY = 'edit_workspace_toolbar_collapsed_v1';
 
-const DEFAULT_WIDTHS = [14, 72, 14];
+const DEFAULT_WIDTHS = [18, 64, 18];
 const DEFAULT_TIMELINE = 38;
-const MIN_PANEL = 8;
+const MIN_PANEL = 10;
 const MIN_TL = 16;
 const MAX_TL = 80;
 
@@ -671,11 +662,9 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const [imageEditorOpen, setImageEditorOpen] = useState(false);
     const [preview, setPreview] = useState({ presetId: '16:9', width: 1280, height: 720 });
     const [customRatio, setCustomRatio] = useState('2.35:1');
-    const [wfView, setWfView] = useState<'compact' | 'list'>(() => loadJson<string>(WORKFLOW_VIEW_KEY, 'compact') === 'list' ? 'list' : 'compact');
     const [tlHeight, setTlHeight] = useState(getInitTL);
     const [monView, setMonView] = useState<'program' | 'source' | 'split'>('program');
     const [focusMode, setFocusMode] = useState(false);
-    const [toolbarOpen, setToolbarOpen] = useState(() => loadJson<string>(TOOLBAR_COLLAPSED_KEY, 'false') !== 'true');
     const [srcId, setSrcId] = useState<string | null>(null);
     const [externalSourceAsset, setExternalSourceAsset] = useState<LibraryAsset | null>(null);
     const [srcPlay, setSrcPlay] = useState(0);
@@ -690,7 +679,11 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const sourcePreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const sourcePreviewLastSampleRef = useRef(0);
     const [sourcePreviewFrame, setSourcePreviewFrame] = useState<string | null>(null);
-    const focusSnapRef = useRef<{ collapsed: typeof collapsed; tlHeight: number; monView: typeof monView; wfView: typeof wfView } | null>(null);
+    const focusSnapRef = useRef<{ collapsed: typeof collapsed; tlHeight: number; monView: typeof monView } | null>(null);
+    const timelineClipsRef = useRef(timelineClips);
+    timelineClipsRef.current = timelineClips;
+    const playheadRef = useRef({ position: props.playheadPosition, update: props.onPlayheadUpdate });
+    playheadRef.current = { position: props.playheadPosition, update: props.onPlayheadUpdate };
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [savedLayouts, setSavedLayouts] = useState<LayoutPreset[]>(loadSavedLayouts);
@@ -705,7 +698,6 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
         setPanelWidths(layout.panelWidths);
         setCollapsed(layout.collapsed);
         setTlHeight(layout.tlHeight);
-        setToolbarOpen(layout.toolbarOpen);
         setActiveLayoutName(layout.name);
         window.localStorage?.setItem(ACTIVE_LAYOUT_KEY, layout.name);
     }, []);
@@ -713,14 +705,14 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const saveCurrentLayout = useCallback(() => {
         const name = window.prompt('Layout name:');
         if (!name?.trim()) return;
-        const layout: LayoutPreset = { name: name.trim(), panelWidths, collapsed, tlHeight, toolbarOpen };
+        const layout: LayoutPreset = { name: name.trim(), panelWidths, collapsed, tlHeight };
         const existing = savedLayouts.filter(l => l.name !== layout.name);
         const next = [...existing, layout];
         setSavedLayouts(next);
         saveSavedLayouts(next);
         setActiveLayoutName(layout.name);
         window.localStorage?.setItem(ACTIVE_LAYOUT_KEY, layout.name);
-    }, [panelWidths, collapsed, tlHeight, toolbarOpen, savedLayouts]);
+    }, [panelWidths, collapsed, tlHeight, savedLayouts]);
 
     const deleteLayout = useCallback((name: string) => {
         const next = savedLayouts.filter(l => l.name !== name);
@@ -737,20 +729,20 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
             if (e.key === '?' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); setShowShortcuts(prev => !prev); }
             if (e.key === 'F11') { e.preventDefault(); setIsFullscreen(prev => !prev); }
             if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFocus(); }
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            const frame = 1 / DEFAULT_TIMELINE_FPS;
+            const sequenceEnd = timelineClipsRef.current.reduce((max, clip) => Math.max(max, clip.end), 0);
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                const delta = (e.shiftKey ? 1 : frame) * (e.key === 'ArrowLeft' ? -1 : 1);
+                playheadRef.current.update(Math.max(0, Math.min(sequenceEnd, playheadRef.current.position + delta)));
+            }
+            if (e.key === 'Home') { e.preventDefault(); playheadRef.current.update(0); }
+            if (e.key === 'End') { e.preventDefault(); playheadRef.current.update(sequenceEnd); }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
     }, []);
-
-    const wfSteps: Array<{ id: string; label: string; workspace: Workspace; key: string; desc: string }> = [
-        { id: 'media', label: 'Media', workspace: 'IMPORT', key: '1', desc: 'Collect and organize source assets.' },
-        { id: 'trim', label: 'Trim', workspace: 'TRIM', key: '2', desc: 'Create selects and rough cuts.' },
-        { id: 'edit', label: 'Edit', workspace: 'EDIT', key: '3', desc: 'Build the master timeline.' },
-        { id: 'fusion', label: 'Fusion', workspace: 'COMPOSITING', key: '4', desc: 'Compositing, keys, and VFX layers.' },
-        { id: 'color', label: 'Color', workspace: 'POST', key: '5', desc: 'Color grading and look matching.' },
-        { id: 'fairlight', label: 'Fairlight', workspace: 'SOUND', key: '6', desc: 'Dialogue, music, and final mix.' },
-        { id: 'deliver', label: 'Deliver', workspace: 'EXPORT', key: '7', desc: 'Render presets and final output.' },
-    ];
 
     const { assets: browserLibraryAssets } = useLibraryAssets({
         currentProjectName: props.projectName,
@@ -1235,11 +1227,11 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
     const toggleFocus = () => {
         if (!focusMode) {
-            focusSnapRef.current = { collapsed, tlHeight, monView, wfView };
-            setCollapsed({ left: true, right: true }); setTlHeight(55); setMonView('program'); setToolbarOpen(false); setFocusMode(true);
+            focusSnapRef.current = { collapsed, tlHeight, monView };
+            setCollapsed({ left: true, right: true }); setTlHeight(55); setMonView('program'); setFocusMode(true);
         } else {
             const s = focusSnapRef.current;
-            if (s) { setCollapsed(s.collapsed); setTlHeight(s.tlHeight); setMonView(s.monView); setWfView(s.wfView); }
+            if (s) { setCollapsed(s.collapsed); setTlHeight(s.tlHeight); setMonView(s.monView); }
             focusSnapRef.current = null; setFocusMode(false);
         }
     };
@@ -1248,9 +1240,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     useEffect(() => { if (preview.presetId !== 'custom') setCustomRatio(preview.presetId); }, [preview.presetId]);
     useEffect(() => { window.localStorage?.setItem(PANEL_WIDTHS_KEY, JSON.stringify(panelWidths)); }, [panelWidths]);
     useEffect(() => { window.localStorage?.setItem(PANEL_COLLAPSE_KEY, JSON.stringify(collapsed)); }, [collapsed]);
-    useEffect(() => { window.localStorage?.setItem(WORKFLOW_VIEW_KEY, wfView); }, [wfView]);
     useEffect(() => { window.localStorage?.setItem(TIMELINE_HEIGHT_KEY, String(tlHeight)); }, [tlHeight]);
-    useEffect(() => { window.localStorage?.setItem(TOOLBAR_COLLAPSED_KEY, String(!toolbarOpen)); }, [toolbarOpen]);
 
     useEffect(() => {
         if (externalSourceAsset) return;
@@ -1324,32 +1314,43 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
     const aspect = preview.width && preview.height ? { aspectRatio: `${preview.width} / ${preview.height}` } : undefined;
 
+    const sequenceDuration = timelineClips.reduce((max, clip) => Math.max(max, clip.end), 0);
+    const clampPlayhead = (value: number) => Math.max(0, Math.min(Math.max(sequenceDuration, 0), value));
+    const stepProgramFrame = (direction: -1 | 1) => props.onPlayheadUpdate(clampPlayhead(props.playheadPosition + direction / DEFAULT_TIMELINE_FPS));
+    const canThreePointEdit = Boolean(srcSource);
+
     /* ─── Source Monitor ─── */
     const sourcePanel = (
-        <div className="edit-monitor-panel bg-gray-900/50 border border-gray-700/50 rounded-lg flex flex-col min-h-0 overflow-hidden">
-            <div className="edit-monitor-panel__bar flex items-center justify-between px-2 py-1 border-b border-gray-700/30 bg-gray-800/30 flex-shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] uppercase tracking-widest text-gray-500 font-medium">Source</span>
-                    {srcSource?.kind === 'library' && (
-                        <span className="truncate rounded border border-indigo-500/40 bg-indigo-600/10 px-1.5 py-0.5 text-[10px] text-indigo-200">
-                            Browser: {srcSource.projectLabel}
-                        </span>
-                    )}
+        <div className="edit-monitor-panel">
+            <div className="edit-monitor-panel__bar">
+                <div className="edit-monitor-panel__title">
+                    <span>Source</span>
+                    {srcSource?.kind === 'library' && <small title={srcSource.name}>{srcSource.name}</small>}
+                    {srcSource?.kind === 'library' && <span className="edit-chip">{srcSource.projectLabel}</span>}
+                    {srcSource?.kind === 'project' && srcSource.duration && <small>{formatTimecode(srcSource.duration)}</small>}
                 </div>
-                <div className="flex items-center gap-2">
-                    <select value={srcSource?.kind === 'project' ? (srcId || '') : ''} onChange={e => { setExternalSourceAsset(null); setSrcId(e.target.value || null); }} className="max-w-[160px] bg-gray-900/80 border border-gray-700/50 rounded px-1.5 py-0.5 text-[10px] text-gray-300">
-                        <option value="">Project media...</option>
+                <div className="flex items-center gap-1">
+                    <select
+                        value={srcSource?.kind === 'project' ? (srcId || '') : ''}
+                        onChange={e => { setExternalSourceAsset(null); setSrcId(e.target.value || null); }}
+                        className="edit-select max-w-[190px]"
+                        title="Load project media into the source monitor"
+                    >
+                        <option value="">Load media…</option>
                         {mediaItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                     </select>
                     {srcSource?.kind === 'library' && (
-                        <button onClick={() => setExternalSourceAsset(null)} className="px-1.5 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-300 hover:bg-gray-700">
-                            Clear
-                        </button>
+                        <button onClick={() => setExternalSourceAsset(null)} className="edit-text-btn">Clear</button>
                     )}
                 </div>
             </div>
-            <div className="edit-monitor-panel__stage relative bg-black flex-1 min-h-[100px]">
-                {!srcSource && <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">Select or load media to preview</div>}
+            <div className="edit-monitor-panel__stage">
+                {!srcSource && (
+                    <div className="edit-monitor-empty">
+                        <strong>No source loaded</strong>
+                        <span>Pick a clip from the menu above or double-click media in the Browser to review it here and mark in and out points.</span>
+                    </div>
+                )}
                 {srcSource?.type === 'video' && (
                     <video
                         ref={srcVideoRef}
@@ -1373,48 +1374,91 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                     />
                 )}
                 {srcSource?.type === 'image' && <img src={srcSource.url} className="w-full h-full object-contain" alt={srcSource.name} />}
-                {srcSource?.type === 'audio' && <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 gap-1"><div className="text-[10px] uppercase tracking-widest text-gray-600">Audio</div><div className="text-xs font-medium">{srcSource.name}</div><audio ref={srcAudioRef} src={srcSource.url} onTimeUpdate={e => setSrcPlay(e.currentTarget.currentTime || 0)} onEnded={() => setSrcPlaying(false)} /></div>}
+                {srcSource?.type === 'audio' && (
+                    <div className="edit-monitor-empty" style={{ pointerEvents: 'auto' }}>
+                        <MusicNoteIcon className="w-8 h-8 opacity-60" />
+                        <strong>{srcSource.name}</strong>
+                        <span>Audio source · use the transport below to audition and mark a range.</span>
+                        <audio ref={srcAudioRef} src={srcSource.url} onTimeUpdate={e => setSrcPlay(e.currentTarget.currentTime || 0)} onEnded={() => setSrcPlaying(false)} />
+                    </div>
+                )}
             </div>
-            <div className="edit-monitor-panel__controls flex items-center gap-1 px-2 py-0.5 border-t border-gray-700/30 bg-gray-800/20 flex-shrink-0">
-                <button onClick={toggleSrcPlay} disabled={!srcSource || srcSource.type === 'image'} className="px-1.5 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-300 disabled:opacity-40 hover:bg-gray-700">{srcPlaying ? 'Pause' : 'Play'}</button>
-                <button onClick={() => stepSourceFrame(-1)} disabled={!srcSource || srcSource.type === 'image'} className="px-1 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-300 disabled:opacity-40">-1f</button>
-                <button onClick={() => stepSourceFrame(1)} disabled={!srcSource || srcSource.type === 'image'} className="px-1 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-300 disabled:opacity-40">+1f</button>
-                <button onClick={markSrcIn} disabled={!srcSource} className="px-1 py-0.5 rounded text-[10px] bg-indigo-900/25 border border-indigo-500/30 text-indigo-300 disabled:opacity-40">I</button>
-                <button onClick={markSrcOut} disabled={!srcSource} className="px-1 py-0.5 rounded text-[10px] bg-indigo-900/25 border border-indigo-500/30 text-indigo-300 disabled:opacity-40">O</button>
-                <button onClick={() => { setSrcIn(null); setSrcOut(null); }} className="px-1 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-500">Clear</button>
-                <span className="text-[9px] text-gray-600 ml-auto hidden sm:inline">J/K/L ,/. · {formatEditTime(srcIn)} - {formatEditTime(srcOut)}</span>
-            </div>
-            <input type="range" min={0} max={srcDur} step={0.01} value={Math.max(0, Math.min(srcDur, srcPlay))} onChange={e => seekSrc(Number(e.target.value))} disabled={!srcSource} className="w-full h-1 bg-gray-800 cursor-pointer accent-indigo-500 flex-shrink-0" />
+            <EditTransportBar
+                isPlaying={srcPlaying}
+                position={srcPlay}
+                duration={srcSource ? srcDur : 0}
+                disabled={!srcSource || srcSource.type === 'image'}
+                inPoint={srcIn}
+                outPoint={srcOut}
+                onTogglePlayback={toggleSrcPlay}
+                onSeek={seekSrc}
+                onStepFrame={stepSourceFrame}
+                onMarkIn={markSrcIn}
+                onMarkOut={markSrcOut}
+                onClearMarks={() => { setSrcIn(null); setSrcOut(null); }}
+                trailing={(
+                    <div className="edit-transport__actions">
+                        <button onClick={() => do3PE('insert')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--primary" title="Insert the marked range at the playhead, pushing later clips back">Insert</button>
+                        <button onClick={() => do3PE('overwrite')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--outline" title="Overwrite the timeline at the playhead with the marked range">Overwrite</button>
+                    </div>
+                )}
+            />
         </div>
     );
 
     /* ─── Program Monitor ─── */
     const programPanel = (
-        <div className="edit-monitor-panel bg-gray-900/50 border border-gray-700/50 rounded-lg flex flex-col min-h-0 overflow-hidden relative">
-            <div className="edit-monitor-panel__bar flex items-center justify-between px-2 py-1 border-b border-gray-700/30 bg-gray-800/30 flex-shrink-0">
-                <span className="text-[10px] uppercase tracking-widest text-gray-500 font-medium">Program</span>
+        <div className="edit-monitor-panel relative">
+            <div className="edit-monitor-panel__bar">
+                <div className="edit-monitor-panel__title">
+                    <span>Program</span>
+                    <small>{props.projectName || 'Untitled sequence'}</small>
+                </div>
                 <div className="flex items-center gap-1">
-                    <button onClick={markPgmIn} className="px-1 py-0.5 rounded text-[10px] bg-indigo-900/25 border border-indigo-500/30 text-indigo-300">I</button>
-                    <button onClick={markPgmOut} className="px-1 py-0.5 rounded text-[10px] bg-indigo-900/25 border border-indigo-500/30 text-indigo-300">O</button>
-                    <button onClick={() => { setPgmIn(null); setPgmOut(null); }} className="px-1 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700/50 text-gray-500">Clear</button>
-                    <span className="text-[9px] text-gray-600 hidden sm:inline ml-0.5">{formatEditTime(pgmIn)} - {formatEditTime(pgmOut)}</span>
-                    <span className="mx-0.5 text-gray-700/50">|</span>
-                    <button onClick={() => do3PE('insert')} className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-900/25 border border-emerald-500/30 text-emerald-300">Insert</button>
-                    <button onClick={() => do3PE('overwrite')} className="px-1.5 py-0.5 rounded text-[10px] bg-amber-900/25 border border-amber-500/30 text-amber-300">Overwrite</button>
+                    <span className="edit-toolbar__hint hidden md:inline">{preview.width} × {preview.height}</span>
+                    <button onClick={() => setIsFullscreen(true)} className="edit-icon-btn" title="Fullscreen (F11)">
+                        <MaximizeIcon className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
-            <div className="edit-monitor-panel__stage flex-1 min-h-[100px] relative bg-black" onDoubleClick={() => setIsFullscreen(true)} title="Double-click for fullscreen">
+            <div className="edit-monitor-panel__stage" onDoubleClick={() => setIsFullscreen(true)} title="Double-click for fullscreen">
                 <PreviewPlayer
                     timelineClips={timelineClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
                     playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
                     canvasWidth={preview.width} canvasHeight={preview.height} aspectStyle={aspect} showControls={false}
                 />
+                {timelineClips.length === 0 && (
+                    <div className="edit-monitor-empty">
+                        <strong>Nothing on the timeline yet</strong>
+                        <span>Drag media from the Browser onto a track, or mark a range in the Source monitor and press Insert.</span>
+                    </div>
+                )}
                 {props.selectedMedia?.type === 'image' && (
-                    <button onClick={(e) => { e.stopPropagation(); setImageEditorOpen(true); }} className="absolute top-2 right-2 bg-gray-900/60 hover:bg-indigo-600 text-white p-1.5 rounded-lg backdrop-blur-sm border border-gray-600/40 transition-colors z-30" title="Open Image Editor">
+                    <button onClick={(e) => { e.stopPropagation(); setImageEditorOpen(true); }} className="edit-monitor-panel__overlay-btn" title="Open image editor">
                         <BrushIcon className="w-4 h-4" />
                     </button>
                 )}
             </div>
+            <EditTransportBar
+                isPlaying={props.isPlaying}
+                position={props.playheadPosition}
+                duration={sequenceDuration}
+                disabled={timelineClips.length === 0}
+                inPoint={pgmIn}
+                outPoint={pgmOut}
+                onTogglePlayback={props.onTogglePlayback}
+                onSeek={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
+                onStepFrame={stepProgramFrame}
+                onMarkIn={markPgmIn}
+                onMarkOut={markPgmOut}
+                onClearMarks={() => { setPgmIn(null); setPgmOut(null); }}
+                trailing={effective !== 'split' && effective !== 'source' && srcSource ? (
+                    <div className="edit-transport__actions">
+                        <button onClick={() => do3PE('insert')} className="edit-text-btn edit-text-btn--primary" title="Insert the source range at the playhead">Insert</button>
+                        <button onClick={() => do3PE('overwrite')} className="edit-text-btn edit-text-btn--outline" title="Overwrite at the playhead with the source range">Overwrite</button>
+                    </div>
+                ) : null}
+            />
         </div>
     );
 
@@ -1438,15 +1482,15 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                         onLoadMediaToSource={loadMediaToSource}
                         onLoadLibraryAssetToSource={loadLibraryAssetToSource}
                         sourcePreviewFrame={sourcePreviewFrame}
-                        sourcePreviewLabel={srcSource ? `${srcSource.name} @ ${formatEditTime(srcPlay)}` : 'Source monitor'}
+                        sourcePreviewLabel={srcSource ? `${srcSource.name} @ ${formatTimecode(srcPlay)}` : 'Source monitor'}
                     />
                 </div>
             )}
 
             {/* Left toggle */}
             <div className="relative flex-shrink-0" style={{ width: 0 }}>
-                <button onClick={() => togglePanel('left')} className="absolute top-1/2 -translate-y-1/2 z-20 w-4 h-8 bg-gray-700/70 hover:bg-indigo-600 rounded-r flex items-center justify-center transition-colors" style={{ left: collapsed.left ? 0 : -2 }} title={collapsed.left ? 'Show Browser' : 'Hide Browser'}>
-                    {collapsed.left ? <ChevronRightIcon className="w-3 h-3 text-gray-300" /> : <ChevronLeftIcon className="w-3 h-3 text-gray-300" />}
+                <button onClick={() => togglePanel('left')} className="edit-panel-toggle edit-panel-toggle--left" style={{ left: collapsed.left ? 0 : -2 }} title={collapsed.left ? 'Show Browser' : 'Hide Browser'}>
+                    {collapsed.left ? <ChevronRightIcon className="w-3 h-3" /> : <ChevronLeftIcon className="w-3 h-3" />}
                 </button>
             </div>
 
@@ -1454,82 +1498,59 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
             {/* Center */}
             <div ref={centerRef} style={{ flexBasis: `${panelWidths[1]}%`, flexGrow: 1, minWidth: 0 }} className="edit-center-panel flex flex-col h-full px-0.5">
-                {/* Unified compact toolbar */}
-                <div className="edit-toolbar flex items-center gap-1.5 px-2 py-1 bg-gray-800/30 border border-gray-700/40 rounded flex-shrink-0 mb-px">
-                    {/* Monitor switcher */}
-                    <div className="flex items-center gap-px">
+                {/* Toolbar */}
+                <div className="edit-toolbar">
+                    <div className="edit-seg" role="tablist" aria-label="Monitor view">
                         {(['program', 'source', 'split'] as const).map(v => (
-                            <button key={v} onClick={() => setMonView(v)} disabled={v === 'split' && !canSplit}
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize transition-colors ${effective === v ? 'bg-indigo-600/25 text-indigo-300' : 'text-gray-500 hover:text-gray-300'} ${v === 'split' && !canSplit ? 'opacity-25 cursor-not-allowed' : ''}`}
+                            <button
+                                key={v}
+                                type="button"
+                                role="tab"
+                                aria-selected={effective === v}
+                                onClick={() => setMonView(v)}
+                                disabled={v === 'split' && !canSplit}
+                                className={`edit-seg__item capitalize ${effective === v ? 'edit-seg__item--active' : ''}`}
+                                title={v === 'split' && !canSplit ? 'Hide both side panels to use split view' : `Show ${v} monitor`}
                             >{v}</button>
                         ))}
                     </div>
-                    <div className="w-px h-3.5 bg-gray-700/40" />
-                    <button onClick={toggleFocus} className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${focusMode ? 'bg-emerald-600/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{focusMode ? 'Exit Focus' : 'Focus'}</button>
-                    <div className="w-px h-3.5 bg-gray-700/40" />
-                    <select value={preview.presetId} onChange={handlePresetChange} className="bg-transparent border-none text-[10px] text-gray-400 cursor-pointer px-0.5 py-0.5">
-                        {PREVIEW_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
-                    <span className="text-[9px] text-gray-600 hidden md:inline">{preview.width}x{preview.height}</span>
-                    <div className="w-px h-3.5 bg-gray-700/40" />
-                    {/* Layout selector */}
-                    <select value={activeLayoutName} onChange={e => { const l = allLayouts.find(x => x.name === e.target.value); if (l) applyLayout(l); }} className="bg-transparent border-none text-[10px] text-gray-400 cursor-pointer px-0.5 py-0.5">
-                        <option value="" disabled>Layout...</option>
-                        {allLayouts.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
-                    </select>
-                    <button onClick={saveCurrentLayout} className="text-[10px] text-gray-500 hover:text-indigo-300 transition-colors" title="Save current layout">Save</button>
-                    {savedLayouts.some(l => l.name === activeLayoutName) && (
-                        <button onClick={() => deleteLayout(activeLayoutName)} className="text-[10px] text-gray-500 hover:text-red-400 transition-colors" title="Delete layout">Del</button>
-                    )}
-                    <button onClick={() => setToolbarOpen(!toolbarOpen)} className="ml-auto text-[10px] text-gray-500 hover:text-gray-300 px-1">{toolbarOpen ? 'Less' : 'More...'}</button>
-                </div>
-
-                {/* Expandable area */}
-                {toolbarOpen && !focusMode && (
-                    <div className="flex flex-col gap-px mb-px flex-shrink-0 animate-fadeIn">
-                        <div className="bg-gray-800/30 border border-gray-700/40 rounded px-2 py-1">
-                            <div className="flex items-center justify-between mb-0.5">
-                                <span className="text-[9px] uppercase tracking-widest text-gray-600 font-medium">Post Flow</span>
-                                <div className="flex gap-0.5 text-[9px]">
-                                    <button onClick={() => setWfView('compact')} className={wfView === 'compact' ? 'text-indigo-300' : 'text-gray-600'}>Compact</button>
-                                    <button onClick={() => setWfView('list')} className={wfView === 'list' ? 'text-indigo-300' : 'text-gray-600'}>List</button>
-                                </div>
-                            </div>
-                            {wfView === 'compact' ? (
-                                <div className="flex gap-1 overflow-x-auto pb-0.5">
-                                    {wfSteps.map(s => {
-                                        const cur = s.workspace === 'EDIT';
-                                        const ok = props.canAccessWorkspace ? props.canAccessWorkspace(s.workspace) : true;
-                                        return <button key={s.id} disabled={!ok} onClick={() => props.onSwitchWorkspace?.(s.workspace)} title={s.desc}
-                                            className={`rounded border px-2 py-0.5 text-[11px] font-medium transition min-w-[70px] ${cur ? 'border-indigo-500/50 bg-indigo-700/20 text-white' : 'border-gray-700/40 bg-gray-900/20 text-gray-400 hover:border-gray-600'} ${!ok ? 'opacity-25 cursor-not-allowed' : ''}`}
-                                        >{s.label} <span className="text-gray-600 text-[9px]">{s.key}</span></button>;
-                                    })}
-                                </div>
-                            ) : (
-                                <div className="space-y-0.5">{wfSteps.map(s => {
-                                    const cur = s.workspace === 'EDIT'; const ok = props.canAccessWorkspace ? props.canAccessWorkspace(s.workspace) : true;
-                                    return <button key={s.id} disabled={!ok} onClick={() => props.onSwitchWorkspace?.(s.workspace)}
-                                        className={`w-full rounded border px-2 py-1 text-left text-[11px] transition ${cur ? 'border-indigo-500/50 bg-indigo-700/20' : 'border-gray-700/40 bg-gray-900/20 hover:border-gray-600'} ${!ok ? 'opacity-25 cursor-not-allowed' : ''}`}
-                                    ><div className="flex justify-between"><span className="font-medium text-white">{s.label}</span><span className="text-[9px] text-gray-600">Key {s.key}</span></div><div className="text-[10px] text-gray-500">{s.desc}</div></button>;
-                                })}</div>
-                            )}
-                        </div>
+                    <span className="edit-divider" />
+                    <div className="edit-toolbar__group">
+                        <select value={preview.presetId} onChange={handlePresetChange} className="edit-select" title="Sequence aspect ratio">
+                            {PREVIEW_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label === 'Custom' ? 'Custom…' : p.label}</option>)}
+                        </select>
                         {preview.presetId === 'custom' && (
-                            <div className="flex items-center gap-2 bg-gray-800/30 border border-gray-700/40 rounded px-2 py-0.5 text-[10px] text-gray-400">
-                                <span className="text-gray-600">Ratio</span>
-                                <input type="text" value={customRatio} onChange={e => handleRatioChange(e.target.value)} placeholder="16:9" className="w-14 bg-gray-900/50 border border-gray-700/40 rounded px-1 py-0.5 text-[10px] text-gray-300" />
-                                <span className="text-gray-600">W</span>
-                                <input type="number" min="1" value={preview.width} onChange={e => handleDimChange('width', Number(e.target.value))} className="w-14 bg-gray-900/50 border border-gray-700/40 rounded px-1 py-0.5 text-[10px] text-gray-300" />
-                                <span className="text-gray-600">H</span>
-                                <input type="number" min="1" value={preview.height} onChange={e => handleDimChange('height', Number(e.target.value))} className="w-14 bg-gray-900/50 border border-gray-700/40 rounded px-1 py-0.5 text-[10px] text-gray-300" />
+                            <div className="edit-toolbar__group ml-1">
+                                <input type="text" value={customRatio} onChange={e => handleRatioChange(e.target.value)} placeholder="16:9" className="edit-input w-16" title="Aspect ratio" />
+                                <input type="number" min="1" value={preview.width} onChange={e => handleDimChange('width', Number(e.target.value))} className="edit-input w-[4.4rem]" title="Width" />
+                                <span className="edit-toolbar__hint">×</span>
+                                <input type="number" min="1" value={preview.height} onChange={e => handleDimChange('height', Number(e.target.value))} className="edit-input w-[4.4rem]" title="Height" />
                             </div>
                         )}
                     </div>
-                )}
+                    <span className="edit-divider" />
+                    <div className="edit-toolbar__group">
+                        <select value={activeLayoutName} onChange={e => { const l = allLayouts.find(x => x.name === e.target.value); if (l) applyLayout(l); }} className="edit-select" title="Panel layout">
+                            <option value="" disabled>Layout…</option>
+                            {allLayouts.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
+                        </select>
+                        <button onClick={saveCurrentLayout} className="edit-text-btn" title="Save the current panel arrangement as a layout">Save</button>
+                        {savedLayouts.some(l => l.name === activeLayoutName) && (
+                            <button onClick={() => deleteLayout(activeLayoutName)} className="edit-text-btn" title="Delete this saved layout">Delete</button>
+                        )}
+                    </div>
+                    <div className="edit-toolbar__spacer" />
+                    <button onClick={toggleFocus} className={`edit-text-btn ${focusMode ? 'edit-text-btn--outline' : ''}`} title="Hide side panels and enlarge the timeline (F)">
+                        {focusMode ? 'Exit focus' : 'Focus'}
+                    </button>
+                    <button onClick={() => setShowShortcuts(true)} className="edit-icon-btn" title="Keyboard shortcuts (?)">
+                        <KeyboardIcon className="w-4 h-4" />
+                    </button>
+                </div>
 
                 {/* Monitor - takes all remaining space */}
                 <div className="flex-1 min-h-0" style={{ flexBasis: `${100 - tlHeight}%` }}>
-                    <div className={`h-full grid gap-px ${effective === 'split' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    <div className={`h-full grid gap-2 ${effective === 'split' ? 'grid-cols-2' : 'grid-cols-1'}`}>
                         {effective === 'split' ? <>{sourcePanel}{programPanel}</> : effective === 'source' ? sourcePanel : programPanel}
                     </div>
                 </div>
@@ -1537,40 +1558,20 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 <HorizontalDraggableDivider onDrag={handleVDrag} onDoubleClick={resetTL} />
 
                 {/* Timeline */}
-                <div className="flex flex-col gap-px" style={{ flexBasis: `${tlHeight}%`, minHeight: 160 }}>
-                    <div className="flex items-center justify-between gap-1 bg-gray-800/30 border border-gray-700/40 rounded px-2 py-0.5 flex-shrink-0">
-                        <div className="flex items-center gap-0.5 flex-wrap">
-                            {([
-                                { m: 'normal' as const, l: 'Trim', k: 'V', c: 'indigo' },
-                                { m: 'ripple' as const, l: 'Ripple', k: 'R', c: 'amber' },
-                                { m: 'roll' as const, l: 'Roll', k: 'O', c: 'cyan' },
-                                { m: 'slip' as const, l: 'Slip', k: 'Y', c: 'fuchsia' },
-                                { m: 'slide' as const, l: 'Slide', k: 'U', c: 'emerald' },
-                            ]).map(({ m, l, k, c }) => (
-                                <button key={m} onClick={() => props.onTrimModeChange(m)}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors ${props.trimMode === m ? `bg-${c}-700/25 border-${c}-500/40 text-${c}-300` : 'bg-transparent border-gray-700/30 text-gray-500 hover:text-gray-300'}`}
-                                >{l} ({k})</button>
-                            ))}
-                        </div>
-                        <div className="flex items-center gap-2 text-[9px] text-gray-600">
-                            <span className="hidden lg:inline">Space/K J/L C</span>
-                            <span className={`px-1 py-0.5 rounded ${props.isSnappingEnabled ? 'bg-indigo-900/15 text-indigo-400' : 'text-gray-600'}`}>Snap {props.isSnappingEnabled ? 'On' : 'Off'}</span>
-                        </div>
-                    </div>
-                    <div className="edit-timeline-surface flex-1 min-h-0">
-                        <Timeline
-                            tracks={timelineTracks} clips={timelineClips} mediaItems={mediaItems} selectedClipId={selectedClipId}
-                            onSelectClip={props.onSelectClip} onUpdateClip={onUpdateClip} onBatchUpdateClips={props.onBatchUpdateClips}
-                            playheadPosition={props.playheadPosition} isSnappingEnabled={props.isSnappingEnabled} trimMode={props.trimMode}
-                            onPlayheadUpdate={props.onPlayheadUpdate} onSnappingToggle={props.onSnappingToggle} onSplitClip={props.onSplitClip}
-                            onAddTrack={props.onAddTrack} onUpdateTrack={props.onUpdateTrack} activeTrackId={props.activeTrackId}
-                            onSetActiveTrack={props.onSetActiveTrack} onDropMedia={props.onDropMedia}
-                            onDropLibraryAsset={props.onDropLibraryAsset}
-                            onDropEffect={props.onDropEffectOnClip} onDropEffectStack={props.onDropEffectStackOnClip}
-                            waveformCache={waveformCache}
-                            onMatchGap={handleMatchTimelineGap}
-                        />
-                    </div>
+                <div className="edit-timeline-surface flex flex-col" style={{ flexBasis: `${tlHeight}%`, minHeight: 180 }}>
+                    <Timeline
+                        tracks={timelineTracks} clips={timelineClips} mediaItems={mediaItems} selectedClipId={selectedClipId}
+                        onSelectClip={props.onSelectClip} onUpdateClip={onUpdateClip} onBatchUpdateClips={props.onBatchUpdateClips}
+                        playheadPosition={props.playheadPosition} isSnappingEnabled={props.isSnappingEnabled} trimMode={props.trimMode}
+                        onTrimModeChange={props.onTrimModeChange}
+                        onPlayheadUpdate={props.onPlayheadUpdate} onSnappingToggle={props.onSnappingToggle} onSplitClip={props.onSplitClip}
+                        onAddTrack={props.onAddTrack} onUpdateTrack={props.onUpdateTrack} activeTrackId={props.activeTrackId}
+                        onSetActiveTrack={props.onSetActiveTrack} onDropMedia={props.onDropMedia}
+                        onDropLibraryAsset={props.onDropLibraryAsset}
+                        onDropEffect={props.onDropEffectOnClip} onDropEffectStack={props.onDropEffectStackOnClip}
+                        waveformCache={waveformCache}
+                        onMatchGap={handleMatchTimelineGap}
+                    />
                 </div>
             </div>
 
@@ -1579,8 +1580,8 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
             {/* Right toggle */}
             <div className="relative flex-shrink-0" style={{ width: 0 }}>
-                <button onClick={() => togglePanel('right')} className="absolute top-1/2 -translate-y-1/2 z-20 w-4 h-8 bg-gray-700/70 hover:bg-indigo-600 rounded-l flex items-center justify-center transition-colors" style={{ right: collapsed.right ? 0 : -2 }} title={collapsed.right ? 'Show Inspector' : 'Hide Inspector'}>
-                    {collapsed.right ? <ChevronLeftIcon className="w-3 h-3 text-gray-300" /> : <ChevronRightIcon className="w-3 h-3 text-gray-300" />}
+                <button onClick={() => togglePanel('right')} className="edit-panel-toggle edit-panel-toggle--right" style={{ right: collapsed.right ? 0 : -2 }} title={collapsed.right ? 'Show Inspector' : 'Hide Inspector'}>
+                    {collapsed.right ? <ChevronLeftIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
                 </button>
             </div>
 

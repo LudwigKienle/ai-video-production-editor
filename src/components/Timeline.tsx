@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { EffectType, TimelineClip, MediaItem, TimelineTrack, WaveformCache } from '../types';
-import { VideoIcon, AudioIcon, ScissorsIcon, MagnetIcon, AddIcon, LockIcon, UnlockIcon, MuteIcon, WandSparklesIcon } from './icons';
+import { VideoIcon, AudioIcon, ScissorsIcon, MagnetIcon, LockIcon, UnlockIcon, MuteIcon, WandSparklesIcon, ZoomInIcon, ZoomOutIcon, FitViewIcon, SoloIcon } from './icons';
+import { formatTimecode, formatRulerLabel, pickRulerStep } from '../utils/timecode';
 import Waveform from './Waveform';
 import { getClipEffectLayers } from '../utils/effects';
 import type { LibraryAsset } from '../hooks/useLibraryAssets';
@@ -14,6 +15,7 @@ interface TimelineProps {
   playheadPosition: number;
   isSnappingEnabled: boolean;
   trimMode: 'normal' | 'ripple' | 'roll' | 'slip' | 'slide';
+  onTrimModeChange?: (mode: 'normal' | 'ripple' | 'roll' | 'slip' | 'slide') => void;
   waveformCache: WaveformCache;
   onSelectClip: (clipId: string | null) => void;
   onSetActiveTrack: (trackId: string) => void;
@@ -40,9 +42,14 @@ interface TimelineProps {
   }) => void | Promise<void>;
 }
 
-const PIXELS_PER_SECOND = 25;
+const DEFAULT_PIXELS_PER_SECOND = 25;
+const MIN_PIXELS_PER_SECOND = 3;
+const MAX_PIXELS_PER_SECOND = 400;
+const ZOOM_STORAGE_KEY = 'timeline_pixels_per_second_v1';
 const MIN_CLIP_DURATION = 0.5;
 const TRACK_HEIGHT = 64;
+const TRACK_ROW_HEIGHT = TRACK_HEIGHT + 6;
+const RULER_HEIGHT = 30;
 const TRACK_HEADER_WIDTH = 156;
 const SNAP_THRESHOLD = 8;
 const EPSILON = 1e-4;
@@ -71,6 +78,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     playheadPosition,
     isSnappingEnabled,
     trimMode,
+    onTrimModeChange,
     waveformCache,
     onSelectClip,
     onSetActiveTrack,
@@ -90,6 +98,19 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   } = props;
 
   const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const tracksAreaRef = useRef<HTMLDivElement>(null);
+  const [pxPerSec, setPxPerSec] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_PIXELS_PER_SECOND;
+    try {
+      const raw = window.localStorage.getItem(ZOOM_STORAGE_KEY);
+      const parsed = raw ? Number(raw) : NaN;
+      return Number.isFinite(parsed) ? clamp(parsed, MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND) : DEFAULT_PIXELS_PER_SECOND;
+    } catch {
+      return DEFAULT_PIXELS_PER_SECOND;
+    }
+  });
+  const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const getMediaForItem = (mediaId: string) => mediaItems.find((media) => media.id === mediaId);
   const getMediaDuration = (mediaId: string, fallback = 5) => Math.max(MIN_CLIP_DURATION, getMediaForItem(mediaId)?.duration || fallback);
 
@@ -185,7 +206,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const rect = timelineContainerRef.current.getBoundingClientRect();
     const scrollLeft = timelineContainerRef.current.scrollLeft;
     const x = e.clientX - rect.left + scrollLeft - TRACK_HEADER_WIDTH;
-    const newTime = x / PIXELS_PER_SECOND;
+    const newTime = x / pxPerSec;
     onPlayheadUpdate(Math.max(0, newTime));
   };
 
@@ -197,6 +218,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
   const handleTrimMouseDown = (e: React.MouseEvent, clip: TimelineClip, handle: 'start' | 'end') => {
     e.stopPropagation();
+    if (clip.id !== selectedClipId) onSelectClip(clip.id);
     onSetActiveTrack(clip.trackId);
     document.body.style.cursor = 'ew-resize';
     setTrimmingState({
@@ -241,13 +263,13 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
     const rect = timelineContainerRef.current.getBoundingClientRect();
     const scrollLeft = timelineContainerRef.current.scrollLeft;
-    const scrollTop = timelineContainerRef.current.scrollTop;
+    const tracksRect = tracksAreaRef.current?.getBoundingClientRect();
 
     const x = e.clientX - rect.left + scrollLeft - TRACK_HEADER_WIDTH;
-    const y = e.clientY - rect.top + scrollTop;
-    const time = Math.max(0, x / PIXELS_PER_SECOND);
+    const y = tracksRect ? e.clientY - tracksRect.top : -1;
+    const time = Math.max(0, x / pxPerSec);
 
-    const trackIndex = Math.floor(y / (TRACK_HEIGHT + 2));
+    const trackIndex = Math.floor(y / TRACK_ROW_HEIGHT);
     if (trackIndex >= 0 && trackIndex < tracks.length) {
       if (mediaId && onDropMedia) {
         onDropMedia(mediaId, tracks[trackIndex].id, time);
@@ -269,7 +291,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         const rect = timelineContainerRef.current.getBoundingClientRect();
         const scrollLeft = timelineContainerRef.current.scrollLeft;
         const x = e.clientX - rect.left + scrollLeft - TRACK_HEADER_WIDTH;
-        const newTime = x / PIXELS_PER_SECOND;
+        const newTime = x / pxPerSec;
         onPlayheadUpdate(Math.max(0, newTime));
         return;
       }
@@ -284,7 +306,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
       if (trimmingState) {
         const { initialClip, initialX, handle, initialClips, mode } = trimmingState;
         const deltaX = e.clientX - initialX;
-        let deltaTime = deltaX / PIXELS_PER_SECOND;
+        let deltaTime = deltaX / pxPerSec;
 
         setSnapLinePosition(null);
         if (isSnappingEnabled && mode !== 'slip') {
@@ -298,9 +320,9 @@ const Timeline: React.FC<TimelineProps> = (props) => {
             ? initialClip.start + deltaTime
             : initialClip.end + deltaTime;
           for (const point of snapPoints) {
-            if (Math.abs((targetTime - point) * PIXELS_PER_SECOND) < SNAP_THRESHOLD) {
+            if (Math.abs((targetTime - point) * pxPerSec) < SNAP_THRESHOLD) {
               deltaTime = point - (handle === 'start' ? initialClip.start : initialClip.end);
-              setSnapLinePosition(point * PIXELS_PER_SECOND + TRACK_HEADER_WIDTH);
+              setSnapLinePosition(point * pxPerSec + TRACK_HEADER_WIDTH);
               break;
             }
           }
@@ -537,7 +559,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
       if (draggingState) {
         const { initialClip, initialX, initialY, initialClips } = draggingState;
         const deltaX = e.clientX - initialX;
-        let deltaTime = deltaX / PIXELS_PER_SECOND;
+        let deltaTime = deltaX / pxPerSec;
 
         let newStart = Math.max(0, initialClip.start + deltaTime);
         let newTrackId = initialClip.trackId;
@@ -559,7 +581,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
           candidatePoints.forEach((candidate) => {
             snapPoints.forEach((snapPoint) => {
-              const distance = Math.abs((candidate - snapPoint) * PIXELS_PER_SECOND);
+              const distance = Math.abs((candidate - snapPoint) * pxPerSec);
               if (distance < SNAP_THRESHOLD && distance < bestDistance) {
                 bestDistance = distance;
                 bestAdjustment = snapPoint - candidate;
@@ -570,15 +592,14 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
           if (bestAdjustment !== null && bestSnapPoint !== null) {
             newStart = Math.max(0, newStart + bestAdjustment);
-            setSnapLinePosition(bestSnapPoint * PIXELS_PER_SECOND + TRACK_HEADER_WIDTH);
+            setSnapLinePosition(bestSnapPoint * pxPerSec + TRACK_HEADER_WIDTH);
           }
         }
 
-        const timelineRect = timelineContainerRef.current?.getBoundingClientRect();
-        if (timelineRect) {
-          const scrollTop = timelineContainerRef.current?.scrollTop || 0;
-          const yPosInTimeline = e.clientY - timelineRect.top + scrollTop;
-          const trackIndex = Math.floor(yPosInTimeline / (TRACK_HEIGHT + 2));
+        const tracksRect = tracksAreaRef.current?.getBoundingClientRect();
+        if (tracksRect) {
+          const yPosInTimeline = e.clientY - tracksRect.top;
+          const trackIndex = Math.floor(yPosInTimeline / TRACK_ROW_HEIGHT);
           const targetTrack = tracks[trackIndex];
           const media = getMediaForItem(initialClip.mediaId);
           if (
@@ -632,14 +653,16 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     tracks,
     isSnappingEnabled,
     playheadPosition,
+    pxPerSec,
     onPlayheadUpdate,
     onUpdateClip,
     onBatchUpdateClips,
     onSetActiveTrack,
   ]);
 
-  const totalDuration = clips.reduce((max, clip) => Math.max(max, clip.end), 10);
-  const timelineWidth = Math.max(totalDuration * PIXELS_PER_SECOND, window.innerWidth - TRACK_HEADER_WIDTH - 50);
+  const contentDuration = clips.reduce((max, clip) => Math.max(max, clip.end), 0);
+  const totalDuration = Math.max(10, contentDuration + 8);
+  const timelineWidth = Math.max(totalDuration * pxPerSec, containerWidth - TRACK_HEADER_WIDTH - 24);
   const clipAtPlayhead = clips.find((clip) => playheadPosition >= clip.start && playheadPosition <= clip.end);
   const videoGapsByTrack = tracks.reduce<Record<string, Array<{
     trackId: string;
@@ -686,319 +709,471 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   })();
   const coverageHeatmapGaps = coverageTrackId ? (videoGapsByTrack[coverageTrackId] || []) : [];
 
-  const modeLabel = trimMode === 'normal'
-    ? 'Trim'
-    : trimMode === 'ripple'
-      ? 'Ripple'
-      : trimMode === 'roll'
-        ? 'Roll'
-        : trimMode === 'slip'
-          ? 'Slip'
-          : 'Slide';
+
+  /* ─── Zoom ─── */
+
+  const applyZoom = useCallback((next: number, anchorClientX?: number) => {
+    const container = timelineContainerRef.current;
+    const clamped = clamp(next, MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND);
+    if (container && anchorClientX !== undefined) {
+      const rect = container.getBoundingClientRect();
+      const laneX = anchorClientX - rect.left + container.scrollLeft - TRACK_HEADER_WIDTH;
+      const anchorTime = Math.max(0, laneX / pxPerSec);
+      setPxPerSec(clamped);
+      requestAnimationFrame(() => {
+        if (!timelineContainerRef.current) return;
+        timelineContainerRef.current.scrollLeft = Math.max(0, anchorTime * clamped - (anchorClientX - rect.left - TRACK_HEADER_WIDTH));
+      });
+    } else {
+      setPxPerSec(clamped);
+    }
+    try { window.localStorage.setItem(ZOOM_STORAGE_KEY, String(clamped)); } catch { /* ignore */ }
+  }, [pxPerSec]);
+
+  const zoomStep = (direction: -1 | 1) => applyZoom(pxPerSec * (direction > 0 ? 1.35 : 1 / 1.35));
+
+  const zoomToFit = () => {
+    const container = timelineContainerRef.current;
+    if (!container) return;
+    const available = container.clientWidth - TRACK_HEADER_WIDTH - 32;
+    const span = Math.max(1, contentDuration > 0 ? contentDuration : 10);
+    applyZoom(available / span);
+    requestAnimationFrame(() => { if (timelineContainerRef.current) timelineContainerRef.current.scrollLeft = 0; });
+  };
+
+  useEffect(() => {
+    const container = timelineContainerRef.current;
+    if (!container) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      applyZoom(pxPerSec * factor, event.clientX);
+    };
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [applyZoom, pxPerSec]);
+
+  useEffect(() => {
+    const container = timelineContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (Number.isFinite(width)) setContainerWidth(width);
+    });
+    observer.observe(container);
+    setContainerWidth(container.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+
+  // Keep the playhead in view while playing or scrubbing from the keyboard.
+  useEffect(() => {
+    const container = timelineContainerRef.current;
+    if (!container || isDraggingPlayhead) return;
+    const playheadX = playheadPosition * pxPerSec + TRACK_HEADER_WIDTH;
+    const viewStart = container.scrollLeft + TRACK_HEADER_WIDTH;
+    const viewEnd = container.scrollLeft + container.clientWidth;
+    if (playheadX < viewStart + 8 || playheadX > viewEnd - 8) {
+      container.scrollLeft = Math.max(0, playheadX - TRACK_HEADER_WIDTH - container.clientWidth * 0.3);
+    }
+  }, [playheadPosition, pxPerSec, isDraggingPlayhead]);
+
+  /* ─── Ruler ─── */
+
+  const rulerStep = pickRulerStep(pxPerSec);
+  const rulerTicks = useMemo(() => {
+    const ticks: Array<{ time: number; major: boolean }> = [];
+    const minor = rulerStep / 5;
+    const count = Math.ceil(totalDuration / minor) + 1;
+    for (let i = 0; i <= count; i += 1) {
+      const time = i * minor;
+      ticks.push({ time, major: i % 5 === 0 });
+    }
+    return ticks;
+  }, [rulerStep, totalDuration]);
+
+  const handleRulerMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (!timelineContainerRef.current) return;
+    const rect = timelineContainerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + timelineContainerRef.current.scrollLeft - TRACK_HEADER_WIDTH;
+    onPlayheadUpdate(Math.max(0, x / pxPerSec));
+    setIsDraggingPlayhead(true);
+    document.body.style.cursor = 'ew-resize';
+  };
+
+  const trimModes: Array<{ mode: 'normal' | 'ripple' | 'roll' | 'slip' | 'slide'; label: string; key: string; hint: string }> = [
+    { mode: 'normal', label: 'Trim', key: 'V', hint: 'Trim a clip edge without touching its neighbors' },
+    { mode: 'ripple', label: 'Ripple', key: 'R', hint: 'Trim and shift everything after the edit' },
+    { mode: 'roll', label: 'Roll', key: 'O', hint: 'Move the cut between two clips' },
+    { mode: 'slip', label: 'Slip', key: 'Y', hint: 'Change the source frames without moving the clip' },
+    { mode: 'slide', label: 'Slide', key: 'U', hint: 'Move a clip while trimming its neighbors' },
+  ];
+
+  const modeLabel = trimModes.find((entry) => entry.mode === trimMode)?.label ?? 'Trim';
+  const zoomPercent = Math.round((pxPerSec / DEFAULT_PIXELS_PER_SECOND) * 100);
+  const playheadX = playheadPosition * pxPerSec + TRACK_HEADER_WIDTH;
+  const hasClips = clips.length > 0;
+  const tracksHeight = tracks.length * TRACK_ROW_HEIGHT;
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700 rounded-lg h-full flex flex-col select-none">
-      <div className="flex flex-wrap justify-between items-center gap-2 mb-2 flex-shrink-0 p-2 border-b border-gray-700">
-        <h3 className="text-lg font-semibold text-white">Timeline</h3>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <span className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded border ${
-            trimMode === 'normal'
-              ? 'text-gray-200 border-gray-600 bg-gray-700/40'
-              : trimMode === 'ripple'
-                ? 'text-amber-200 border-amber-500/50 bg-amber-700/20'
-                : trimMode === 'roll'
-                  ? 'text-cyan-200 border-cyan-500/50 bg-cyan-700/20'
-                  : trimMode === 'slip'
-                    ? 'text-fuchsia-200 border-fuchsia-500/50 bg-fuchsia-700/20'
-                    : 'text-emerald-200 border-emerald-500/50 bg-emerald-700/20'
-          }`}>
-            {modeLabel}
-          </span>
+    <div className="tl-root select-none">
+      {/* Header: trim modes · timecode · tools */}
+      <div className="tl-header">
+        <div className="tl-header__group">
+          {onTrimModeChange ? (
+            <div className="edit-seg" role="tablist" aria-label="Trim mode">
+              {trimModes.map((entry) => (
+                <button
+                  key={entry.mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={trimMode === entry.mode}
+                  className={`edit-seg__item ${trimMode === entry.mode ? 'edit-seg__item--active' : ''}`}
+                  onClick={() => onTrimModeChange(entry.mode)}
+                  title={`${entry.hint} (${entry.key})`}
+                >
+                  {entry.label}
+                  <kbd className="edit-seg__key">{entry.key}</kbd>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="edit-chip">{modeLabel}</span>
+          )}
+        </div>
+
+        <div className="edit-timecode tl-header__timecode" title="Playhead position / sequence duration">
+          <span className="edit-timecode__now">{formatTimecode(playheadPosition)}</span>
+          <span className="edit-timecode__sep">/</span>
+          <span className="edit-timecode__total">{formatTimecode(contentDuration)}</span>
+        </div>
+
+        <div className="tl-header__group tl-header__group--end">
           <button
-            title="Split Clip (C)"
+            type="button"
+            className="edit-icon-btn"
+            title="Split clip at playhead (C)"
             onClick={() => clipAtPlayhead && onSplitClip(clipAtPlayhead.id, playheadPosition)}
             disabled={!clipAtPlayhead}
-            className="p-2 rounded-md transition-colors disabled:text-gray-600 text-gray-300 hover:bg-gray-700"
           >
-            <ScissorsIcon className="w-5 h-5" />
+            <ScissorsIcon className="w-4 h-4" />
           </button>
           <button
-            title="Toggle Snapping"
+            type="button"
+            className={`edit-icon-btn ${isSnappingEnabled ? 'edit-icon-btn--accent' : ''}`}
+            title={`Snapping ${isSnappingEnabled ? 'on' : 'off'} (N)`}
             onClick={onSnappingToggle}
-            className={`p-2 rounded-md transition-colors ${isSnappingEnabled ? 'text-indigo-400 bg-indigo-900/50' : 'text-gray-300 hover:bg-gray-700'}`}
           >
-            <MagnetIcon className="w-5 h-5" />
+            <MagnetIcon className="w-4 h-4" />
           </button>
           {onSmartFill && (
-            <button
-              title="Gap Fill Assistant"
-              onClick={onSmartFill}
-              className="p-2 rounded-md transition-colors text-indigo-300 hover:bg-indigo-900/50 hover:text-white"
-            >
-              <WandSparklesIcon className="w-5 h-5" />
+            <button type="button" className="edit-icon-btn" title="Gap fill assistant" onClick={onSmartFill}>
+              <WandSparklesIcon className="w-4 h-4" />
             </button>
           )}
-          <div className="w-px h-6 bg-gray-700 mx-1" />
-          <button title="Add Video Track" onClick={() => onAddTrack('video')} className="p-2 rounded-md transition-colors text-gray-300 hover:bg-gray-700"><AddIcon className="w-5 h-5" /><VideoIcon className="w-5 h-5 -ml-3" /></button>
-          <button title="Add Audio Track" onClick={() => onAddTrack('audio')} className="p-2 rounded-md transition-colors text-gray-300 hover:bg-gray-700"><AddIcon className="w-5 h-5" /><AudioIcon className="w-5 h-5 -ml-3" /></button>
+          <span className="edit-divider" />
+          <button type="button" className="edit-text-btn" title="Add video track (Alt+V)" onClick={() => onAddTrack('video')}>
+            <VideoIcon className="w-3.5 h-3.5" />
+            <span>Video</span>
+          </button>
+          <button type="button" className="edit-text-btn" title="Add audio track (Alt+A)" onClick={() => onAddTrack('audio')}>
+            <AudioIcon className="w-3.5 h-3.5" />
+            <span>Audio</span>
+          </button>
+          <span className="edit-divider" />
+          <div className="tl-zoom" title="Zoom (Ctrl/Cmd + scroll wheel)">
+            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(-1)} disabled={pxPerSec <= MIN_PIXELS_PER_SECOND} title="Zoom out">
+              <ZoomOutIcon className="w-4 h-4" />
+            </button>
+            <input
+              type="range"
+              className="tl-zoom__slider"
+              min={Math.log(MIN_PIXELS_PER_SECOND)}
+              max={Math.log(MAX_PIXELS_PER_SECOND)}
+              step={0.01}
+              value={Math.log(pxPerSec)}
+              onChange={(event) => applyZoom(Math.exp(Number(event.target.value)))}
+              aria-label="Timeline zoom"
+            />
+            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(1)} disabled={pxPerSec >= MAX_PIXELS_PER_SECOND} title="Zoom in">
+              <ZoomInIcon className="w-4 h-4" />
+            </button>
+            <button type="button" className="edit-icon-btn" onClick={zoomToFit} title="Fit sequence to view">
+              <FitViewIcon className="w-4 h-4" />
+            </button>
+            <span className="tl-zoom__value">{zoomPercent}%</span>
+          </div>
         </div>
       </div>
 
+      {/* Scrollable ruler + tracks */}
       <div
-        className="flex-grow bg-gray-900/50 rounded-b p-2 overflow-auto relative"
+        className="tl-scroll"
         ref={timelineContainerRef}
         onClick={handleTimelineClick}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <div className="relative mb-2" style={{ width: `${timelineWidth + TRACK_HEADER_WIDTH}px` }}>
-          <div
-            className="absolute left-0 top-0 bottom-0 flex flex-col justify-center px-3 border-r border-gray-700/60 bg-gray-800/60"
-            style={{ width: `${TRACK_HEADER_WIDTH}px` }}
-          >
-            <div className="text-[10px] uppercase tracking-widest text-gray-500">Coverage</div>
-            <div className="text-[11px] text-gray-300">{coverageTrackId ? `Track ${coverageTrackId}` : 'No video track'}</div>
-          </div>
-          <div
-            className="relative h-10 rounded-md border border-gray-700/60 bg-gray-950/70 overflow-hidden"
-            style={{ marginLeft: `${TRACK_HEADER_WIDTH}px` }}
-          >
-            {coverageHeatmapGaps.length === 0 ? (
-              <div className="absolute inset-0 flex items-center justify-center text-[11px] text-gray-500">
-                No major coverage gaps detected on the active video lane.
-              </div>
-            ) : coverageHeatmapGaps.map((gap) => {
-              const colorClass = gap.suggestedCoverage === 'b-roll'
-                ? 'bg-rose-500/30 border-rose-400/50 text-rose-100'
-                : gap.suggestedCoverage === 'alt-angle'
-                  ? 'bg-amber-500/25 border-amber-400/40 text-amber-100'
-                  : 'bg-sky-500/25 border-sky-400/40 text-sky-100';
-              return (
-                <button
-                  key={`heatmap-${gap.trackId}-${gap.start}-${gap.end}`}
-                  type="button"
-                  onClick={() => onPlayheadUpdate(gap.start)}
-                  className={`absolute top-1 bottom-1 rounded border text-[10px] px-2 text-left ${colorClass}`}
-                  style={{
-                    left: `${gap.start * PIXELS_PER_SECOND}px`,
-                    width: `${Math.max(8, gap.duration * PIXELS_PER_SECOND)}px`,
-                  }}
-                  title={`${gap.suggestedCoverage} needed around ${gap.start.toFixed(1)}s`}
-                >
-                  {gap.duration * PIXELS_PER_SECOND > 80 ? `Need ${gap.suggestedCoverage}` : ''}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="relative" style={{ width: `${timelineWidth + TRACK_HEADER_WIDTH}px` }}>
-          {tracks.map((track, index) => {
-            const trackClips = clips.filter((clip) => clip.trackId === track.id);
-            const trackGaps = videoGapsByTrack[track.id] || [];
-            const trackNumber = tracks.filter((entry, entryIndex) => entry.type === track.type && entryIndex <= index).length;
-            const targetLabel = `${track.type === 'video' ? 'V' : 'A'}${trackNumber}`;
-            const isActiveTrack = activeTrackId === track.id;
-            return (
-              <div key={track.id} className="relative border-b border-gray-700/50" style={{ height: `${TRACK_HEIGHT + 2}px` }}>
+        <div className="tl-canvas" style={{ width: `${timelineWidth + TRACK_HEADER_WIDTH}px` }}>
+          {/* Ruler row */}
+          <div className="tl-ruler-row" style={{ height: `${RULER_HEIGHT}px` }}>
+            <div className="tl-corner" style={{ width: `${TRACK_HEADER_WIDTH}px` }}>
+              <span className="tl-corner__label">{tracks.length} track{tracks.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="tl-ruler" style={{ left: `${TRACK_HEADER_WIDTH}px` }} onMouseDown={handleRulerMouseDown}>
+              {rulerTicks.map((tick) => (
                 <div
-                  className={`track-header absolute top-0 bottom-2 left-0 p-2 flex flex-col justify-center sticky left-0 z-30 border-r ${
-                    isActiveTrack ? 'bg-indigo-900/35 border-indigo-500/50' : 'bg-gray-800/70 border-gray-700/70'
-                  }`}
-                  style={{ width: `${TRACK_HEADER_WIDTH}px` }}
-                  onClick={() => onSetActiveTrack(track.id)}
+                  key={tick.time}
+                  className={`tl-tick ${tick.major ? 'tl-tick--major' : ''}`}
+                  style={{ left: `${tick.time * pxPerSec}px` }}
                 >
-                  <p className="font-bold text-sm capitalize text-white truncate">{track.type} Track {trackNumber}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUpdateTrack(track.id, { isTargeted: !(track.isTargeted ?? false) });
-                        onSetActiveTrack(track.id);
-                      }}
-                      className={`text-[10px] px-1.5 py-0.5 rounded border ${track.isTargeted ? 'border-indigo-400 bg-indigo-600/30 text-indigo-100' : 'border-gray-600 text-gray-300'}`}
-                      title={`Track targeting ${targetLabel}`}
-                    >
-                      {targetLabel}
-                    </button>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUpdateTrack(track.id, { isSolo: !(track.isSolo ?? false) });
-                        onSetActiveTrack(track.id);
-                      }}
-                      className={`text-[10px] px-1.5 py-0.5 rounded border ${track.isSolo ? 'border-yellow-400 bg-yellow-700/30 text-yellow-100' : 'border-gray-600 text-gray-300'}`}
-                      title="Solo track (Alt+S)"
-                    >
-                      S
-                    </button>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUpdateTrack(track.id, { isLocked: !track.isLocked });
-                        onSetActiveTrack(track.id);
-                      }}
-                      title={track.isLocked ? 'Unlock Track (Alt+L)' : 'Lock Track (Alt+L)'}
-                    >
-                      {track.isLocked ? <LockIcon className="w-4 h-4 text-red-400" /> : <UnlockIcon className="w-4 h-4 text-gray-400 hover:text-white" />}
-                    </button>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUpdateTrack(track.id, { isMuted: !track.isMuted });
-                        onSetActiveTrack(track.id);
-                      }}
-                      title={track.isMuted ? 'Unmute Track (Alt+M)' : 'Mute Track (Alt+M)'}
-                    >
-                      {track.isMuted ? <MuteIcon className="w-4 h-4 text-yellow-400" /> : <AudioIcon className="w-4 h-4 text-gray-400 hover:text-white" />}
-                    </button>
-                  </div>
+                  {tick.major && <span className="tl-tick__label">{formatRulerLabel(tick.time, rulerStep)}</span>}
                 </div>
-                <div className="absolute top-0 bottom-2" style={{ left: `${TRACK_HEADER_WIDTH}px`, right: 0 }}>
-                  {trackGaps.map((gap) => {
-                    const width = Math.max(16, gap.duration * PIXELS_PER_SECOND);
-                    const colorClass = gap.suggestedCoverage === 'b-roll'
-                      ? 'border-rose-400/40 bg-rose-500/10'
-                      : gap.suggestedCoverage === 'alt-angle'
-                        ? 'border-amber-400/35 bg-amber-500/10'
-                        : 'border-sky-400/35 bg-sky-500/10';
-                    const label = gap.suggestedCoverage === 'b-roll'
-                      ? 'Need B-roll'
-                      : gap.suggestedCoverage === 'alt-angle'
-                        ? 'Need Alt Angle'
-                        : 'Need Insert';
-                    return (
-                      <div
-                        key={`gap-${track.id}-${gap.start}-${gap.end}`}
-                        className={`absolute top-1 bottom-1 rounded border border-dashed ${colorClass} group/gap overflow-hidden`}
-                        style={{ left: `${gap.start * PIXELS_PER_SECOND}px`, width: `${width}px` }}
+              ))}
+              {contentDuration > 0 && (
+                <div className="tl-ruler__content" style={{ width: `${contentDuration * pxPerSec}px` }} />
+              )}
+              <div className="tl-ruler__playhead" style={{ left: `${playheadPosition * pxPerSec}px` }} onMouseDown={handlePlayheadMouseDown} />
+            </div>
+          </div>
+
+          {/* Coverage strip (only when gaps exist on the active video lane) */}
+          {coverageHeatmapGaps.length > 0 && (
+            <div className="tl-coverage-row">
+              <div className="tl-coverage-row__header" style={{ width: `${TRACK_HEADER_WIDTH}px` }}>
+                <span>Coverage</span>
+              </div>
+              <div className="tl-coverage-row__lane" style={{ left: `${TRACK_HEADER_WIDTH}px` }}>
+                {coverageHeatmapGaps.map((gap) => (
+                  <button
+                    key={`heatmap-${gap.trackId}-${gap.start}-${gap.end}`}
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); onPlayheadUpdate(gap.start); }}
+                    className={`tl-coverage-gap tl-coverage-gap--${gap.suggestedCoverage}`}
+                    style={{ left: `${gap.start * pxPerSec}px`, width: `${Math.max(8, gap.duration * pxPerSec)}px` }}
+                    title={`${gap.suggestedCoverage} needed around ${gap.start.toFixed(1)}s`}
+                  >
+                    {gap.duration * pxPerSec > 80 ? `Need ${gap.suggestedCoverage}` : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tracks */}
+          <div className="tl-tracks" ref={tracksAreaRef} style={{ height: `${tracksHeight}px` }}>
+            {tracks.map((track, index) => {
+              const trackClips = clips.filter((clip) => clip.trackId === track.id);
+              const trackGaps = videoGapsByTrack[track.id] || [];
+              const trackNumber = tracks.filter((entry, entryIndex) => entry.type === track.type && entryIndex <= index).length;
+              const targetLabel = `${track.type === 'video' ? 'V' : 'A'}${trackNumber}`;
+              const isActiveTrack = activeTrackId === track.id;
+              const isVideo = track.type === 'video';
+              return (
+                <div
+                  key={track.id}
+                  className={`tl-track ${isActiveTrack ? 'tl-track--active' : ''} ${track.isLocked ? 'tl-track--locked' : ''}`}
+                  style={{ height: `${TRACK_ROW_HEIGHT}px` }}
+                >
+                  <div
+                    className={`track-header tl-track__header ${isActiveTrack ? 'tl-track__header--active' : ''}`}
+                    style={{ width: `${TRACK_HEADER_WIDTH}px` }}
+                    onClick={() => onSetActiveTrack(track.id)}
+                  >
+                    <div className="tl-track__title">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUpdateTrack(track.id, { isTargeted: !(track.isTargeted ?? false) });
+                          onSetActiveTrack(track.id);
+                        }}
+                        className={`tl-track__badge ${isVideo ? 'tl-track__badge--video' : 'tl-track__badge--audio'} ${track.isTargeted ? 'tl-track__badge--targeted' : ''}`}
+                        title={track.isTargeted ? `${targetLabel} is a target track. Click to release.` : `Target ${targetLabel} for inserts and overwrites`}
                       >
-                        <div className="absolute inset-0 opacity-80" />
-                        <div className="absolute inset-0 flex items-center justify-between gap-2 px-2">
-                          <span className="text-[10px] text-gray-200 truncate">{width > 90 ? label : ''}</span>
-                          {onMatchGap && width > 70 && (
+                        {targetLabel}
+                      </button>
+                      <span className="tl-track__name">{isVideo ? 'Video' : 'Audio'} {trackNumber}</span>
+                    </div>
+                    <div className="tl-track__controls">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUpdateTrack(track.id, { isSolo: !(track.isSolo ?? false) });
+                          onSetActiveTrack(track.id);
+                        }}
+                        className={`tl-toggle ${track.isSolo ? 'tl-toggle--solo' : ''}`}
+                        title={track.isSolo ? 'Solo on (Alt+S)' : 'Solo track (Alt+S)'}
+                      >
+                        <SoloIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUpdateTrack(track.id, { isMuted: !track.isMuted });
+                          onSetActiveTrack(track.id);
+                        }}
+                        className={`tl-toggle ${track.isMuted ? 'tl-toggle--muted' : ''}`}
+                        title={track.isMuted ? 'Unmute track (Alt+M)' : 'Mute track (Alt+M)'}
+                      >
+                        {track.isMuted ? <MuteIcon className="w-3.5 h-3.5" /> : <AudioIcon className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUpdateTrack(track.id, { isLocked: !track.isLocked });
+                          onSetActiveTrack(track.id);
+                        }}
+                        className={`tl-toggle ${track.isLocked ? 'tl-toggle--locked' : ''}`}
+                        title={track.isLocked ? 'Unlock track (Alt+L)' : 'Lock track (Alt+L)'}
+                      >
+                        {track.isLocked ? <LockIcon className="w-3.5 h-3.5" /> : <UnlockIcon className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={`tl-track__lane ${isVideo ? 'tl-track__lane--video' : 'tl-track__lane--audio'}`} style={{ left: `${TRACK_HEADER_WIDTH}px` }}>
+                    {trackGaps.map((gap) => {
+                      const width = Math.max(16, gap.duration * pxPerSec);
+                      const label = gap.suggestedCoverage === 'b-roll'
+                        ? 'Need B-roll'
+                        : gap.suggestedCoverage === 'alt-angle'
+                          ? 'Need alt angle'
+                          : 'Need insert';
+                      return (
+                        <div
+                          key={`gap-${track.id}-${gap.start}-${gap.end}`}
+                          className={`tl-gap tl-gap--${gap.suggestedCoverage} group/gap`}
+                          style={{ left: `${gap.start * pxPerSec}px`, width: `${width}px` }}
+                        >
+                          <span className="tl-gap__label">{width > 90 ? label : ''}</span>
+                          {onMatchGap && width > 110 && (
                             <button
                               type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void onMatchGap(gap);
-                              }}
-                              className="opacity-0 group-hover/gap:opacity-100 rounded bg-indigo-600 px-2 py-1 text-[10px] text-white hover:bg-indigo-500"
+                              onClick={(event) => { event.stopPropagation(); void onMatchGap(gap); }}
+                              className="tl-gap__action opacity-0 group-hover/gap:opacity-100"
                             >
-                              Match This Gap
+                              Match gap
                             </button>
                           )}
                         </div>
-                      </div>
-                    );
-                  })}
-                  {trackClips.map((clip) => {
-                    const media = getMediaForItem(clip.mediaId);
-                    if (!media) return null;
-                    const isSelected = clip.id === selectedClipId;
-                    const clipWidth = (clip.end - clip.start) * PIXELS_PER_SECOND;
-                    const effectCount = getClipEffectLayers(clip).length;
-                    const timelineDuration = Math.max(MIN_CLIP_DURATION, clip.end - clip.start);
-                    const keyframeMarkers = (clip.keyframes || [])
-                      .map((frame) => {
-                        const timelineOffset = frame.time / Math.max(0.05, clip.speed || 1);
-                        const ratio = timelineOffset / timelineDuration;
-                        if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) return null;
-                        return {
-                          id: frame.id,
-                          leftPct: ratio * 100,
-                          color: KEYFRAME_MARKER_COLORS[frame.property] || '#94a3b8',
-                        };
-                      })
-                      .filter(Boolean) as Array<{ id: string; leftPct: number; color: string }>;
+                      );
+                    })}
 
-                    return (
-                      <div
-                        key={clip.id}
-                        onMouseDown={(e) => handleClipMouseDown(e, clip)}
-                        onDragOver={(event) => {
-                          const effectId = event.dataTransfer.getData('application/x-effect-id');
-                          const stackId = event.dataTransfer.getData('application/x-effect-stack-id');
-                          if (effectId || stackId) {
+                    {trackClips.map((clip) => {
+                      const media = getMediaForItem(clip.mediaId);
+                      if (!media) return null;
+                      const isSelected = clip.id === selectedClipId;
+                      const isHovered = hoveredClipId === clip.id;
+                      const clipWidth = Math.max(4, (clip.end - clip.start) * pxPerSec);
+                      const effectCount = getClipEffectLayers(clip).length;
+                      const timelineDuration = Math.max(MIN_CLIP_DURATION, clip.end - clip.start);
+                      const keyframeMarkers = (clip.keyframes || [])
+                        .map((frame) => {
+                          const timelineOffset = frame.time / Math.max(0.05, clip.speed || 1);
+                          const ratio = timelineOffset / timelineDuration;
+                          if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) return null;
+                          return { id: frame.id, leftPct: ratio * 100, color: KEYFRAME_MARKER_COLORS[frame.property] || '#94a3b8' };
+                        })
+                        .filter(Boolean) as Array<{ id: string; leftPct: number; color: string }>;
+                      const kind = media.type === 'audio' ? 'audio' : media.type === 'image' ? 'image' : clip.textConfig ? 'title' : 'video';
+                      const showLabel = clipWidth > 56;
+                      const speedLabel = clip.speed && Math.abs(clip.speed - 1) > 0.01 ? `${clip.speed.toFixed(2)}×` : null;
+
+                      return (
+                        <div
+                          key={clip.id}
+                          onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                          onMouseEnter={() => setHoveredClipId(clip.id)}
+                          onMouseLeave={() => setHoveredClipId((current) => (current === clip.id ? null : current))}
+                          onDragOver={(event) => {
+                            const effectId = event.dataTransfer.getData('application/x-effect-id');
+                            const stackId = event.dataTransfer.getData('application/x-effect-stack-id');
+                            if (effectId || stackId) {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'copy';
+                            }
+                          }}
+                          onDrop={(event) => {
+                            const droppedEffectId = event.dataTransfer.getData('application/x-effect-id');
+                            const droppedStackId = event.dataTransfer.getData('application/x-effect-stack-id');
+                            if (!droppedEffectId && !droppedStackId) return;
                             event.preventDefault();
-                            event.dataTransfer.dropEffect = 'copy';
-                          }
-                        }}
-                        onDrop={(event) => {
-                          const droppedEffectId = event.dataTransfer.getData('application/x-effect-id');
-                          const droppedStackId = event.dataTransfer.getData('application/x-effect-stack-id');
-                          if (!droppedEffectId && !droppedStackId) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          if (droppedStackId && onDropEffectStack) {
-                            onDropEffectStack(clip.id, droppedStackId);
-                            onSelectClip(clip.id);
-                            onSetActiveTrack(clip.trackId);
-                            return;
-                          }
-                          if (droppedEffectId && onDropEffect) {
-                            onDropEffect(clip.id, droppedEffectId as EffectType);
-                            onSelectClip(clip.id);
-                            onSetActiveTrack(clip.trackId);
-                          }
-                        }}
-                        style={{
-                          width: `${clipWidth}px`,
-                          left: `${clip.start * PIXELS_PER_SECOND}px`,
-                          height: `${TRACK_HEIGHT}px`,
-                        }}
-                        className={`clip-item absolute top-1 rounded-md overflow-hidden cursor-grab transition-all duration-200 group border-2 ${track.isLocked ? 'opacity-70' : ''} ${
-                          isSelected ? 'border-indigo-500 z-10 shadow-lg' : 'border-gray-900/50'
-                        } ${track.type === 'audio' ? 'bg-purple-900/50' : ''}`}
-                      >
-                        {media.type === 'image' ? (
-                          <img src={media.url} className="w-full h-full object-cover" draggable={false} />
-                        ) : media.type === 'video' ? (
-                          <video src={media.url} className="w-full h-full object-cover" />
-                        ) : (
-                          waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={TRACK_HEIGHT} />
-                        )}
-                        <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-                        <div className="absolute top-1 left-1 text-xs text-white px-1 py-0.5 rounded bg-black/60 truncate max-w-full pointer-events-none">{media.name}</div>
-                        {effectCount > 0 && (
-                          <div className="absolute bottom-1 left-1 text-[10px] text-fuchsia-100 px-1.5 py-0.5 rounded bg-fuchsia-900/60 border border-fuchsia-400/30 pointer-events-none">
-                            FX {effectCount}
+                            event.stopPropagation();
+                            if (droppedStackId && onDropEffectStack) {
+                              onDropEffectStack(clip.id, droppedStackId);
+                              onSelectClip(clip.id);
+                              onSetActiveTrack(clip.trackId);
+                              return;
+                            }
+                            if (droppedEffectId && onDropEffect) {
+                              onDropEffect(clip.id, droppedEffectId as EffectType);
+                              onSelectClip(clip.id);
+                              onSetActiveTrack(clip.trackId);
+                            }
+                          }}
+                          style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${TRACK_HEIGHT}px` }}
+                          className={`clip-item tl-clip tl-clip--${kind} ${isSelected ? 'tl-clip--selected' : ''} ${track.isLocked ? 'tl-clip--locked' : ''}`}
+                          title={`${media.name} · ${formatTimecode(clip.start)} → ${formatTimecode(clip.end)}`}
+                        >
+                          <div className="tl-clip__media">
+                            {media.type === 'image' ? (
+                              <img src={media.url} className="w-full h-full object-cover" draggable={false} alt="" />
+                            ) : media.type === 'video' ? (
+                              <video src={media.url} className="w-full h-full object-cover" muted preload="metadata" />
+                            ) : (
+                              waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={TRACK_HEIGHT} />
+                            )}
                           </div>
-                        )}
-                        {clip.transitionOut && (
-                          <div className="absolute top-1 right-1 text-[10px] text-indigo-200 px-1.5 py-0.5 rounded bg-indigo-900/70 border border-indigo-500/40 pointer-events-none">
-                            {clip.transitionOut.type} · {clip.transitionOut.duration.toFixed(1)}s
-                          </div>
-                        )}
-                        {keyframeMarkers.map((marker) => (
-                          <div
-                            key={marker.id}
-                            className="absolute top-0 bottom-0 w-0.5 pointer-events-none"
-                            style={{ left: `${marker.leftPct}%`, background: marker.color, opacity: 0.85 }}
-                          />
-                        ))}
-                        {isSelected && !track.isLocked && (
-                          <>
-                            <div className="absolute left-0 top-0 bottom-0 w-2 bg-indigo-400/70 cursor-ew-resize z-20" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'start')} />
-                            <div className="absolute right-0 top-0 bottom-0 w-2 bg-indigo-400/70 cursor-ew-resize z-20" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'end')} />
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
+                          <div className="tl-clip__scrim" />
+                          {showLabel && (
+                            <div className="tl-clip__label">
+                              <span className="tl-clip__name">{clip.textConfig?.content || media.name}</span>
+                              <span className="tl-clip__meta">
+                                {speedLabel && <span>{speedLabel}</span>}
+                                {effectCount > 0 && <span>FX {effectCount}</span>}
+                                {clip.transitionOut && <span>{clip.transitionOut.type} {clip.transitionOut.duration.toFixed(1)}s</span>}
+                              </span>
+                            </div>
+                          )}
+                          {keyframeMarkers.map((marker) => (
+                            <div key={marker.id} className="tl-clip__keyframe" style={{ left: `${marker.leftPct}%`, background: marker.color }} />
+                          ))}
+                          {!track.isLocked && (isSelected || isHovered) && (
+                            <>
+                              <div className="tl-clip__handle tl-clip__handle--start" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'start')} />
+                              <div className="tl-clip__handle tl-clip__handle--end" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'end')} />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {!hasClips && (
+              <div className="tl-empty" style={{ left: `${TRACK_HEADER_WIDTH}px` }}>
+                <div className="tl-empty__card">
+                  <p className="tl-empty__title">Your sequence is empty</p>
+                  <p className="tl-empty__hint">Drag clips from the Browser onto a track, or load a clip into the Source monitor and press Insert.</p>
                 </div>
               </div>
-            );
-          })}
+            )}
+          </div>
 
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 cursor-ew-resize pointer-events-auto"
-            style={{ left: `${playheadPosition * PIXELS_PER_SECOND + TRACK_HEADER_WIDTH}px` }}
-            onMouseDown={handlePlayheadMouseDown}
-          >
-            <div className="absolute -top-1 -left-1.5 w-4 h-4 bg-red-500 rounded-full" />
+          {/* Playhead spanning ruler + tracks */}
+          <div className="tl-playhead" style={{ left: `${playheadX}px` }} onMouseDown={handlePlayheadMouseDown}>
+            <div className="tl-playhead__hit" />
+            <div className="tl-playhead__line" />
           </div>
           {snapLinePosition !== null && (
-            <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 z-30 pointer-events-none" style={{ left: `${snapLinePosition}px` }} />
+            <div className="tl-snapline" style={{ left: `${snapLinePosition}px` }} />
           )}
         </div>
       </div>
