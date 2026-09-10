@@ -100,6 +100,7 @@ interface EditWorkspaceProps {
     isPlaying: boolean;
     onTogglePlayback: () => void;
     onDeleteClip: () => void;
+    onRippleDeleteClip?: () => void;
     onDropMedia: (mediaId: string, trackId: string, time: number) => void;
     onDropLibraryAsset: (asset: LibraryAsset, trackId: string, time: number) => Promise<void> | void;
     onDropEffectOnClip: (clipId: string, effect: EffectType) => void;
@@ -454,8 +455,9 @@ const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: Array<{ keys: string;
             { keys: 'L', desc: 'Play forward' },
             { keys: 'Left / Right', desc: 'Step 1 frame' },
             { keys: 'Shift+Left/Right', desc: 'Step 1 second' },
-            { keys: 'Home', desc: 'Go to start' },
-            { keys: 'End', desc: 'Go to end' },
+            { keys: 'Up / Down', desc: 'Previous / next edit point' },
+            { keys: 'Home / End', desc: 'Go to start / end' },
+            { keys: 'Click timecode', desc: 'Type a position (1:05, +2, -1:00)' },
         ],
     },
     {
@@ -465,7 +467,9 @@ const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: Array<{ keys: string;
             { keys: 'Shift+Del', desc: 'Ripple delete' },
             { keys: 'Ctrl+Z', desc: 'Undo' },
             { keys: 'Ctrl+Shift+Z', desc: 'Redo' },
-            { keys: 'Ctrl+C / V / X', desc: 'Copy / Paste / Cut' },
+            { keys: 'Ctrl+C / V / X', desc: 'Copy / paste at playhead / cut' },
+            { keys: 'Ctrl+D', desc: 'Duplicate clip' },
+            { keys: 'Right-click clip', desc: 'Clip menu' },
             { keys: 'Del / Backspace', desc: 'Delete selected clip' },
         ],
     },
@@ -625,6 +629,18 @@ const parseRatio = (value: string) => {
 const PANEL_WIDTHS_KEY = 'edit_workspace_panel_widths_v3';
 const PANEL_COLLAPSE_KEY = 'edit_workspace_panel_collapsed_v1';
 const TIMELINE_HEIGHT_KEY = 'edit_workspace_timeline_height_v3';
+const GUIDES_KEY = 'edit_workspace_guides_v1';
+const MASK_KEY = 'edit_workspace_mask_v1';
+
+const MASK_PRESETS: Array<{ id: string; label: string; ratio: number | null }> = [
+    { id: 'none', label: 'No mask', ratio: null },
+    { id: '2.39', label: '2.39:1', ratio: 2.39 },
+    { id: '1.85', label: '1.85:1', ratio: 1.85 },
+    { id: '16:9', label: '16:9', ratio: 16 / 9 },
+    { id: '4:3', label: '4:3', ratio: 4 / 3 },
+    { id: '1:1', label: '1:1', ratio: 1 },
+    { id: '9:16', label: '9:16', ratio: 9 / 16 },
+];
 
 const DEFAULT_WIDTHS = [18, 64, 18];
 const DEFAULT_TIMELINE = 38;
@@ -685,6 +701,13 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const playheadRef = useRef({ position: props.playheadPosition, update: props.onPlayheadUpdate });
     playheadRef.current = { position: props.playheadPosition, update: props.onPlayheadUpdate };
     const [showShortcuts, setShowShortcuts] = useState(false);
+    const [guides, setGuides] = useState<'off' | 'thirds' | 'safe' | 'both'>(() => (loadJson<string>(GUIDES_KEY, 'off') as 'off' | 'thirds' | 'safe' | 'both'));
+    const [mask, setMask] = useState<string>(() => loadJson<string>(MASK_KEY, 'none'));
+    const programStageRef = useRef<HTMLDivElement | null>(null);
+    const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+    useEffect(() => { window.localStorage?.setItem(GUIDES_KEY, JSON.stringify(guides)); }, [guides]);
+    useEffect(() => { window.localStorage?.setItem(MASK_KEY, JSON.stringify(mask)); }, [mask]);
+
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [savedLayouts, setSavedLayouts] = useState<LayoutPreset[]>(loadSavedLayouts);
     const [activeLayoutName, setActiveLayoutName] = useState<string>(() => {
@@ -857,6 +880,18 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const canSplit = collapsed.left && collapsed.right;
     const resolved: 'program' | 'source' | 'split' = monView === 'split' && canSplit ? 'split' : monView === 'source' ? 'source' : 'program';
     const effective = focusMode ? 'program' : resolved;
+    const effectiveMonitorKey = `${effective}-${collapsed.left}-${collapsed.right}`;
+    useEffect(() => {
+        const element = programStageRef.current;
+        if (!element || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver((entries) => {
+            const rect = entries[0]?.contentRect;
+            if (rect) setStageSize({ width: rect.width, height: rect.height });
+        });
+        observer.observe(element);
+        setStageSize({ width: element.clientWidth, height: element.clientHeight });
+        return () => observer.disconnect();
+    }, [effectiveMonitorKey]);
 
     const pauseSourcePlayback = useCallback(() => {
         srcVideoRef.current?.pause();
@@ -1319,6 +1354,21 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const stepProgramFrame = (direction: -1 | 1) => props.onPlayheadUpdate(clampPlayhead(props.playheadPosition + direction / DEFAULT_TIMELINE_FPS));
     const canThreePointEdit = Boolean(srcSource);
 
+    const previewRatio = preview.width > 0 && preview.height > 0 ? preview.width / preview.height : 16 / 9;
+    const fitted = stageSize.width > 0 && stageSize.height > 0
+        ? (() => {
+            const width = Math.min(stageSize.width, stageSize.height * previewRatio);
+            const height = width / previewRatio;
+            return { left: (stageSize.width - width) / 2, top: (stageSize.height - height) / 2, width, height };
+        })()
+        : null;
+    const maskRatio = MASK_PRESETS.find((preset) => preset.id === mask)?.ratio ?? null;
+    const maskBars = fitted && maskRatio
+        ? (maskRatio > previewRatio
+            ? { horizontal: true, size: Math.max(0, (fitted.height - fitted.width / maskRatio) / 2) }
+            : { horizontal: false, size: Math.max(0, (fitted.width - fitted.height * maskRatio) / 2) })
+        : null;
+
     /* ─── Source Monitor ─── */
     const sourcePanel = (
         <div className="edit-monitor-panel">
@@ -1415,18 +1465,52 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                     <small>{props.projectName || 'Untitled sequence'}</small>
                 </div>
                 <div className="flex items-center gap-1">
+                    <select value={guides} onChange={(e) => setGuides(e.target.value as typeof guides)} className="edit-select" title="Overlay guides">
+                        <option value="off">No guides</option>
+                        <option value="thirds">Thirds</option>
+                        <option value="safe">Safe areas</option>
+                        <option value="both">Thirds + safe</option>
+                    </select>
+                    <select value={mask} onChange={(e) => setMask(e.target.value)} className="edit-select" title="Aspect mask">
+                        {MASK_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                    </select>
                     <span className="edit-toolbar__hint hidden md:inline">{preview.width} × {preview.height}</span>
                     <button onClick={() => setIsFullscreen(true)} className="edit-icon-btn" title="Fullscreen (F11)">
                         <MaximizeIcon className="w-4 h-4" />
                     </button>
                 </div>
             </div>
-            <div className="edit-monitor-panel__stage" onDoubleClick={() => setIsFullscreen(true)} title="Double-click for fullscreen">
+            <div ref={programStageRef} className="edit-monitor-panel__stage" onDoubleClick={() => setIsFullscreen(true)} title="Double-click for fullscreen">
                 <PreviewPlayer
                     timelineClips={timelineClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
                     playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
                     canvasWidth={preview.width} canvasHeight={preview.height} aspectStyle={aspect} showControls={false}
                 />
+                {(guides !== 'off' || maskRatio) && fitted && (
+                    <div className="edit-guides" style={{ left: fitted.left, top: fitted.top, width: fitted.width, height: fitted.height }} aria-hidden>
+                        {maskRatio && maskBars && (
+                            <>
+                                <div className="edit-guides__mask" style={maskBars.horizontal ? { left: 0, right: 0, top: 0, height: maskBars.size } : { top: 0, bottom: 0, left: 0, width: maskBars.size }} />
+                                <div className="edit-guides__mask" style={maskBars.horizontal ? { left: 0, right: 0, bottom: 0, height: maskBars.size } : { top: 0, bottom: 0, right: 0, width: maskBars.size }} />
+                            </>
+                        )}
+                        {(guides === 'thirds' || guides === 'both') && (
+                            <>
+                                <div className="edit-guides__line edit-guides__line--v" style={{ left: '33.333%' }} />
+                                <div className="edit-guides__line edit-guides__line--v" style={{ left: '66.666%' }} />
+                                <div className="edit-guides__line edit-guides__line--h" style={{ top: '33.333%' }} />
+                                <div className="edit-guides__line edit-guides__line--h" style={{ top: '66.666%' }} />
+                            </>
+                        )}
+                        {(guides === 'safe' || guides === 'both') && (
+                            <>
+                                <div className="edit-guides__safe" style={{ inset: '5%' }} title="Action safe" />
+                                <div className="edit-guides__safe edit-guides__safe--title" style={{ inset: '10%' }} title="Title safe" />
+                                <div className="edit-guides__center" />
+                            </>
+                        )}
+                    </div>
+                )}
                 {timelineClips.length === 0 && (
                     <div className="edit-monitor-empty">
                         <strong>Nothing on the timeline yet</strong>
@@ -1571,6 +1655,10 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                         onDropEffect={props.onDropEffectOnClip} onDropEffectStack={props.onDropEffectStackOnClip}
                         waveformCache={waveformCache}
                         onMatchGap={handleMatchTimelineGap}
+                        rangeIn={pgmIn}
+                        rangeOut={pgmOut}
+                        onDeleteClip={props.onDeleteClip}
+                        onRippleDeleteClip={props.onRippleDeleteClip}
                     />
                 </div>
             </div>

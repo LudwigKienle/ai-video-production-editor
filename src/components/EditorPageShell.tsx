@@ -37,6 +37,7 @@ export interface SharedSequenceProps {
     onUpdateTrack: (trackId: string, updates: Partial<Omit<TimelineTrack, 'id' | 'type'>>) => void;
     onSetActiveTrack: (trackId: string) => void;
     onDeleteClip?: () => void;
+    onRippleDeleteClip?: () => void;
     onDropMedia?: (mediaId: string, trackId: string, time: number) => void;
     onDropLibraryAsset?: (asset: LibraryAsset, trackId: string, time: number) => void | Promise<void>;
     projectName?: string | null;
@@ -299,6 +300,7 @@ const EditorPageShell: React.FC<EditorPageShellProps> = (props) => {
                             onPlayheadUpdate={onPlayheadUpdate} onSnappingToggle={props.onSnappingToggle} onSplitClip={props.onSplitClip}
                             onAddTrack={props.onAddTrack} onUpdateTrack={props.onUpdateTrack}
                             onDropMedia={props.onDropMedia} onDropLibraryAsset={props.onDropLibraryAsset}
+                            onDeleteClip={props.onDeleteClip} onRippleDeleteClip={props.onRippleDeleteClip}
                         />
                     </div>
                 </>

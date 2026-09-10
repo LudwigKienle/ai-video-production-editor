@@ -6516,3 +6516,109 @@ body[data-theme="light"] .wb-marker { background: rgb(255 255 255 / 0.94); color
 
 /* Colour viewer inside the page shell: fill the stage regardless of percentage-height resolution. */
 .page-shell .color-viewer__image { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+
+/* ─── Timeline: clip menu, ruler marks ─── */
+
+.tl-ruler__range {
+  position: absolute;
+  top: 3px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgb(var(--app-warm-rgb) / 0.75);
+  box-shadow: 0 0 0 1px rgb(var(--app-warm-rgb) / 0.4);
+  pointer-events: none;
+}
+
+.tl-ruler__clipmark {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  background: var(--app-accent);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.tl-menu {
+  position: fixed;
+  z-index: 9500;
+  display: flex;
+  flex-direction: column;
+  min-width: 13.5rem;
+  padding: 0.3rem;
+  border: 1px solid var(--edit-hairline-strong);
+  border-radius: 0.65rem;
+  background: var(--app-panel);
+  color: var(--app-text);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.4);
+}
+
+.tl-menu__title {
+  padding: 0.35rem 0.6rem 0.4rem;
+  color: var(--app-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.42rem 0.6rem;
+  border: 0;
+  border-radius: 0.42rem;
+  background: transparent;
+  color: var(--app-text);
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tl-menu__item span { flex: 1; }
+.tl-menu__item:hover:not(:disabled) { background: var(--edit-control-hover); }
+.tl-menu__item:disabled { opacity: 0.4; cursor: default; }
+.tl-menu__item--danger:hover:not(:disabled) { background: rgb(221 124 124 / 0.16); color: var(--app-danger); }
+.tl-menu__sep { height: 1px; margin: 0.25rem 0.3rem; background: var(--edit-hairline); }
+
+/* ─── Transport: typed timecode ─── */
+
+.edit-timecode__now--button {
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0 0.25rem;
+  background: transparent;
+  cursor: text;
+  font: inherit;
+  color: inherit;
+}
+
+.edit-timecode__now--button:hover:not(:disabled) { background: var(--edit-control-hover); }
+.edit-timecode__now--button:disabled { cursor: default; }
+
+.edit-timecode__input {
+  width: 8.2rem;
+  height: 1.6rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--app-accent);
+  border-radius: 0.35rem;
+  background: var(--app-panel);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.86rem;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--app-glow);
+}
+
+/* ─── Program monitor guides and masks ─── */
+
+.edit-guides { position: absolute; z-index: 20; pointer-events: none; }
+.edit-guides__mask { position: absolute; background: rgb(0 0 0 / 0.82); }
+.edit-guides__line { position: absolute; background: rgb(255 255 255 / 0.35); mix-blend-mode: difference; }
+.edit-guides__line--v { top: 0; bottom: 0; width: 1px; }
+.edit-guides__line--h { left: 0; right: 0; height: 1px; }
+.edit-guides__safe { position: absolute; border: 1px solid rgb(255 255 255 / 0.45); mix-blend-mode: difference; }
+.edit-guides__safe--title { border-style: dashed; }
+.edit-guides__center { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%); border: 1px solid rgb(255 255 255 / 0.5); border-radius: 999px; mix-blend-mode: difference; }

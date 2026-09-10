@@ -8327,6 +8327,7 @@ function App() {
             isPlaying,
             onTogglePlayback: togglePlayback,
             onDeleteClip: () => { if (selectedClipId) { deleteClipFromTimeline(selectedClipId); } },
+            onRippleDeleteClip: () => { if (selectedClipId) { deleteClipFromTimeline(selectedClipId, { ripple: true }); } },
             onDropMedia: handleDropMedia,
             onDropEffectOnClip: (clipId: string, effect: EffectType) => applyCssEffectToClip(clipId, effect),
             onDropEffectStackOnClip: (clipId: string, stackId: string) => applyEffectStackToClip(clipId, stackId),

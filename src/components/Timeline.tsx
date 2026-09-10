@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { EffectType, TimelineClip, MediaItem, TimelineTrack, WaveformCache } from '../types';
-import { VideoIcon, AudioIcon, ScissorsIcon, MagnetIcon, LockIcon, UnlockIcon, MuteIcon, WandSparklesIcon, ZoomInIcon, ZoomOutIcon, FitViewIcon, SoloIcon } from './icons';
+import { VideoIcon, AudioIcon, ScissorsIcon, MagnetIcon, LockIcon, UnlockIcon, MuteIcon, WandSparklesIcon, ZoomInIcon, ZoomOutIcon, FitViewIcon, SoloIcon, LayersIcon, TrashIcon, SkipBackIcon, SkipForwardIcon } from './icons';
 import { formatTimecode, formatRulerLabel, pickRulerStep } from '../utils/timecode';
 import Waveform from './Waveform';
 import { getClipEffectLayers } from '../utils/effects';
@@ -17,6 +17,12 @@ interface TimelineProps {
   trimMode: 'normal' | 'ripple' | 'roll' | 'slip' | 'slide';
   onTrimModeChange?: (mode: 'normal' | 'ripple' | 'roll' | 'slip' | 'slide') => void;
   waveformCache: WaveformCache;
+  /** Program in/out marks, drawn on the ruler. */
+  rangeIn?: number | null;
+  rangeOut?: number | null;
+  /** Deletes the selected clip (optionally closing the gap). */
+  onDeleteClip?: () => void;
+  onRippleDeleteClip?: () => void;
   onSelectClip: (clipId: string | null) => void;
   onSetActiveTrack: (trackId: string) => void;
   onUpdateClip: (updatedClip: TimelineClip) => void;
@@ -47,8 +53,9 @@ const MIN_PIXELS_PER_SECOND = 3;
 const MAX_PIXELS_PER_SECOND = 400;
 const ZOOM_STORAGE_KEY = 'timeline_pixels_per_second_v1';
 const MIN_CLIP_DURATION = 0.5;
-const TRACK_HEIGHT = 64;
-const TRACK_ROW_HEIGHT = TRACK_HEIGHT + 6;
+const DEFAULT_TRACK_HEIGHT = 64;
+const TRACK_HEIGHTS = [44, 64, 96] as const;
+const TRACK_HEIGHT_STORAGE_KEY = 'timeline_track_height_v1';
 const RULER_HEIGHT = 30;
 const TRACK_HEADER_WIDTH = 156;
 const SNAP_THRESHOLD = 8;
@@ -67,6 +74,9 @@ const classifyCoverageNeed = (duration: number): 'insert' | 'alt-angle' | 'b-rol
 );
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+/** Survives page switches so a clip copied on Edit can be pasted on Trim. */
+let timelineClipboard: TimelineClip | null = null;
 
 const Timeline: React.FC<TimelineProps> = (props) => {
   const {
@@ -95,6 +105,10 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     onDropEffectStack,
     onSmartFill,
     onMatchGap,
+    rangeIn = null,
+    rangeOut = null,
+    onDeleteClip,
+    onRippleDeleteClip,
   } = props;
 
   const timelineContainerRef = useRef<HTMLDivElement>(null);
@@ -110,6 +124,15 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     }
   });
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
+  const [trackHeight, setTrackHeight] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_TRACK_HEIGHT;
+    try {
+      const raw = Number(window.localStorage.getItem(TRACK_HEIGHT_STORAGE_KEY));
+      return TRACK_HEIGHTS.includes(raw as (typeof TRACK_HEIGHTS)[number]) ? raw : DEFAULT_TRACK_HEIGHT;
+    } catch { return DEFAULT_TRACK_HEIGHT; }
+  });
+  const rowHeight = trackHeight + 6;
+  const [clipMenu, setClipMenu] = useState<{ x: number; y: number; clipId: string } | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const getMediaForItem = (mediaId: string) => mediaItems.find((media) => media.id === mediaId);
   const getMediaDuration = (mediaId: string, fallback = 5) => Math.max(MIN_CLIP_DURATION, getMediaForItem(mediaId)?.duration || fallback);
@@ -269,7 +292,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const y = tracksRect ? e.clientY - tracksRect.top : -1;
     const time = Math.max(0, x / pxPerSec);
 
-    const trackIndex = Math.floor(y / TRACK_ROW_HEIGHT);
+    const trackIndex = Math.floor(y / rowHeight);
     if (trackIndex >= 0 && trackIndex < tracks.length) {
       if (mediaId && onDropMedia) {
         onDropMedia(mediaId, tracks[trackIndex].id, time);
@@ -599,7 +622,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         const tracksRect = tracksAreaRef.current?.getBoundingClientRect();
         if (tracksRect) {
           const yPosInTimeline = e.clientY - tracksRect.top;
-          const trackIndex = Math.floor(yPosInTimeline / TRACK_ROW_HEIGHT);
+          const trackIndex = Math.floor(yPosInTimeline / rowHeight);
           const targetTrack = tracks[trackIndex];
           const media = getMediaForItem(initialClip.mediaId);
           if (
@@ -654,6 +677,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     isSnappingEnabled,
     playheadPosition,
     pxPerSec,
+    rowHeight,
     onPlayheadUpdate,
     onUpdateClip,
     onBatchUpdateClips,
@@ -709,6 +733,121 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   })();
   const coverageHeatmapGaps = coverageTrackId ? (videoGapsByTrack[coverageTrackId] || []) : [];
 
+
+  /* ─── Clip actions: duplicate, copy, paste, edit-point navigation ─── */
+
+  const cloneClip = (clip: TimelineClip): TimelineClip => ({
+    ...clip,
+    id: `clip-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    keyframes: clip.keyframes?.map((frame) => ({ ...frame, id: `kf-${Date.now()}-${Math.random().toString(16).slice(2, 6)}` })),
+  });
+
+  /** Finds the first free spot for a clip on a track at or after `desiredStart`. */
+  const placeOnTrack = (clip: TimelineClip, trackId: string, desiredStart: number): TimelineClip => {
+    const length = Math.max(MIN_CLIP_DURATION, clip.end - clip.start);
+    const others = getTrackClips(clips, trackId).filter((entry) => entry.id !== clip.id);
+    let start = Math.max(0, desiredStart);
+    for (let guard = 0; guard < 100; guard += 1) {
+      const hit = others.find((entry) => entry.start < start + length - EPSILON && entry.end > start + EPSILON);
+      if (!hit) break;
+      start = hit.end;
+    }
+    return { ...clip, trackId, start, end: start + length };
+  };
+
+  const trackAcceptsClip = (track: TimelineTrack, clip: TimelineClip) => {
+    const media = getMediaForItem(clip.mediaId);
+    const wantsAudio = media?.type === 'audio';
+    return !track.isLocked && (wantsAudio ? track.type === 'audio' : track.type === 'video');
+  };
+
+  const duplicateClip = useCallback((clip: TimelineClip) => {
+    const copy = placeOnTrack(cloneClip(clip), clip.trackId, clip.end);
+    applyClipSet([...clips, copy]);
+    onSelectClip(copy.id);
+  }, [clips, onSelectClip, applyClipSet]);
+
+  const copyClip = useCallback((clip: TimelineClip) => { timelineClipboard = { ...clip }; }, []);
+
+  const pasteClip = useCallback(() => {
+    if (!timelineClipboard) return;
+    const source = timelineClipboard;
+    const target = tracks.find((track) => track.id === activeTrackId && trackAcceptsClip(track, source))
+      || tracks.find((track) => track.id === source.trackId && trackAcceptsClip(track, source))
+      || tracks.find((track) => trackAcceptsClip(track, source));
+    if (!target) return;
+    const copy = placeOnTrack(cloneClip(source), target.id, playheadPosition);
+    applyClipSet([...clips, copy]);
+    onSelectClip(copy.id);
+    onSetActiveTrack(target.id);
+  }, [clips, tracks, activeTrackId, playheadPosition, onSelectClip, onSetActiveTrack, applyClipSet]);
+
+  const editPoints = useMemo(() => {
+    const points = new Set<number>([0]);
+    clips.forEach((clip) => { points.add(Number(clip.start.toFixed(4))); points.add(Number(clip.end.toFixed(4))); });
+    return Array.from(points).sort((a, b) => a - b);
+  }, [clips]);
+
+  const goToEditPoint = useCallback((direction: -1 | 1) => {
+    const target = direction < 0
+      ? [...editPoints].reverse().find((point) => point < playheadPosition - EPSILON)
+      : editPoints.find((point) => point > playheadPosition + EPSILON);
+    if (target !== undefined) onPlayheadUpdate(target);
+  }, [editPoints, playheadPosition, onPlayheadUpdate]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+      const selected = clips.find((clip) => clip.id === selectedClipId) || null;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        const key = event.key.toLowerCase();
+        if (key === 'c' && selected) { event.preventDefault(); copyClip(selected); }
+        else if (key === 'x' && selected) { event.preventDefault(); copyClip(selected); onDeleteClip?.(); }
+        else if (key === 'v') { event.preventDefault(); pasteClip(); }
+        else if (key === 'd' && selected) { event.preventDefault(); duplicateClip(selected); }
+        return;
+      }
+      if (event.altKey) return;
+      if (event.key === 'ArrowUp') { event.preventDefault(); goToEditPoint(-1); }
+      else if (event.key === 'ArrowDown') { event.preventDefault(); goToEditPoint(1); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [clips, selectedClipId, copyClip, pasteClip, duplicateClip, goToEditPoint, onDeleteClip]);
+
+  useEffect(() => {
+    if (!clipMenu) return;
+    const close = () => setClipMenu(null);
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [clipMenu]);
+
+  const track = (clip: TimelineClip) => tracks.find((entry) => entry.id === clip.trackId);
+
+  const openClipMenu = (event: React.MouseEvent, clip: TimelineClip) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (clip.id !== selectedClipId) onSelectClip(clip.id);
+    onSetActiveTrack(clip.trackId);
+    setClipMenu({ x: event.clientX, y: event.clientY, clipId: clip.id });
+  };
+
+  const cycleTrackHeight = () => {
+    const index = TRACK_HEIGHTS.indexOf(trackHeight as (typeof TRACK_HEIGHTS)[number]);
+    const next = TRACK_HEIGHTS[(index + 1) % TRACK_HEIGHTS.length];
+    setTrackHeight(next);
+    try { window.localStorage.setItem(TRACK_HEIGHT_STORAGE_KEY, String(next)); } catch { /* ignore */ }
+  };
 
   /* ─── Zoom ─── */
 
@@ -814,7 +953,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   const zoomPercent = Math.round((pxPerSec / DEFAULT_PIXELS_PER_SECOND) * 100);
   const playheadX = playheadPosition * pxPerSec + TRACK_HEADER_WIDTH;
   const hasClips = clips.length > 0;
-  const tracksHeight = tracks.length * TRACK_ROW_HEIGHT;
+  const tracksHeight = tracks.length * rowHeight;
 
   return (
     <div className="tl-root select-none">
@@ -881,6 +1020,9 @@ const Timeline: React.FC<TimelineProps> = (props) => {
             <AudioIcon className="w-3.5 h-3.5" />
             <span>Audio</span>
           </button>
+          <button type="button" className="edit-icon-btn" title={`Track height: ${trackHeight <= TRACK_HEIGHTS[0] ? 'small' : trackHeight >= TRACK_HEIGHTS[2] ? 'large' : 'medium'} (click to change)`} onClick={cycleTrackHeight}>
+            <LayersIcon className="w-4 h-4" />
+          </button>
           <span className="edit-divider" />
           <div className="tl-zoom" title="Zoom (Ctrl/Cmd + scroll wheel)">
             <button type="button" className="edit-icon-btn" onClick={() => zoomStep(-1)} disabled={pxPerSec <= MIN_PIXELS_PER_SECOND} title="Zoom out">
@@ -934,6 +1076,17 @@ const Timeline: React.FC<TimelineProps> = (props) => {
               {contentDuration > 0 && (
                 <div className="tl-ruler__content" style={{ width: `${contentDuration * pxPerSec}px` }} />
               )}
+              {(rangeIn !== null || rangeOut !== null) && (
+                <div
+                  className="tl-ruler__range"
+                  style={{ left: `${(rangeIn ?? 0) * pxPerSec}px`, width: `${Math.max(2, ((rangeOut ?? Math.max(contentDuration, rangeIn ?? 0)) - (rangeIn ?? 0)) * pxPerSec)}px` }}
+                  title="Program in/out range"
+                />
+              )}
+              {(() => {
+                const selected = clips.find((clip) => clip.id === selectedClipId);
+                return selected ? <div className="tl-ruler__clipmark" style={{ left: `${selected.start * pxPerSec}px`, width: `${Math.max(2, (selected.end - selected.start) * pxPerSec)}px` }} /> : null;
+              })()}
               <div className="tl-ruler__playhead" style={{ left: `${playheadPosition * pxPerSec}px` }} onMouseDown={handlePlayheadMouseDown} />
             </div>
           </div>
@@ -974,7 +1127,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                 <div
                   key={track.id}
                   className={`tl-track ${isActiveTrack ? 'tl-track--active' : ''} ${track.isLocked ? 'tl-track--locked' : ''}`}
-                  style={{ height: `${TRACK_ROW_HEIGHT}px` }}
+                  style={{ height: `${rowHeight}px` }}
                 >
                   <div
                     className={`track-header tl-track__header ${isActiveTrack ? 'tl-track__header--active' : ''}`}
@@ -1087,7 +1240,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                       return (
                         <div
                           key={clip.id}
-                          onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                          onMouseDown={(e) => { if (e.button === 2) return; handleClipMouseDown(e, clip); }}
+                          onContextMenu={(e) => openClipMenu(e, clip)}
                           onMouseEnter={() => setHoveredClipId(clip.id)}
                           onMouseLeave={() => setHoveredClipId((current) => (current === clip.id ? null : current))}
                           onDragOver={(event) => {
@@ -1116,7 +1270,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                               onSetActiveTrack(clip.trackId);
                             }
                           }}
-                          style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${TRACK_HEIGHT}px` }}
+                          style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${trackHeight}px` }}
                           className={`clip-item tl-clip tl-clip--${kind} ${isSelected ? 'tl-clip--selected' : ''} ${track.isLocked ? 'tl-clip--locked' : ''}`}
                           title={`${media.name} · ${formatTimecode(clip.start)} → ${formatTimecode(clip.end)}`}
                         >
@@ -1126,7 +1280,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                             ) : media.type === 'video' ? (
                               <video src={media.url} className="w-full h-full object-cover" muted preload="metadata" />
                             ) : (
-                              waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={TRACK_HEIGHT} />
+                              waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={trackHeight} />
                             )}
                           </div>
                           <div className="tl-clip__scrim" />
@@ -1177,6 +1331,50 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           )}
         </div>
       </div>
+
+      {clipMenu && (() => {
+        const clip = clips.find((entry) => entry.id === clipMenu.clipId);
+        if (!clip) return null;
+        const inClip = playheadPosition > clip.start + EPSILON && playheadPosition < clip.end - EPSILON;
+        const media = getMediaForItem(clip.mediaId);
+        const left = Math.min(clipMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 0) - 240);
+        const top = Math.min(clipMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 0) - 320);
+        const item = (label: string, action: () => void, options?: { disabled?: boolean; danger?: boolean; icon?: React.ReactNode; shortcut?: string }) => (
+          <button
+            key={label}
+            type="button"
+            className={`tl-menu__item ${options?.danger ? 'tl-menu__item--danger' : ''}`}
+            disabled={options?.disabled}
+            onClick={() => { setClipMenu(null); action(); }}
+          >
+            {options?.icon}
+            <span>{label}</span>
+            {options?.shortcut && <kbd className="edit-seg__key">{options.shortcut}</kbd>}
+          </button>
+        );
+        return (
+          <div className="tl-menu" style={{ left, top }} onMouseDown={(event) => event.stopPropagation()} role="menu">
+            <div className="tl-menu__title">{clip.textConfig?.content || media?.name || 'Clip'}</div>
+            {item('Split at playhead', () => onSplitClip(clip.id, playheadPosition), { disabled: !inClip, icon: <ScissorsIcon className="w-3.5 h-3.5" />, shortcut: 'C' })}
+            {item('Go to start', () => onPlayheadUpdate(clip.start), { icon: <SkipBackIcon className="w-3.5 h-3.5" /> })}
+            {item('Go to end', () => onPlayheadUpdate(clip.end), { icon: <SkipForwardIcon className="w-3.5 h-3.5" /> })}
+            {item('Zoom to clip', () => {
+              const container = timelineContainerRef.current;
+              if (!container) return;
+              const available = container.clientWidth - TRACK_HEADER_WIDTH - 48;
+              applyZoom(available / Math.max(0.5, clip.end - clip.start));
+              requestAnimationFrame(() => { if (timelineContainerRef.current) timelineContainerRef.current.scrollLeft = Math.max(0, clip.start * (available / Math.max(0.5, clip.end - clip.start)) - 24); });
+            }, { icon: <FitViewIcon className="w-3.5 h-3.5" /> })}
+            <div className="tl-menu__sep" />
+            {item('Duplicate', () => duplicateClip(clip), { disabled: track(clip)?.isLocked, shortcut: 'Ctrl+D' })}
+            {item('Copy', () => copyClip(clip), { shortcut: 'Ctrl+C' })}
+            {item('Paste at playhead', () => pasteClip(), { disabled: !timelineClipboard, shortcut: 'Ctrl+V' })}
+            <div className="tl-menu__sep" />
+            {onDeleteClip && item('Delete', () => onDeleteClip(), { danger: true, disabled: track(clip)?.isLocked, icon: <TrashIcon className="w-3.5 h-3.5" />, shortcut: 'Del' })}
+            {onRippleDeleteClip && item('Ripple delete', () => onRippleDeleteClip(), { danger: true, disabled: track(clip)?.isLocked, shortcut: 'Shift+Del' })}
+          </div>
+        );
+      })()}
     </div>
   );
 };
