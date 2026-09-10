@@ -102,6 +102,9 @@ import AnalysisWorkspace from './workspaces/AnalysisWorkspace';
 import ReviewWorkspace from './workspaces/ReviewWorkspace';
 import RequestsWorkspace from './workspaces/RequestsWorkspace';
 import CompositingWorkspace from './workspaces/CompositingWorkspace';
+
+/** Pages that edit the shared sequence and therefore share the editor shortcuts. */
+const EDITOR_PAGE_WORKSPACES: Workspace[] = ['EDIT', 'TRIM', 'POST', 'COMPOSITING'];
 import MoodboardWorkspace from './workspaces/MoodboardWorkspace';
 import NotebookLMWorkspace from './workspaces/NotebookLMWorkspace';
 import MicrodramaWorkspace from './workspaces/MicrodramaWorkspace';
@@ -5839,7 +5842,7 @@ function App() {
     }, [canRedo, canUndo, redo, undo]);
 
     useEffect(() => {
-        if (activeWorkspace !== 'EDIT') return;
+        if (!EDITOR_PAGE_WORKSPACES.includes(activeWorkspace)) return;
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.defaultPrevented || event.metaKey || event.ctrlKey) return;
@@ -8627,13 +8630,18 @@ function App() {
                 />
             );
             case 'AVATAR': return <AvatarWorkspace avatars={avatars} onUpdateAvatars={setAvatars} onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])} />;
-            case 'TRIM': return <TrimWorkspace selectedClip={commonProps.selectedClip} selectedMedia={commonProps.selectedMedia} onTrim={(id, dur) => { setTimelineClips(timelineClips.map(c => c.id === id ? { ...c, end: c.start + dur, duration: dur } : c)); setActiveWorkspace('EDIT'); }} onCancel={() => setActiveWorkspace('EDIT')} />;
-            case 'POST': return <PostWorkspace selectedClip={commonProps.selectedClip} selectedMedia={commonProps.selectedMedia} onUpdateFilters={updateClipFilters} timelineClips={timelineClips} mediaItems={mediaItems} storyBible={storyBible} />;
+            case 'TRIM': return <TrimWorkspace {...commonProps} onSwitchToEdit={() => setActiveWorkspace('EDIT')} />;
+            case 'POST': return <PostWorkspace {...commonProps} onUpdateFilters={updateClipFilters} storyBible={storyBible} onSwitchToEdit={() => setActiveWorkspace('EDIT')} />;
             case 'COMPOSITING': return (
                 <CompositingWorkspace
+                    {...commonProps}
                     apiKeyReady={apiKeyReady}
-                    mediaItems={mediaItems}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
+                    onAddToTimeline={(item) => {
+                        setMediaItems(prev => (prev.some(entry => entry.id === item.id) ? prev : [...prev, item]));
+                        appendMediaToTimeline(item, { startTime: playheadPosition });
+                    }}
+                    onSwitchToEdit={() => setActiveWorkspace('EDIT')}
                     seedVideoUrl={compositingSeedVideo}
                     onConsumeSeed={() => setCompositingSeedVideo(null)}
                     currentProjectPath={projectPath}

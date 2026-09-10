@@ -16,6 +16,7 @@ import {
     type ColorWheelGrade,
 } from '../utils/colorWheels';
 import ColorWheel from '../components/ColorWheel';
+import EditorPageShell, { type SharedSequenceProps } from '../components/EditorPageShell';
 import { getInstalledPluginLuts, subscribePlugins } from '../services/pluginService';
 
 // Keep unused imports referenced for API parity with the previous version.
@@ -24,14 +25,12 @@ void transcribeAudio;
 void generateSmartScore;
 void generateSoundEffect;
 
-interface PostWorkspaceProps {
+interface PostWorkspaceProps extends SharedSequenceProps {
     selectedClip: TimelineClip | null;
     selectedMedia: MediaItem | null;
     onUpdateFilters: (clipId: string, filters: TimelineClip['filters']) => void;
-    timelineClips: TimelineClip[];
-    mediaItems: MediaItem[];
     storyBible?: StoryBible;
-    onSelectClip?: (clipId: string) => void;
+    onSwitchToEdit?: () => void;
 }
 
 const COLOR_WHEELS_LUT_NAME = 'Color Wheels';
@@ -217,7 +216,7 @@ const Scopes: React.FC<{ source: string | null; mode: 'histogram' | 'waveform' }
 
 type ColorTab = 'primaries' | 'film' | 'ai';
 
-const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'selectedMedia' | 'onUpdateFilters' | 'timelineClips' | 'mediaItems' | 'onSelectClip'>> = ({ selectedClip, selectedMedia, onUpdateFilters, timelineClips, mediaItems, onSelectClip }) => {
+const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'selectedMedia' | 'onUpdateFilters' | 'timelineClips' | 'mediaItems' | 'onSelectClip' | 'playheadPosition'>> = ({ selectedClip, selectedMedia, onUpdateFilters, timelineClips, mediaItems, onSelectClip, playheadPosition }) => {
     const [frame, setFrame] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<string | false>(false);
     const [aiGrade, setAiGrade] = useState<{ analysis: string; suggestions: any[] } | null>(null);
@@ -252,13 +251,22 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
 
     useEffect(() => subscribePlugins(() => setPluginLuts(getInstalledPluginLuts())), []);
 
+    // The viewer shows the frame under the playhead when it sits inside the clip,
+    // otherwise the clip's first used frame. Seeks are debounced while scrubbing.
+    const speed = Math.max(0.05, selectedClip?.speed || 1);
+    const sourceIn = selectedClip?.sourceIn ?? 0;
+    const playheadInClip = Boolean(selectedClip && playheadPosition >= selectedClip.start && playheadPosition <= selectedClip.end);
+    const sourceTime = selectedClip && playheadInClip ? sourceIn + (playheadPosition - selectedClip.start) * speed : sourceIn;
+    const frameTimeKey = Math.round(sourceTime * 12) / 12;
     useEffect(() => {
+        let cancelled = false;
         const getFrame = async () => {
             if (selectedMedia?.type === 'video' && selectedMedia.url && selectedClip) {
                 try {
-                    setFrame(await extractFrameFromVideo(selectedMedia.url, selectedClip.start));
+                    const next = await extractFrameFromVideo(selectedMedia.url, frameTimeKey);
+                    if (!cancelled) setFrame(next);
                 } catch {
-                    setFrame(null);
+                    if (!cancelled) setFrame(null);
                 }
             } else if (selectedMedia?.type === 'image') {
                 setFrame(selectedMedia.url);
@@ -266,8 +274,9 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
                 setFrame(null);
             }
         };
-        void getFrame();
-    }, [selectedClip?.id, selectedMedia?.id]);
+        const timer = window.setTimeout(() => { void getFrame(); }, 120);
+        return () => { cancelled = true; window.clearTimeout(timer); };
+    }, [selectedClip?.id, selectedMedia?.id, frameTimeKey]);
 
     useEffect(() => {
         setAiGrade(null);
@@ -499,7 +508,7 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
                     </div>
                     <div className="color-viewer__bar">
                         <span className="color-viewer__name">{selectedMedia.name}</span>
-                        <span className="color-viewer__meta">{lutLabel}{filters.lut !== 'none' ? ` · ${filters.lutIntensity}%` : ''}</span>
+                        <span className="color-viewer__meta">{lutLabel}{filters.lut !== 'none' ? ` · ${filters.lutIntensity}%` : ''}{playheadInClip ? '' : ' · first frame'}</span>
                         <div className="color-viewer__actions">
                             <button type="button" className={`toolbar-button ${compare ? 'toolbar-segmented__item--active' : ''}`} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)} title="Hold to see the original">Original</button>
                             <button type="button" className="toolbar-button" onClick={copyGradeToAll} title="Copy this grade to every visual clip">Apply to all</button>
@@ -515,15 +524,6 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
                         </div>
                     </div>
                     <Scopes source={previewFrame} mode={scopeMode} />
-                    {visualClips.length > 1 && onSelectClip && (
-                        <div className="color-clipstrip color-clipstrip--compact">
-                            {visualClips.map((clip, index) => (
-                                <button key={clip.id} type="button" className={`color-clipstrip__item ${clip.id === selectedClip.id ? 'color-clipstrip__item--active' : ''}`} onClick={() => onSelectClip(clip.id)} title={mediaItems.find((m) => m.id === clip.mediaId)?.name}>
-                                    <span>{index + 1}</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -670,33 +670,44 @@ const ColorGradingPanel: React.FC<Pick<PostWorkspaceProps, 'selectedClip' | 'sel
 const PostWorkspace: React.FC<PostWorkspaceProps> = (props) => {
     const [activeTab, setActiveTab] = useState<'color' | 'audio'>('color');
 
-    if (props.timelineClips.length === 0) {
-        return (
-            <div className="studio-workspace color-page__empty">
+    const toolbar = (
+        <div className="edit-seg" role="tablist" aria-label="Color page">
+            <button type="button" role="tab" aria-selected={activeTab === 'color'} onClick={() => setActiveTab('color')} className={`edit-seg__item ${activeTab === 'color' ? 'edit-seg__item--active' : ''}`}>
+                <ColorIcon className="w-4 h-4" /> Color
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'audio'} onClick={() => setActiveTab('audio')} className={`edit-seg__item ${activeTab === 'audio' ? 'edit-seg__item--active' : ''}`}>
+                <AudioIcon className="w-4 h-4" /> Audio
+            </button>
+        </div>
+    );
+
+    const main = props.timelineClips.length === 0 ? (
+        <div className="color-workspace">
+            <div className="color-page__empty">
                 <ColorIcon className="w-10 h-10 app-muted" />
                 <h2 className="text-xl font-semibold">Color</h2>
                 <p className="app-muted">Add clips to the timeline in Edit to start grading and mixing.</p>
             </div>
-        );
-    }
-
-    return (
-        <div className="studio-workspace color-workspace">
-            <div className="color-workspace__tabs">
-                <div className="toolbar-segmented">
-                    <button type="button" onClick={() => setActiveTab('color')} className={`toolbar-segmented__item ${activeTab === 'color' ? 'toolbar-segmented__item--active' : ''}`}>
-                        <ColorIcon className="w-4 h-4" /> Color
-                    </button>
-                    <button type="button" onClick={() => setActiveTab('audio')} className={`toolbar-segmented__item ${activeTab === 'audio' ? 'toolbar-segmented__item--active' : ''}`}>
-                        <AudioIcon className="w-4 h-4" /> Audio
-                    </button>
-                </div>
-            </div>
+        </div>
+    ) : (
+        <div className="color-workspace">
             <div className="color-workspace__body">
                 {activeTab === 'color' && <ColorGradingPanel {...props} />}
                 {activeTab === 'audio' && <AudioAnalyzerPanel {...props} />}
             </div>
         </div>
+    );
+
+    return (
+        <EditorPageShell
+            {...props}
+            page="color"
+            toolbar={toolbar}
+            main={main}
+            transportPlacement="bar"
+            followPlayhead
+            onSwitchToEdit={props.onSwitchToEdit}
+        />
     );
 };
 
