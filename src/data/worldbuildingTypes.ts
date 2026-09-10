@@ -100,4 +100,6 @@ export const createDefaultWorldbuildingState = (): WorldbuildingState => ({
   factions: [],
   environments: [],
   glossary: [],
+  lookStyleIds: [],
+  lookNotes: '',
 });

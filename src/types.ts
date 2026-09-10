@@ -1112,6 +1112,12 @@ export type WorldbuildingState = {
   factions: WorldbuildingFaction[];
   environments: WorldbuildingEnvironment[];
   glossary: WorldbuildingGlossaryEntry[];
+  /** Visual style references (ids from the style library) that define the world's look. */
+  lookStyleIds?: string[];
+  /** Free-form art direction notes for the world's look. */
+  lookNotes?: string;
+  /** Id of the template the world was seeded from, if any. */
+  templateId?: string;
 };
 
 export type StoryBible = {
