@@ -10,6 +10,10 @@ const MODELS = {
     QWEN_IMAGE_MAX_EDIT: 'fal-ai/qwen-image-max/edit',
     GPT_IMAGE_2_T2I: 'openai/gpt-image-2',
     GPT_IMAGE_2_EDIT: 'openai/gpt-image-2/edit',
+    GPT_IMAGE_25_FLARE_T2I: 'openai/gpt-image-2.5/flare/text-to-image',
+    GPT_IMAGE_25_FLARE_EDIT: 'openai/gpt-image-2.5/flare/edit',
+    GPT_IMAGE_25_SUNBURST_T2I: 'openai/gpt-image-2.5/sunburst/text-to-image',
+    GPT_IMAGE_25_SUNBURST_EDIT: 'openai/gpt-image-2.5/sunburst/edit',
     NANO_BANANA_2_T2I: 'fal-ai/nano-banana-2',
     NANO_BANANA_2_EDIT: 'fal-ai/nano-banana-2/edit',
     SEEDREAM_V5_LITE_T2I: 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
@@ -17,6 +21,8 @@ const MODELS = {
     WAN_V27_PRO_EDIT: 'fal-ai/wan/v2.7/pro/edit',
     WAN_V27_T2V: 'fal-ai/wan/v2.7/text-to-video',
     WAN_V27_I2V: 'fal-ai/wan/v2.7/image-to-video',
+    WAN_30_T2V: 'alibaba/wan-3.0/text-to-video',
+    WAN_30_I2V: 'alibaba/wan-3.0/image-to-video',
     HAPPY_HORSE_T2V: 'alibaba/happy-horse/text-to-video',
     HAPPY_HORSE_I2V: 'alibaba/happy-horse/image-to-video',
     GROK_IMAGINE_IMAGE_EDIT: 'xai/grok-imagine-image/edit',
@@ -2406,4 +2412,202 @@ export const generate3dWithFalRodinV25 = async (
     if (typeof opts?.seed === 'number') input.seed = opts.seed;
     const output = await runFalQueue(MODELS.RODIN_V25_IMAGE_TO_3D, input, { pollIntervalMs: 5000, maxChecks: 240 });
     return finalizeFalMesh(output, 'rodin-v2.5', MODELS.RODIN_V25_IMAGE_TO_3D, 'Rodin 2.5 image-to-3D', opts?.name || 'rodin_blockout');
+};
+
+/* ─── GPT Image 2.5 (Flare / Sunburst) ─── */
+
+export type FalGptImage25Variant = 'flare' | 'sunburst';
+export type FalGptImage25Quality = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const gptImage25Endpoint = (variant: FalGptImage25Variant, mode: 't2i' | 'edit') => {
+    if (variant === 'sunburst') return mode === 'edit' ? MODELS.GPT_IMAGE_25_SUNBURST_EDIT : MODELS.GPT_IMAGE_25_SUNBURST_T2I;
+    return mode === 'edit' ? MODELS.GPT_IMAGE_25_FLARE_EDIT : MODELS.GPT_IMAGE_25_FLARE_T2I;
+};
+
+export const generateImageWithFalGptImage25 = async (
+    prompt: string,
+    opts?: {
+        variant?: FalGptImage25Variant;
+        aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
+        numOutputs?: number;
+        quality?: FalGptImage25Quality;
+        outputFormat?: 'jpeg' | 'png' | 'webp';
+        background?: 'auto' | 'transparent' | 'opaque';
+    }
+): Promise<MediaItem> => {
+    const variant = opts?.variant || 'flare';
+    const endpoint = gptImage25Endpoint(variant, 't2i');
+    const input: Record<string, any> = {
+        prompt,
+        image_size: mapQwenMaxImageSize(opts?.aspectRatio),
+        quality: opts?.quality || 'high',
+        output_format: opts?.outputFormat || 'png',
+    };
+    if (opts?.background) input.background = opts.background;
+    if (opts?.numOutputs) input.num_images = opts.numOutputs;
+
+    const output = await runFalQueue(endpoint, input);
+    const urls = Array.from(new Set(collectFalImageUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL GPT Image 2.5 ${variant} text-to-image returned no images.`);
+    }
+
+    recordUsage({
+        provider: 'fal',
+        model: endpoint,
+        kind: 'image',
+        units: 1,
+        unitLabel: 'image',
+        note: `FAL GPT Image 2.5 ${variant} text-to-image`,
+    });
+
+    return {
+        id: `fal-gpt-image-25-${variant}-t2i-${Date.now()}`,
+        name: `fal_gpt_image_25_${variant}_${prompt.slice(0, 16) || 'image'}.png`,
+        type: 'image',
+        url: urls[0],
+        source: 'generated',
+    };
+};
+
+export const editImageWithFalGptImage25 = async (
+    prompt: string,
+    image: { base64: string; mimeType: string } | Array<{ base64: string; mimeType: string }>,
+    opts?: {
+        variant?: FalGptImage25Variant;
+        aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
+        numOutputs?: number;
+        quality?: FalGptImage25Quality;
+        outputFormat?: 'jpeg' | 'png' | 'webp';
+        background?: 'auto' | 'transparent' | 'opaque';
+        mask?: { base64: string; mimeType: string };
+    }
+): Promise<MediaItem[]> => {
+    const variant = opts?.variant || 'flare';
+    const endpoint = gptImage25Endpoint(variant, 'edit');
+    const images = Array.isArray(image) ? image : [image];
+    const imageUrls = images.filter((item) => !!item?.base64).map((item) => toDataUri(item)).slice(0, 16);
+    if (imageUrls.length === 0) {
+        throw new Error('FAL GPT Image 2.5 Edit requires at least one reference image.');
+    }
+
+    const input: Record<string, any> = {
+        prompt,
+        image_urls: imageUrls,
+        quality: opts?.quality || 'high',
+        output_format: opts?.outputFormat || 'png',
+    };
+    if (opts?.aspectRatio) input.image_size = mapQwenMaxImageSize(opts.aspectRatio);
+    if (opts?.background) input.background = opts.background;
+    if (opts?.numOutputs) input.num_images = opts.numOutputs;
+    if (opts?.mask) input.mask_url = toDataUri(opts.mask);
+
+    const output = await runFalQueue(endpoint, input);
+    const urls = Array.from(new Set(collectFalImageUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL GPT Image 2.5 ${variant} edit returned no images.`);
+    }
+
+    recordUsage({
+        provider: 'fal',
+        model: endpoint,
+        kind: 'edit',
+        units: 1,
+        unitLabel: 'request',
+        note: `FAL GPT Image 2.5 ${variant} edit`,
+    });
+
+    return urls.map((url, index) => ({
+        id: `fal-gpt-image-25-${variant}-edit-${Date.now()}-${index}`,
+        name: `fal_gpt_image_25_${variant}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
+        type: 'image',
+        url,
+        source: 'generated',
+    }));
+};
+
+/* ─── Wan 3.0 (Alibaba) ─── */
+
+export type FalWan30Resolution = '480p' | '720p' | '1080p';
+export type FalWan30AspectRatio = 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
+
+type FalWan30Options = {
+    /** 2–30 s. Omit to let the model pick a smart duration. */
+    duration?: number;
+    aspectRatio?: FalWan30AspectRatio;
+    resolution?: FalWan30Resolution;
+    /** Generate native audio alongside the picture (default true). */
+    audio?: boolean;
+    enablePromptExpansion?: boolean;
+    enableThinking?: boolean;
+    seed?: number;
+};
+
+const buildWan30Input = (prompt: string, opts?: FalWan30Options) => {
+    const input: Record<string, any> = {
+        prompt,
+        resolution: opts?.resolution || '1080p',
+        aspect_ratio: opts?.aspectRatio || '16:9',
+        audio: opts?.audio !== false,
+    };
+    if (typeof opts?.duration === 'number') {
+        input.duration = clampDurationRange(opts.duration, 5, 2, 30);
+    }
+    if (typeof opts?.enablePromptExpansion === 'boolean') input.enable_prompt_expansion = opts.enablePromptExpansion;
+    if (typeof opts?.enableThinking === 'boolean') input.enable_thinking = opts.enableThinking;
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    return input;
+};
+
+const finishWan30Video = async (endpoint: string, output: any, prompt: string, requestedDuration: number | undefined, label: string, idPrefix: string): Promise<MediaItem> => {
+    const urls = Array.from(new Set(collectFalVideoUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL Wan 3.0 ${label} returned no video.`);
+    }
+    const videoUrl = urls[0];
+    let resolvedDuration = typeof output?.duration === 'number' ? output.duration : requestedDuration || 5;
+    try {
+        resolvedDuration = await getVideoDuration(videoUrl);
+    } catch {
+        /* keep reported/requested duration */
+    }
+
+    recordUsage({
+        provider: 'fal',
+        model: endpoint,
+        kind: 'video',
+        units: resolvedDuration,
+        unitLabel: 'second',
+        note: `FAL Wan 3.0 ${label}`,
+    });
+
+    return {
+        id: `${idPrefix}-${Date.now()}`,
+        name: `${idPrefix.replace(/-/g, '_')}_${prompt.slice(0, 15) || 'clip'}.mp4`,
+        type: 'video',
+        url: videoUrl,
+        source: 'generated',
+        duration: resolvedDuration,
+    };
+};
+
+export const generateVideoWithFalWan30Text = async (prompt: string, opts?: FalWan30Options): Promise<MediaItem> => {
+    const input = buildWan30Input(prompt, opts);
+    const output = await runFalQueue(MODELS.WAN_30_T2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finishWan30Video(MODELS.WAN_30_T2V, output, prompt, input.duration, 'text-to-video', 'fal-wan-30-t2v');
+};
+
+export const generateVideoWithFalWan30Image = async (
+    prompt: string,
+    image: { base64: string; mimeType: string },
+    opts?: FalWan30Options & { endImage?: { base64: string; mimeType: string } }
+): Promise<MediaItem> => {
+    if (!image?.base64) {
+        throw new Error('FAL Wan 3.0 Image-to-Video requires a start image.');
+    }
+    const input = buildWan30Input(prompt, opts);
+    input.start_image_url = toDataUri(image);
+    if (opts?.endImage?.base64) input.end_image_url = toDataUri(opts.endImage);
+    const output = await runFalQueue(MODELS.WAN_30_I2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finishWan30Video(MODELS.WAN_30_I2V, output, prompt, input.duration, 'image-to-video', 'fal-wan-30-i2v');
 };

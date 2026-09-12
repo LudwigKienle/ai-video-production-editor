@@ -31,6 +31,8 @@ import {
   generateVideoWithFalKlingV3Text,
   generateVideoWithFalWanV27Image,
   generateVideoWithFalWanV27Text,
+  generateVideoWithFalWan30Image,
+  generateVideoWithFalWan30Text,
 } from '../services/falAiService';
 import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
@@ -76,6 +78,8 @@ type VideoModelId =
   | 'wan-i2v'
   | 'wan-v27-t2v-fal'
   | 'wan-v27-i2v-fal'
+  | 'wan-30-t2v-fal'
+  | 'wan-30-i2v-fal'
   | 'happy-horse-t2v-fal'
   | 'happy-horse-i2v-fal'
   | 'kling-26'
@@ -126,6 +130,8 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'wan-i2v', label: 'Wan 2.2 I2V Fast', provider: 'Replicate', supportsImage: true, requiresImage: true },
   { id: 'wan-v27-t2v-fal', label: 'WAN 2.7 (Text-to-Video)', provider: 'FAL', supportsImage: false, supportsAudio: true },
   { id: 'wan-v27-i2v-fal', label: 'WAN 2.7 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true, supportsAudio: true, supportsEndFrame: true },
+  { id: 'wan-30-t2v-fal', label: 'Wan 3.0 (Text-to-Video)', provider: 'FAL', supportsImage: false },
+  { id: 'wan-30-i2v-fal', label: 'Wan 3.0 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true, supportsEndFrame: true },
   { id: 'happy-horse-t2v-fal', label: 'Happy Horse 1.0 (Text-to-Video)', provider: 'FAL', supportsImage: false },
   { id: 'happy-horse-i2v-fal', label: 'Happy Horse 1.0 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true },
   { id: 'kling-26', label: 'Kling 2.6', provider: 'Replicate', supportsImage: true },
@@ -207,6 +213,8 @@ const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
   'wan-i2v': ['16:9', '9:16'],
   'wan-v27-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'wan-30-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'wan-30-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'happy-horse-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'happy-horse-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'kling-26': ['16:9', '9:16', '1:1'],
@@ -245,6 +253,8 @@ const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
   'wan-i2v': { provider: 'replicate', kind: 'video', model: 'wan-video/wan-2.2-i2v-fast' },
   'wan-v27-t2v-fal': { provider: 'fal', kind: 'video', model: 'fal-ai/wan/v2.7/text-to-video' },
   'wan-v27-i2v-fal': { provider: 'fal', kind: 'video', model: 'fal-ai/wan/v2.7/image-to-video' },
+  'wan-30-t2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/wan-3.0/text-to-video' },
+  'wan-30-i2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/wan-3.0/image-to-video' },
   'happy-horse-t2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/happy-horse/text-to-video' },
   'happy-horse-i2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/happy-horse/image-to-video' },
   'kling-26': { provider: 'replicate', kind: 'video', model: 'kwaivgi/kling-v2.6' },
@@ -277,6 +287,8 @@ const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options
   'wan-i2v': { supported: true, options: [3, 5, 8, 10, 12], fallback: 5 },
   'wan-v27-t2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'wan-v27-i2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
+  'wan-30-t2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30], fallback: 5 },
+  'wan-30-i2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30], fallback: 5 },
   'happy-horse-t2v-fal': { supported: true, options: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'happy-horse-i2v-fal': { supported: true, options: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'kling-26': { supported: true, options: [5, 10], fallback: 5 },
@@ -594,6 +606,12 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   }, [durationConfig, modelId, modelOption, needsAudio, supportsAudioInput, supportsEndFrame]);
   const selectedModelGuidance = useMemo(() => {
     if (!modelOption) return 'Select a model to see required inputs before you generate.';
+    if (modelId === 'wan-30-t2v-fal') {
+      return 'Wan 3.0 renders 2–30 s in one pass at up to 1080p with native audio; describe the shot beat by beat for long takes.';
+    }
+    if (modelId === 'wan-30-i2v-fal') {
+      return 'Wan 3.0 animates your start frame (optional end frame) for 2–30 s with native audio; keep the frame clean and well composed.';
+    }
     if (modelId === 'happy-horse-t2v-fal') {
       return 'Generates 1080p video with native audio from text; use clear shot timing when you want a controlled sequence.';
     }
@@ -1119,6 +1137,24 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
             resolution: '1080p',
             audio: optionalAudioReference,
+          });
+          break;
+        case 'wan-30-t2v-fal':
+          item = await generateVideoWithFalWan30Text(finalPrompt, {
+            duration: normalizedDurationSeconds,
+            aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
+            resolution: '1080p',
+            audio: true,
+          });
+          break;
+        case 'wan-30-i2v-fal':
+          if (!reference) throw new Error('Wan 3.0 I2V requires a start frame.');
+          item = await generateVideoWithFalWan30Image(finalPrompt, reference, {
+            endImage: endFrameReference,
+            duration: normalizedDurationSeconds,
+            aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
+            resolution: '1080p',
+            audio: true,
           });
           break;
         case 'happy-horse-t2v-fal':
