@@ -485,6 +485,10 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-qwen-max-t2i', provider: 'fal', model: 'fal-ai/qwen-image-max/text-to-image', kind: 'image', unitCost: withMargin(0.075), unitLabel: 'image', label: 'FAL Qwen Image Max T2I' },
     { id: 'fal-qwen-multi', provider: 'fal', model: 'fal-ai/qwen-image-max/edit', kind: 'edit', unitCost: withMargin(0.075), unitLabel: 'request', label: 'FAL Qwen Image Max Edit' },
     { id: 'fal-gpt-image-2', provider: 'fal', model: 'openai/gpt-image-2', kind: 'image', unitCost: withMargin(0.15), unitLabel: 'image', label: 'FAL GPT Image 2 T2I' },
+    { id: 'fal-gpt-image-25-flare', provider: 'fal', model: 'openai/gpt-image-2.5/flare/text-to-image', kind: 'image', unitCost: withMargin(0.08), unitLabel: 'image', label: 'FAL GPT Image 2.5 Flare T2I' },
+    { id: 'fal-gpt-image-25-flare-edit', provider: 'fal', model: 'openai/gpt-image-2.5/flare/edit', kind: 'edit', unitCost: withMargin(0.08), unitLabel: 'request', label: 'FAL GPT Image 2.5 Flare Edit' },
+    { id: 'fal-gpt-image-25-sunburst', provider: 'fal', model: 'openai/gpt-image-2.5/sunburst/text-to-image', kind: 'image', unitCost: withMargin(0.15), unitLabel: 'image', label: 'FAL GPT Image 2.5 Sunburst T2I' },
+    { id: 'fal-gpt-image-25-sunburst-edit', provider: 'fal', model: 'openai/gpt-image-2.5/sunburst/edit', kind: 'edit', unitCost: withMargin(0.15), unitLabel: 'request', label: 'FAL GPT Image 2.5 Sunburst Edit' },
     { id: 'fal-gpt-image-2-edit', provider: 'fal', model: 'openai/gpt-image-2/edit', kind: 'edit', unitCost: withMargin(0.15), unitLabel: 'request', label: 'FAL GPT Image 2 Edit' },
     { id: 'fal-nano-banana-2-t2i', provider: 'fal', model: 'fal-ai/nano-banana-2', kind: 'image', unitCost: withMargin(0.08), unitLabel: 'image', label: 'FAL Nano Banana 2 T2I' },
     { id: 'fal-nano-banana-2-edit', provider: 'fal', model: 'fal-ai/nano-banana-2/edit', kind: 'edit', unitCost: withMargin(0.08), unitLabel: 'request', label: 'FAL Nano Banana 2 Edit' },
@@ -493,6 +497,8 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-wan-v27-pro-edit', provider: 'fal', model: 'fal-ai/wan/v2.7/pro/edit', kind: 'edit', unitCost: withMargin(0.075), unitLabel: 'request', label: 'FAL WAN 2.7 Pro Edit' },
     { id: 'fal-wan-v27-t2v', provider: 'fal', model: 'fal-ai/wan/v2.7/text-to-video', kind: 'video', unitCost: withMargin(0.1), unitLabel: 'second', label: 'FAL WAN 2.7 T2V' },
     { id: 'fal-wan-v27-i2v', provider: 'fal', model: 'fal-ai/wan/v2.7/image-to-video', kind: 'video', unitCost: withMargin(0.1), unitLabel: 'second', label: 'FAL WAN 2.7 I2V' },
+    { id: 'fal-wan-30-t2v', provider: 'fal', model: 'alibaba/wan-3.0/text-to-video', kind: 'video', unitCost: withMargin(0.2), unitLabel: 'second', label: 'FAL Wan 3.0 T2V (1080p)' },
+    { id: 'fal-wan-30-i2v', provider: 'fal', model: 'alibaba/wan-3.0/image-to-video', kind: 'video', unitCost: withMargin(0.2), unitLabel: 'second', label: 'FAL Wan 3.0 I2V (1080p)' },
     { id: 'fal-happy-horse-t2v', provider: 'fal', model: 'alibaba/happy-horse/text-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Happy Horse 1.0 T2V (1080p)' },
     { id: 'fal-happy-horse-i2v', provider: 'fal', model: 'alibaba/happy-horse/image-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Happy Horse 1.0 I2V (1080p)' },
     { id: 'fal-seedance-2-i2v', provider: 'fal', model: 'bytedance/seedance-2.0/image-to-video', kind: 'video', unitCost: withMargin(0.3024), unitLabel: 'second', label: 'FAL Seedance 2.0 I2V (720p)' },
@@ -8475,7 +8481,21 @@ function App() {
                     onAddStockImage={(item) => setMediaItems((prev) => [...prev, item])}
                 />
             );
-            case 'IMPORT': return <ImportWorkspace mediaItems={mediaItems} onAddMedia={handleAddMedia} onAddToTimeline={handleAddToTimeline} onImportTimelineOtio={handleImportTimelineOtio} />;
+            case 'IMPORT': return (
+                <ImportWorkspace
+                    mediaItems={mediaItems}
+                    timelineClips={timelineClips}
+                    onAddMedia={handleAddMedia}
+                    onAddToTimeline={handleAddToTimeline}
+                    onImportTimelineOtio={handleImportTimelineOtio}
+                    projectName={projectName || storyBible.title}
+                    currentProjectPath={projectPath}
+                    references={references}
+                    shotPrompts={shotPrompts}
+                    recentProjects={recentProjects}
+                    onImportLibraryAsset={handleImportLibraryAsset}
+                />
+            );
             case 'MICRODRAMA': return (
                 <MicrodramaWorkspace
                     storyBible={storyBible}
@@ -8556,12 +8576,14 @@ function App() {
             );
             case 'SOUND': return (
                 <SoundWorkspace
+                    {...commonProps}
                     apiKeyReady={apiKeyReady}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
-                    mediaItems={mediaItems}
-                    references={references}
-                    shotPrompts={shotPrompts}
-                    recentProjects={recentProjects}
+                    onAddToTimeline={(item) => {
+                        setMediaItems(prev => (prev.some(entry => entry.id === item.id) ? prev : [...prev, item]));
+                        appendMediaToTimeline(item, { startTime: playheadPosition });
+                    }}
+                    onSwitchToEdit={() => setActiveWorkspace('EDIT')}
                     currentProjectName={projectName || storyBible.title}
                     currentProjectPath={projectPath}
                 />

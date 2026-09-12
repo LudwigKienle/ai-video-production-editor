@@ -15,13 +15,14 @@ import {
   type CorridorKeyResult,
   type CorridorKeyStatus,
 } from '../services/corridorKeyService';
-import { LayersIcon, UploadIcon, FilmIcon } from '../components/icons';
+import { LayersIcon, UploadIcon, FilmIcon, BrainCircuitIcon, KeyingIcon, SparklesIcon, MotionIcon, TransformIcon, VideoIcon } from '../components/icons';
+import PreviewPlayer from '../components/PreviewPlayer';
 import EditorPageShell, { type SharedSequenceProps } from '../components/EditorPageShell';
 import { formatTimecode } from '../utils/timecode';
 import NatronCompositorPanel from '../components/NatronCompositorPanel';
 import ArtRelightPanel from '../components/ArtRelightPanel';
 import CompositingNodeStudioView from '../components/CompositingNodeStudioView';
-import { COMPOSITING_WORKSPACE_VIEWS, type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
+import { type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
 
 interface CompositingWorkspaceProps extends SharedSequenceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -41,14 +42,6 @@ type CorridorKeyVideoSource = 'none' | 'file' | 'media';
 type CorridorKeySourceRole = 'source' | 'alpha';
 
 type CompositeTab = 'layer' | 'key' | 'relight' | 'pose' | 'reframe' | 'kling';
-const COMPOSITE_TABS: Array<{ id: CompositeTab; label: string; hint: string }> = [
-  { id: 'layer', label: 'Layer', hint: 'Blend a foreground over a background' },
-  { id: 'key', label: 'Key', hint: 'Green screen keying with CorridorKey' },
-  { id: 'relight', label: 'Relight', hint: 'Change light direction and mood' },
-  { id: 'pose', label: 'Pose & Replace', hint: 'OpenPose extraction and animate-replace' },
-  { id: 'reframe', label: 'Reframe', hint: 'Adapt shots to other aspect ratios' },
-  { id: 'kling', label: 'Kling bridge', hint: 'Send composites to Kling O3' },
-];
 
 const CORRIDOR_KEY_REPO_STORAGE_KEY = 'ai-video-studio:corridor-key-repo-path';
 
@@ -652,95 +645,136 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     }
   };
 
-  const fromTimeline = timelineClip && timelineMedia ? (
-    <div className="fusion-source">
-      <div className="fusion-source__text">
-        <FilmIcon className="w-4 h-4" />
-        <span>Timeline clip</span>
-        <strong>{timelineMedia.name}</strong>
-        <small>{timelineMedia.type} · {formatTimecode(timelineClip.end - timelineClip.start)}</small>
+  type FusionTool = { id: string; label: string; hint: string; icon: React.FC<{ className?: string }>; view: CompositingWorkspaceView; tab?: CompositeTab };
+  const FUSION_TOOLS: FusionTool[] = [
+    { id: 'nodes', label: 'Node Studio', hint: 'Full node graph for multi-pass comps', icon: BrainCircuitIcon, view: 'nodeStudio' },
+    { id: 'layer', label: 'Merge', hint: 'Blend a foreground over a background', icon: LayersIcon, view: 'tools', tab: 'layer' },
+    { id: 'key', label: 'Keyer', hint: 'Green screen keying with CorridorKey', icon: KeyingIcon, view: 'tools', tab: 'key' },
+    { id: 'relight', label: 'Relight', hint: 'Change light direction and mood', icon: SparklesIcon, view: 'tools', tab: 'relight' },
+    { id: 'pose', label: 'Pose & Replace', hint: 'OpenPose extraction and animate-replace', icon: MotionIcon, view: 'tools', tab: 'pose' },
+    { id: 'reframe', label: 'Reframe', hint: 'Adapt shots to other aspect ratios', icon: TransformIcon, view: 'tools', tab: 'reframe' },
+    { id: 'kling', label: 'Kling Bridge', hint: 'Send composites to Kling O3', icon: VideoIcon, view: 'tools', tab: 'kling' },
+  ];
+  const activeTool = FUSION_TOOLS.find((tool) => (tool.view === 'nodeStudio' ? compositingView === 'nodeStudio' : compositingView === 'tools' && tool.tab === compositeTab)) || FUSION_TOOLS[1];
+  const selectTool = (tool: FusionTool) => {
+    setCompositingView(tool.view);
+    if (tool.tab) setCompositeTab(tool.tab);
+  };
+
+  const left = (
+    <div className="fusion-tools">
+      <div className="fusion-tools__header">
+        <span>Tools</span>
+        <small>{FUSION_TOOLS.length}</small>
       </div>
-      <div className="fusion-source__actions">
-        {timelineMedia.type === 'image' && (
-          <>
-            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setBackgroundMediaId(timelineMedia.id); setBackgroundSource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Use as background</button>
-            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setOverlayMediaId(timelineMedia.id); setOverlaySource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Use as overlay</button>
-          </>
+      <div className="fusion-tools__list" role="listbox" aria-label="Fusion tools">
+        {FUSION_TOOLS.map((tool) => {
+          const Icon = tool.icon;
+          const active = tool.id === activeTool.id;
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={`fusion-tools__item ${active ? 'fusion-tools__item--active' : ''}`}
+              onClick={() => selectTool(tool)}
+              title={tool.hint}
+            >
+              <span className="fusion-tools__icon"><Icon className="w-4 h-4" /></span>
+              <span className="fusion-tools__text">
+                <strong>{tool.label}</strong>
+                <small>{tool.hint}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {apiKeyReady === false && (
+        <div className="fusion-tools__notice">Add API keys in Settings to enable AI compositing tools.</div>
+      )}
+    </div>
+  );
+
+  const mediaInViewer = (
+    <div className="fusion-viewer">
+      <div className="fusion-viewer__bar">
+        <span className="fusion-viewer__label">MediaIn</span>
+        <small className="fusion-viewer__meta">
+          {timelineMedia ? `${timelineMedia.type} · ${formatTimecode(timelineClip!.end - timelineClip!.start)}` : 'No clip selected'}
+        </small>
+      </div>
+      <div className="fusion-viewer__stage">
+        {timelineMedia?.type === 'image' && <img src={timelineMedia.url} alt="" draggable={false} />}
+        {timelineMedia?.type === 'video' && <video src={timelineMedia.url} muted playsInline preload="metadata" />}
+        {!timelineMedia && (
+          <div className="fusion-viewer__empty">
+            <FilmIcon className="w-5 h-5" />
+            <span>Select a clip in the film strip or timeline</span>
+          </div>
         )}
-        {timelineMedia.type === 'video' && (
-          <>
-            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setCorridorKeySourceMediaId(timelineMedia.id); setCorridorKeySourceKind('media'); setCompositingView('tools'); setCompositeTab('key'); }}>Key this clip</button>
-            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setReframeVideoMediaId(timelineMedia.id); setReframeVideoSource('media'); setCompositingView('tools'); setCompositeTab('reframe'); }}>Reframe this clip</button>
-          </>
-        )}
+      </div>
+      <div className="fusion-viewer__foot">
+        {timelineMedia ? <strong title={timelineMedia.name}>{timelineMedia.name}</strong> : <span>—</span>}
+        <div className="fusion-viewer__actions">
+          {timelineMedia?.type === 'image' && (
+            <>
+              <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setBackgroundMediaId(timelineMedia.id); setBackgroundSource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Background</button>
+              <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setOverlayMediaId(timelineMedia.id); setOverlaySource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Overlay</button>
+            </>
+          )}
+          {timelineMedia?.type === 'video' && (
+            <>
+              <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setCorridorKeySourceMediaId(timelineMedia.id); setCorridorKeySourceKind('media'); setCompositingView('tools'); setCompositeTab('key'); }}>Key</button>
+              <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setReframeVideoMediaId(timelineMedia.id); setReframeVideoSource('media'); setCompositingView('tools'); setCompositeTab('reframe'); }}>Reframe</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
-  ) : (
-    <div className="fusion-source fusion-source--empty">
-      <FilmIcon className="w-4 h-4" />
-      <span>Select a clip in the film strip or timeline to composite it. Results can be placed back at the playhead.</span>
+  );
+
+  const programViewer = (
+    <div className="fusion-viewer">
+      <div className="fusion-viewer__bar">
+        <span className="fusion-viewer__label">Program</span>
+        <small className="fusion-viewer__meta">{formatTimecode(props.playheadPosition)}</small>
+      </div>
+      <div className="fusion-viewer__stage fusion-viewer__stage--program">
+        <PreviewPlayer
+          timelineClips={props.timelineClips} timelineTracks={props.timelineTracks} mediaItems={mediaItems}
+          playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
+          canvasWidth={1280} canvasHeight={720} aspectStyle={{ aspectRatio: '16 / 9' }} showControls={false}
+        />
+        {props.timelineClips.length === 0 && (
+          <div className="fusion-viewer__empty">
+            <span>Timeline is empty</span>
+          </div>
+        )}
+      </div>
+      <div className="fusion-viewer__foot">
+        <span>{props.projectName || 'Untitled sequence'}</span>
+      </div>
     </div>
   );
 
   const main = (
-    <div className="page-shell__scroll">
-      <div className="max-w-6xl mx-auto space-y-6 p-6">
-        {fromTimeline}
-
-        {apiKeyReady === false && (
-          <div className="app-panel p-3 text-sm text-amber-200 border border-amber-400/40 bg-amber-400/10">
-            Add API keys in Settings to enable compositing tools.
-          </div>
-        )}
-
-        <div className="quickstart">
-          <div className="quickstart__title">Start with what you want to do</div>
-          <div className="quickstart__grid">
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('layer'); }}>
-              <strong>Layer two clips</strong><span>Blend, screen or multiply a foreground over a background.</span>
-            </button>
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('key'); }}>
-              <strong>Key a green screen</strong><span>Corridor-style keyer with a separate alpha pass.</span>
-            </button>
-            <button type="button" className="quickstart__item" onClick={() => { setCompositingView('tools'); setCompositeTab('relight'); }}>
-              <strong>Relight a shot</strong><span>Change the light direction and mood of a still.</span>
-            </button>
-            <button type="button" className="quickstart__item" onClick={() => setCompositingView('nodeStudio')}>
-              <strong>Build a node comp</strong><span>Full node graph for multi-pass work.</span>
-            </button>
-          </div>
+    <div className="fusion-page">
+      <div className="fusion-page__viewers">
+        {mediaInViewer}
+        {programViewer}
+      </div>
+      <div className="fusion-page__work page-shell__scroll">
+        <div className="fusion-page__work-bar">
+          <activeTool.icon className="w-4 h-4" />
+          <strong>{activeTool.label}</strong>
+          <small>{activeTool.hint}</small>
         </div>
-
-        <div className="app-panel p-2 flex flex-wrap items-center gap-2">
-          {COMPOSITING_WORKSPACE_VIEWS.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              onClick={() => setCompositingView(view.id)}
-              className={`rounded-lg px-4 py-2 text-left transition ${
-                compositingView === view.id
-                  ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20'
-                  : 'bg-white/5 text-gray-300 hover:bg-white/10'
-              }`}
-            >
-              <div className="text-sm font-semibold">{view.label}</div>
-              <div className={`text-[11px] ${compositingView === view.id ? 'text-indigo-100' : 'text-gray-500'}`}>
-                {view.description}
-              </div>
-            </button>
-          ))}
-        </div>
-
+        <div className="fusion-page__work-body">
         {compositingView === 'nodeStudio' ? (
           <CompositingNodeStudioView mediaItems={mediaItems} onAddGeneratedMedia={onAddGeneratedMedia} />
         ) : (
           <>
-        <div className="toolbar-segmented composite-tabs" role="tablist" aria-label="Compositing tools">
-          {COMPOSITE_TABS.map((tab) => (
-            <button key={tab.id} type="button" role="tab" aria-selected={compositeTab === tab.id} className={`toolbar-segmented__item ${compositeTab === tab.id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setCompositeTab(tab.id)} title={tab.hint}>{tab.label}</button>
-          ))}
-        </div>
-
         {compositeTab === 'relight' && (
         <ArtRelightPanel
           mediaItems={mediaItems}
@@ -1583,6 +1617,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
         )}
           </>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1591,7 +1626,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     <div className="edit-toolbar__group">
       <span style={{ color: 'var(--app-accent-strong)' }}><LayersIcon className="w-4 h-4" /></span>
       <span className="text-sm font-semibold">Fusion</span>
-      <span className="edit-toolbar__hint">Layer, key, relight, reframe and node comps on the shared timeline</span>
+      <span className="edit-toolbar__hint">{activeTool.label} · {activeTool.hint}</span>
     </div>
   );
 
@@ -1600,6 +1635,7 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
       {...props}
       page="fusion"
       toolbar={toolbar}
+      left={left}
       main={main}
       transportPlacement="bar"
       followPlayhead

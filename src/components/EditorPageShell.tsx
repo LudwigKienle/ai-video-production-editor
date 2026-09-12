@@ -43,7 +43,7 @@ export interface SharedSequenceProps {
     projectName?: string | null;
 }
 
-export type EditorPageId = 'trim' | 'color' | 'fusion';
+export type EditorPageId = 'trim' | 'color' | 'fusion' | 'fairlight';
 
 interface EditorPageShellProps extends SharedSequenceProps {
     page: EditorPageId;
@@ -144,8 +144,8 @@ const EditorPageShell: React.FC<EditorPageShellProps> = (props) => {
 
     const timelineOpenKey = `page_shell_timeline_open_${page}`;
     const timelineHeightKey = `page_shell_timeline_height_${page}`;
-    const [timelineOpen, setTimelineOpen] = useState(() => loadBool(timelineOpenKey, page === 'trim'));
-    const [timelineHeight, setTimelineHeight] = useState(() => loadNumber(timelineHeightKey, page === 'trim' ? 300 : 240, 160, 640));
+    const [timelineOpen, setTimelineOpen] = useState(() => loadBool(timelineOpenKey, page === 'trim' || page === 'fairlight'));
+    const [timelineHeight, setTimelineHeight] = useState(() => loadNumber(timelineHeightKey, page === 'trim' ? 300 : page === 'fairlight' ? 340 : 240, 160, 640));
     const [dragging, setDragging] = useState(false);
     const [fullscreen, setFullscreen] = useState(false);
     const sequenceDuration = sequenceDurationOf(timelineClips);

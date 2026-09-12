@@ -12,6 +12,9 @@ interface MediaBinProps {
   onAddMedia: (files: FileList) => void;
   onAddToTimeline: (mediaId: string) => void;
   onLoadMediaToSource?: (mediaId: string) => void;
+  /** When set, a single click selects (Media page); double-click adds to the timeline. */
+  onSelectMedia?: (mediaId: string) => void;
+  selectedMediaId?: string | null;
   onLoadLibraryAssetToSource?: (asset: LibraryAsset) => void;
   currentProjectName?: string | null;
   currentProjectPath?: string | null;
@@ -139,6 +142,8 @@ const MediaBin: React.FC<MediaBinProps> = ({
   onAddMedia,
   onAddToTimeline,
   onLoadMediaToSource,
+  onSelectMedia,
+  selectedMediaId = null,
   onLoadLibraryAssetToSource,
   currentProjectName,
   currentProjectPath,
@@ -649,10 +654,16 @@ const MediaBin: React.FC<MediaBinProps> = ({
                       key={item.id}
                       draggable={!isArchive}
                       onDragStart={(e) => handleProjectDragStart(e, item.id)}
-                      className={`relative group aspect-square bg-gray-900 rounded-md overflow-hidden border-2 border-transparent hover:border-indigo-500 transition-all ${isArchive ? 'cursor-default' : 'cursor-pointer'}`}
+                      className={`relative group aspect-square bg-gray-900 rounded-md overflow-hidden border-2 ${selectedMediaId === item.id ? 'border-indigo-400 ring-2 ring-indigo-400/40' : 'border-transparent'} hover:border-indigo-500 transition-all ${isArchive ? 'cursor-default' : 'cursor-pointer'}`}
                       onClick={() => {
-                        if (!isArchive) onAddToTimeline(item.id);
+                        if (isArchive) return;
+                        if (onSelectMedia) onSelectMedia(item.id);
+                        else onAddToTimeline(item.id);
                       }}
+                      onDoubleClick={() => {
+                        if (!isArchive && onSelectMedia) onAddToTimeline(item.id);
+                      }}
+                      title={onSelectMedia ? 'Click to preview · double-click to add to timeline' : undefined}
                     >
                       <div className="absolute top-1 left-1 z-10 flex max-w-[75%] flex-col items-start gap-1">
                         {item.generatedBy && (
