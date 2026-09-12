@@ -12852,7 +12852,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Library Phase */}
                         {activePhase === 'library' && (
                             <div className="space-y-6">
-                                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-700 pb-4">
+                                <div className="phase-bar phase-bar__row">
                                     <div>
                                         <h2 className="text-2xl font-semibold text-white">Projects</h2>
                                         <p className="text-gray-400 text-sm">Open a saved workspace or switch to a different project folder.</p>
@@ -14524,12 +14524,43 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Concept Phase */}
                         {activePhase === 'concept' && (
                             <div className="space-y-8">
-                                <div className="phase-bar flex justify-between items-end">
-                                    <div>
+                                <div className="phase-bar phase-bar--stack">
+                                    <div className="phase-bar__row">
+                                    <div className="phase-bar__title">
                                         <h2 className="text-2xl font-bold text-white">Concept & Casting</h2>
                                         <p className="text-gray-400 text-sm mt-1">Review extracted assets and generate visual references.</p>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                                        <div className="phase-bar__actions">
+                                        {canGenerateConcepts && (
+                                            <>
+                                                <button
+                                                    onClick={handleGenerateAllPrompts}
+                                                    className="app-button app-secondary"
+                                                >
+                                                    <EditIcon className="w-5 h-5" /> Write All Prompts
+                                                </button>
+                                                <button
+                                                    onClick={handleGenerateAllConcepts}
+                                                    className="app-button app-primary"
+                                                >
+                                                    <MagicWandIcon className="w-5 h-5" /> Generate All
+                                                </button>
+                                            </>
+                                        )}
+                                        <button
+                                            onClick={() => {
+                                                if (canGenerateStoryboard) {
+                                                    handleGenerateStoryboard();
+                                                }
+                                                setActivePhase(canUseSceneWall ? 'scene_wall' : 'storyboard');
+                                            }}
+                                            className="app-button app-secondary phase-next"
+                                        >
+                                            Next: {canUseSceneWall ? 'Scene Wall' : 'Storyboard'} <span aria-hidden="true">→</span>
+                                        </button>
+                                        </div>
+                                    </div>
+                                    <div className="phase-bar__tools">
                                         <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
                                             <span className="text-xs font-bold text-gray-400 px-2">Model:</span>
@@ -14629,33 +14660,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 />
                                             </div>
                                         )}
-                                        {canGenerateConcepts && (
-                                            <>
-                                                <button
-                                                    onClick={handleGenerateAllPrompts}
-                                                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105"
-                                                >
-                                                    <EditIcon className="w-5 h-5" /> Write All Prompts
-                                                </button>
-                                                <button
-                                                    onClick={handleGenerateAllConcepts}
-                                                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105"
-                                                >
-                                                    <MagicWandIcon className="w-5 h-5" /> Generate All
-                                                </button>
-                                            </>
-                                        )}
-                                        <button
-                                            onClick={() => {
-                                                if (canGenerateStoryboard) {
-                                                    handleGenerateStoryboard();
-                                                }
-                                                setActivePhase(canUseSceneWall ? 'scene_wall' : 'storyboard');
-                                            }}
-                                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105"
-                                        >
-                                            Next: {canUseSceneWall ? 'Scene Wall' : 'Storyboard'} <span className="text-green-200">→</span>
-                                        </button>
                                     </div>
                                 </div>
 
@@ -15875,7 +15879,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Scene Wall Phase (Pro) */}
                         {activePhase === 'scene_wall' && canUseSceneWall && (
                             <div className="space-y-6">
-                                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-700 pb-4">
+                                <div className="phase-bar phase-bar__row">
                                     <div>
                                         <h2 className="text-2xl font-bold text-white">Scene Wall (Pro)</h2>
                                         <p className="text-gray-400 text-sm mt-1">
@@ -15928,7 +15932,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             onClick={() => setActivePhase('storyboard')}
                                             className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-5 rounded-lg shadow-lg"
                                         >
-                                            Next: Storyboard <span className="text-green-200">→</span>
+                                            Next: Storyboard <span aria-hidden="true">→</span>
                                         </button>
                                     </div>
                                 </div>
@@ -15963,8 +15967,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Storyboard Phase */}
                         {activePhase === 'storyboard' && (
                             <div className="space-y-6">
-                                <div className="phase-bar space-y-2">
-                                    <div className="flex items-center justify-between">
+                                <div className="phase-bar phase-bar--stack">
+                                    <div className="phase-bar__row">
+<div className="phase-bar__title">
                                         <div>
                                             <h2 className="text-xl font-bold text-white">Storyboard</h2>
                                             <p className="text-gray-400 text-xs">Visualize the narrative flow. Click "Edit" to refine prompts.</p>
@@ -15982,41 +15987,43 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="flex gap-2 flex-wrap items-center">
-                                        <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
-                                        <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
-                                            <span className="text-xs font-bold text-gray-400 px-2">Persona:</span>
-                                            <select
-                                                value={shotPersonaFilter}
-                                                onChange={(e) => setShotPersonaFilter(e.target.value)}
-                                                className="bg-gray-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none"
-                                            >
-                                                <option value="all">All Personas</option>
-                                                {directorPersonas.map((persona) => (
-                                                    <option key={persona.id} value={persona.id}>{persona.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        {storyboardSceneFilteringAvailable && (
-                                            <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
-                                                <span className="text-xs font-bold text-gray-400 px-2">Scene:</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setStoryboardSceneView('selected')}
-                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'selected' ? 'bg-indigo-900/50 border-indigo-500/60 text-indigo-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
-                                                    title={selectedSceneWallScene?.slugline}
-                                                >
-                                                    {selectedSceneWallScene?.sceneCode || `Sc ${String(selectedSceneWallScene?.sceneNumber || '').padStart(3, '0')}`}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setStoryboardSceneView('all')}
-                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'all' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
-                                                >
-                                                    All Scenes
-                                                </button>
-                                            </div>
+                                                                            <div className="phase-bar__actions">
+                                        {shotPrompts.length === 0 && canGenerateStoryboard && (
+                                            <button onClick={handleGenerateStoryboard} className="app-button app-primary">
+                                                Generate from Script
+                                            </button>
                                         )}
+                                        {shotPrompts.length > 0 && canGenerateStoryboard && (
+                                            <button
+                                                onClick={() => handleGenerateAllShotImages(storyboardVisibleShots)}
+                                                disabled={storyboardVisibleShots.length === 0}
+                                                className="app-button app-primary"
+                                            >
+                                                <MagicWandIcon className="w-5 h-5" /> Generate All Shots
+                                            </button>
+                                        )}
+                                        {shotPrompts.length > 0 && (
+                                            <button
+                                                onClick={handleExportStoryboardPdf}
+                                                disabled={storyboardVisibleShots.length === 0}
+                                                className="app-button app-secondary"
+                                            >
+                                                <PdfIcon className="w-5 h-5" /> Export PDF
+                                            </button>
+                                        )}
+
+                                        {canGenerateFilming && (
+                                            <button
+                                                onClick={() => setActivePhase('filming')}
+                                                className="app-button app-secondary phase-next"
+                                            >
+                                                Next: Filming <span aria-hidden="true">→</span>
+                                            </button>
+                                        )}
+                                        </div>
+                                    </div>
+                                    <div className="phase-bar__tools">
+                                        <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 mr-2">
                                             {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
                                                 <select
@@ -16095,6 +16102,43 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     </div>
                                                 )}
                                             </div>
+                                        </div>
+                                        {storyboardSceneFilteringAvailable && (
+                                            <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
+                                                <span className="text-xs font-bold text-gray-400 px-2">Scene:</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setStoryboardSceneView('selected')}
+                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'selected' ? 'bg-indigo-900/50 border-indigo-500/60 text-indigo-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
+                                                    title={selectedSceneWallScene?.slugline}
+                                                >
+                                                    {selectedSceneWallScene?.sceneCode || `Sc ${String(selectedSceneWallScene?.sceneNumber || '').padStart(3, '0')}`}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setStoryboardSceneView('all')}
+                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'all' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
+                                                >
+                                                    All Scenes
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <details className="phase-settings">
+                                        <summary>Camera, lens &amp; context<small>{CAMERA_PRESETS.find((preset) => preset.id === cameraPresetId)?.label || "Auto"} · {LENS_PRESETS.find((preset) => preset.id === lensPresetId)?.label || "Auto"}{shotPersonaFilter !== "all" ? " · persona filter" : ""}</small></summary>
+                                        <div className="phase-settings__body">
+                                        <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
+                                            <span className="text-xs font-bold text-gray-400 px-2">Persona:</span>
+                                            <select
+                                                value={shotPersonaFilter}
+                                                onChange={(e) => setShotPersonaFilter(e.target.value)}
+                                                className="bg-gray-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none"
+                                            >
+                                                <option value="all">All Personas</option>
+                                                {directorPersonas.map((persona) => (
+                                                    <option key={persona.id} value={persona.id}>{persona.label}</option>
+                                                ))}
+                                            </select>
                                         </div>
                                         {(['flux', 'flux-klein', 'flux-2-turbo', 'z-image', 'z-turbo'] as ReferenceImageModel[]).includes(referenceImageModel) && (
                                             <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
@@ -16199,39 +16243,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     : 'Add a Gemini API key in Settings to enable image + text context matching.'}
                                             </span>
                                         </div>
-                                        {shotPrompts.length === 0 && canGenerateStoryboard && (
-                                            <button onClick={handleGenerateStoryboard} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105">
-                                                Generate from Script
-                                            </button>
-                                        )}
-                                        {shotPrompts.length > 0 && canGenerateStoryboard && (
-                                            <button
-                                                onClick={() => handleGenerateAllShotImages(storyboardVisibleShots)}
-                                                disabled={storyboardVisibleShots.length === 0}
-                                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                <MagicWandIcon className="w-5 h-5" /> Generate All Shots
-                                            </button>
-                                        )}
-                                        {shotPrompts.length > 0 && (
-                                            <button
-                                                onClick={handleExportStoryboardPdf}
-                                                disabled={storyboardVisibleShots.length === 0}
-                                                className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                <PdfIcon className="w-5 h-5" /> Export PDF
-                                            </button>
-                                        )}
-
-                                        {canGenerateFilming && (
-                                            <button
-                                                onClick={() => setActivePhase('filming')}
-                                                className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105"
-                                            >
-                                                Next: Filming <span className="text-green-200">→</span>
-                                            </button>
-                                        )}
-                                    </div>
+                                        </div>
+                                    </details>
                                 </div>
 
                                 {shotPrompts.length > 0 && canGenerateStoryboard && (
@@ -17355,8 +17368,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Filming Phase */}
                         {activePhase === 'filming' && (
                             <div className="space-y-6">
-                                <div className="phase-bar flex justify-between items-center">
-                                    <div>
+                                <div className="phase-bar phase-bar--stack">
+                                    <div className="phase-bar__row">
+                                    <div className="phase-bar__title">
                                         <h2 className="text-2xl font-bold text-white">Principal Photography</h2>
                                         <p className="text-gray-400 text-sm mt-1">Turn your storyboard visuals into high-quality video clips using Veo, Grok (text), Seedance, Wan, Kling, or LTX.</p>
                                         <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-500 uppercase tracking-wider">
@@ -17372,20 +17386,34 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="flex flex-wrap gap-2 items-center">
-                                        <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
-                                            <span className="text-xs font-bold text-gray-400 px-2">Persona:</span>
-                                            <select
-                                                value={shotPersonaFilter}
-                                                onChange={(e) => setShotPersonaFilter(e.target.value)}
-                                                className="bg-gray-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none"
+                                        <div className="phase-bar__actions">
+                                        {canGenerateFilming && (
+                                            <button
+                                                onClick={() => handleGenerateAllVideos(filteredPersonaShots)}
+                                                disabled={filteredPersonaShots.filter(s => {
+                                                    const hasAudio = !requiresShotAudio || Boolean(s.voiceoverUrl);
+                                                    const hasMotionRef = videoModel !== 'kling-v2.6-motion-control'
+                                                        && !(videoModel === 'kling-o3-pro-fal' && klingUseReferenceVideoForO3)
+                                                        ? true
+                                                        : Boolean(s.motionReferenceUrl) || canAutoResolveFilmingMotionReference(s);
+                                                    return isTextOnlyVideoModel
+                                                        ? !s.videoUrl && hasAudio && hasMotionRef
+                                                        : (s.imageUrl || s.startFrameUrl) && !s.videoUrl && hasAudio && hasMotionRef;
+                                                }).length === 0}
+                                                className="app-button app-primary"
                                             >
-                                                <option value="all">All Personas</option>
-                                                {directorPersonas.map((persona) => (
-                                                    <option key={persona.id} value={persona.id}>{persona.label}</option>
-                                                ))}
-                                            </select>
+                                                <CameraIcon className="w-5 h-5" /> Film All Remaining
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => setActivePhase('review')}
+                                            className="app-button app-secondary phase-next"
+                                        >
+                                            Next: Review <span aria-hidden="true">→</span>
+                                        </button>
                                         </div>
+                                    </div>
+                                    <div className="phase-bar__tools">
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
                                             <span className="text-xs font-bold text-gray-400 px-2">Video Model:</span>
                                             <div className="relative z-10 w-full min-w-[260px]">
@@ -17458,37 +17486,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 <span className="text-[10px] text-cyan-300 font-semibold px-2">Audio optional</span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-3 bg-gray-800 p-1.5 rounded-lg border border-gray-700">
-                                            <div className="flex items-center gap-2 pl-1">
-                                                <BrainIcon className="w-4 h-4 text-cyan-300" />
-                                                <span className="text-xs font-bold text-gray-200">Gemini Context Memory</span>
-                                            </div>
-                                            <label className={`inline-flex items-center gap-2 rounded-md border px-3 py-1 text-xs font-semibold ${isGeminiEmbedding2Configured() ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' : 'border-gray-700 bg-gray-900 text-gray-500'}`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={useGeminiContextMemory}
-                                                    onChange={(e) => setUseGeminiContextMemory(e.target.checked)}
-                                                    disabled={!isGeminiEmbedding2Configured()}
-                                                    className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
-                                                />
-                                                Auto-rank filming refs
-                                            </label>
-                                            <label className={`inline-flex items-center gap-2 rounded-md border px-3 py-1 text-xs font-semibold ${isGeminiEmbedding2Configured() && useGeminiContextMemory ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-100' : 'border-gray-700 bg-gray-900 text-gray-500'}`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={useFilmingContinuityAutoRefine}
-                                                    onChange={(e) => setUseFilmingContinuityAutoRefine(e.target.checked)}
-                                                    disabled={!isGeminiEmbedding2Configured() || !useGeminiContextMemory}
-                                                    className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
-                                                />
-                                                Self-refine filmed continuity
-                                            </label>
-                                            <span className="text-[10px] text-gray-400">
-                                                {isGeminiEmbedding2Configured()
-                                                    ? 'Ranks start frame, prior shots, motion refs, research and moodboard before render. Optional self-refine retries drifted renders up to two extra passes and keeps the best take.'
-                                                    : 'Add a Gemini API key in Settings to enable multimodal filming context.'}
-                                            </span>
-                                        </div>
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 mr-2">
                                             <span className="text-xs font-bold text-gray-400 px-2">Seconds:</span>
                                             <select
@@ -17504,6 +17501,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             {!getVideoDurationConfig(videoModel).supported && (
                                                 <span className="text-[10px] text-gray-500 px-1">fixed</span>
                                             )}
+                                        </div>
+                                    </div>
+                                    <details className="phase-settings">
+                                        <summary>Model options<small>{FILMING_VIDEO_MODEL_OPTIONS.find(o => o.id === videoModel)?.label}{shotPersonaFilter !== "all" ? " · persona filter" : ""}</small></summary>
+                                        <div className="phase-settings__body">
+                                        <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
+                                            <span className="text-xs font-bold text-gray-400 px-2">Persona:</span>
+                                            <select
+                                                value={shotPersonaFilter}
+                                                onChange={(e) => setShotPersonaFilter(e.target.value)}
+                                                className="bg-gray-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none"
+                                            >
+                                                <option value="all">All Personas</option>
+                                                {directorPersonas.map((persona) => (
+                                                    <option key={persona.id} value={persona.id}>{persona.label}</option>
+                                                ))}
+                                            </select>
                                         </div>
                                         {isKlingFalVideoModel && (
                                             <div className="flex flex-wrap items-center gap-2 bg-gray-800 p-2 rounded-lg border border-gray-700 mr-2">
@@ -17727,28 +17741,47 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 />
                                             </div>
                                         )}
-                                        {canGenerateFilming && (
-                                            <button
-                                                onClick={() => handleGenerateAllVideos(filteredPersonaShots)}
-                                                disabled={filteredPersonaShots.filter(s => {
-                                                    const hasAudio = !requiresShotAudio || Boolean(s.voiceoverUrl);
-                                                    const hasMotionRef = videoModel !== 'kling-v2.6-motion-control'
-                                                        && !(videoModel === 'kling-o3-pro-fal' && klingUseReferenceVideoForO3)
-                                                        ? true
-                                                        : Boolean(s.motionReferenceUrl) || canAutoResolveFilmingMotionReference(s);
-                                                    return isTextOnlyVideoModel
-                                                        ? !s.videoUrl && hasAudio && hasMotionRef
-                                                        : (s.imageUrl || s.startFrameUrl) && !s.videoUrl && hasAudio && hasMotionRef;
-                                                }).length === 0}
-                                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform hover:scale-105"
-                                            >
-                                                <CameraIcon className="w-5 h-5" /> Film All Remaining
-                                            </button>
-                                        )}
+                                        </div>
+                                    </details>
+                                    <details className="phase-settings">
+                                        <summary>Continuity &amp; context memory<small>{useGeminiContextMemory && isGeminiEmbedding2Configured() ? "on" : "off"}</small></summary>
+                                        <div className="phase-settings__body">
+                                        <div className="flex items-center gap-3 bg-gray-800 p-1.5 rounded-lg border border-gray-700">
+                                            <div className="flex items-center gap-2 pl-1">
+                                                <BrainIcon className="w-4 h-4 text-cyan-300" />
+                                                <span className="text-xs font-bold text-gray-200">Gemini Context Memory</span>
+                                            </div>
+                                            <label className={`inline-flex items-center gap-2 rounded-md border px-3 py-1 text-xs font-semibold ${isGeminiEmbedding2Configured() ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' : 'border-gray-700 bg-gray-900 text-gray-500'}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={useGeminiContextMemory}
+                                                    onChange={(e) => setUseGeminiContextMemory(e.target.checked)}
+                                                    disabled={!isGeminiEmbedding2Configured()}
+                                                    className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
+                                                />
+                                                Auto-rank filming refs
+                                            </label>
+                                            <label className={`inline-flex items-center gap-2 rounded-md border px-3 py-1 text-xs font-semibold ${isGeminiEmbedding2Configured() && useGeminiContextMemory ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-100' : 'border-gray-700 bg-gray-900 text-gray-500'}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={useFilmingContinuityAutoRefine}
+                                                    onChange={(e) => setUseFilmingContinuityAutoRefine(e.target.checked)}
+                                                    disabled={!isGeminiEmbedding2Configured() || !useGeminiContextMemory}
+                                                    className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
+                                                />
+                                                Self-refine filmed continuity
+                                            </label>
+                                            <span className="text-[10px] text-gray-400">
+                                                {isGeminiEmbedding2Configured()
+                                                    ? 'Ranks start frame, prior shots, motion refs, research and moodboard before render. Optional self-refine retries drifted renders up to two extra passes and keeps the best take.'
+                                                    : 'Add a Gemini API key in Settings to enable multimodal filming context.'}
+                                            </span>
+                                        </div>
+                                            <div className="pk-actions">
                                         <button
                                             onClick={() => handleRunGeminiContinuityReview(filteredPersonaShots.map((shot) => shot.shot))}
                                             disabled={geminiContinuityReviewRunning || filteredPersonaShots.every((shot) => !shot.videoUrl && !shot.imageUrl && !shot.startFrameUrl)}
-                                            className="bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform hover:scale-105"
+                                            className="app-button app-secondary"
                                         >
                                             <BrainIcon className="w-5 h-5" /> {geminiContinuityReviewRunning ? 'Reviewing...' : 'Run Continuity Review'}
                                         </button>
@@ -17758,18 +17791,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     filteredPersonaShots.filter((shot) => continuityPriorityRankMap.has(shot.shot)),
                                                 )}
                                                 disabled={!filteredPersonaShots.some((shot) => continuityPriorityRankMap.has(shot.shot))}
-                                                className="bg-amber-700 hover:bg-amber-600 text-white font-bold py-2 px-5 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform hover:scale-105"
+                                                className="app-button app-secondary"
                                             >
                                                 <PlayIcon className="w-5 h-5" /> Re-Film Drift Queue
                                             </button>
                                         )}
-                                        <button
-                                            onClick={() => setActivePhase('review')}
-                                            className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 transition-transform transform hover:scale-105"
-                                        >
-                                            Next: Review <span className="text-blue-200">→</span>
-                                        </button>
-                                    </div>
+                                            </div>
+                                        </div>
+                                    </details>
                                 </div>
 
                                 <div className="grid grid-cols-1 gap-6 pb-20">
@@ -18395,7 +18424,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                         {activePhase === 'marketing' && (
                             <div className="h-full overflow-y-auto">
-                                <div className="mb-4 rounded-2xl border border-gray-800/60 bg-gradient-to-br from-gray-900/80 via-gray-900/60 to-gray-950/80 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+                                <div className="pk-card mb-4">
                                     <div className="flex flex-wrap items-center justify-between gap-4">
                                         <div>
                                             <h3 className="text-lg font-semibold text-white">Marketing Image Models</h3>
@@ -18502,7 +18531,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <button
                                             onClick={() => handleRunGeminiContinuityReview()}
                                             disabled={geminiContinuityReviewRunning || shotPrompts.every((shot) => !shot.videoUrl && !shot.imageUrl && !shot.startFrameUrl)}
-                                            className="bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform hover:scale-105"
+                                            className="app-button app-secondary"
                                         >
                                             <BrainIcon className="w-5 h-5" /> {geminiContinuityReviewRunning ? 'Reviewing...' : 'Gemini Continuity Review'}
                                         </button>
@@ -18510,7 +18539,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             <button
                                                 onClick={() => handleRefilmContinuityPriorityShots()}
                                                 disabled={continuityPriorityQueue.length === 0}
-                                                className="bg-amber-700 hover:bg-amber-600 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-transform transform hover:scale-105"
+                                                className="app-button app-secondary"
                                             >
                                                 <PlayIcon className="w-5 h-5" /> Re-Film Drift Queue
                                             </button>
@@ -18518,7 +18547,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         {canAnalyzeReview && (
                                             <button
                                                 onClick={handleAnalyzeDraft}
-                                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105"
+                                                className="app-button app-primary"
                                             >
                                                 <MagicWandIcon className="w-5 h-5" /> Analyze Project
                                             </button>
@@ -18526,28 +18555,28 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <button
                                             onClick={handleExportRoughCut}
                                             disabled={shotPrompts.filter(s => s.videoUrl).length === 0}
-                                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 transition-transform transform hover:scale-105"
+                                            className="app-button app-secondary phase-next"
                                         >
                                             <ListIcon className="w-5 h-5" /> Export to Timeline
                                         </button>
                                         <button
                                             onClick={() => handleExportXml('premiere')}
                                             disabled={shotPrompts.filter(s => s.videoUrl).length === 0}
-                                            className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 transition-transform transform hover:scale-105"
+                                            className="app-button app-secondary"
                                         >
                                             <PdfIcon className="w-5 h-5" /> XML for Premiere
                                         </button>
                                         <button
                                             onClick={() => handleExportXml('resolve')}
                                             disabled={shotPrompts.filter(s => s.videoUrl).length === 0}
-                                            className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 transition-transform transform hover:scale-105"
+                                            className="app-button app-secondary"
                                         >
                                             <PdfIcon className="w-5 h-5" /> XML for Resolve
                                         </button>
                                     </div>
                                 </div>
 
-                                <div className="mb-6 rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-gray-900/70 to-gray-950/80 p-5 shadow-[0_12px_40px_rgba(0,0,0,0.25)]">
+                                <div className="pk-card pk-card--accent mb-6">
                                     <div className="flex flex-wrap items-start justify-between gap-4">
                                         <div className="max-w-2xl">
                                             <div className="flex items-center gap-2 text-cyan-100">
@@ -18694,7 +18723,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-16 border border-dashed border-gray-700/60 rounded-2xl bg-gradient-to-b from-gray-800/20 to-gray-900/40">
-                                        <div className="p-5 bg-gradient-to-br from-indigo-900/30 to-gray-800/50 rounded-2xl mb-5 border border-indigo-500/20">
+                                        <div className="pk-card pk-card--accent mb-5">
                                             <MagicWandIcon className="w-10 h-10 text-indigo-400/60" />
                                         </div>
                                         <h3 className="text-xl font-bold text-white mb-2">Ready for Review</h3>

@@ -7178,6 +7178,35 @@ body[data-theme="light"] .wb-marker { background: rgb(255 255 255 / 0.94); color
 .project-hub__loading { position: absolute; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; background: rgb(var(--app-bg-rgb) / 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--app-text); font-size: var(--fs-sm); font-weight: 600; }
 .project-hub__loading .pk-spinner { width: 1.4rem; height: 1.4rem; border-width: 3px; }
 
+/* ─── Project hub phase bars: title + one primary action on top, the few essential picks below, everything else behind a disclosure ─── */
+.phase-bar--stack { display: flex !important; flex-direction: column; gap: 0.6rem; align-items: stretch !important; }
+.phase-bar__row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.phase-bar__title { min-width: 0; flex: 1 1 18rem; }
+.phase-bar__title h2 { font-size: var(--fs-lg) !important; font-weight: 650; letter-spacing: -0.015em; }
+.phase-bar__title p { color: var(--app-muted); font-size: var(--fs-xs) !important; line-height: var(--lh-body); margin-top: 0.15rem !important; max-width: 46rem; }
+.phase-bar__title .text-\[10px\] { margin-top: 0.4rem; }
+.phase-bar__actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+.phase-bar__actions .app-button { min-height: 2rem; padding: 0.4rem 0.85rem; font-size: var(--fs-xs); }
+.phase-bar__actions .app-button svg { width: 0.95rem; height: 0.95rem; }
+.phase-bar__tools { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.phase-bar__tools > .flex.items-center.gap-2.bg-gray-800 { background: transparent; border: 0; padding: 0; }
+.phase-bar__tools .text-xs.font-bold.text-gray-400 { font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.phase-settings { border: 1px solid var(--edit-hairline, rgb(var(--app-muted-rgb) / 0.14)); border-radius: var(--radius-md); background: rgb(var(--app-bg-rgb) / 0.25); }
+.phase-settings > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.7rem; font-size: var(--fs-xs); font-weight: 600; color: var(--app-text); user-select: none; }
+.phase-settings > summary::-webkit-details-marker { display: none; }
+.phase-settings > summary::after { content: "›"; margin-left: auto; color: var(--app-muted); transition: transform 120ms ease; }
+.phase-settings[open] > summary::after { transform: rotate(90deg); }
+.phase-settings > summary small { color: var(--app-muted); font-weight: 500; font-size: var(--fs-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phase-settings__body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0.7rem 0.7rem; border-top: 1px solid var(--edit-hairline, rgb(var(--app-muted-rgb) / 0.14)); }
+.phase-settings__body > .flex.items-center.bg-gray-800, .phase-settings__body > .flex.flex-wrap.items-center.bg-gray-800 { background: transparent; border: 0; padding: 0.25rem 0; }
+.phase-next { margin-left: 0.25rem; }
+/* Chip strips (camera / lens / aspect) and toggle labels: accent tokens instead of indigo/cyan/fuchsia */
+.project-hub .bg-indigo-900\/40, .project-hub .bg-indigo-900\/50, .project-hub .bg-indigo-950\/40, .project-hub .bg-cyan-500\/10, .project-hub .bg-fuchsia-500\/10 { background: var(--edit-accent-soft, rgb(var(--app-accent-rgb) / 0.14)); }
+.project-hub .border-indigo-500\/50, .project-hub .border-indigo-500\/60, .project-hub .border-cyan-500\/30, .project-hub .border-fuchsia-500\/30 { border-color: rgb(var(--app-accent-rgb) / 0.5); }
+.project-hub .text-cyan-100, .project-hub .text-fuchsia-100, .project-hub .text-cyan-300 { color: var(--app-accent-strong); }
+.project-hub .bg-gray-900\/60.border-gray-700, .project-hub .bg-gray-900.border-gray-700 { background: var(--edit-control-bg, rgb(var(--app-muted-rgb) / 0.08)); border-color: transparent; }
+.project-hub .app-input.cursor-pointer { min-height: 1.9rem; padding: 0.3rem 0.55rem; font-size: var(--fs-xs); }
+
 /* Transition tiles: two plates + overlays, animated only while hovered. */
 .tr-tile { background: #000; }
 .tr-tile__plate { position: absolute; inset: 0; will-change: transform, opacity; }

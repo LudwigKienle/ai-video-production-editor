@@ -153,6 +153,17 @@ Every browser panel is assembled from the same few parts, so new panels look fin
 - Prefer progressive disclosure for technical controls
 - Avoid putting every expert option above the fold
 
+
+### Phase bars (Project Hub)
+
+Every production phase opens with the same bar, in this order:
+
+1. **Title row** — phase name + one sentence, primary action on the right (`app-button app-primary`), then "Next: …" as a quiet secondary. One primary per bar, never two.
+2. **Tools row** — only the picks that change *what* gets generated (aspect ratio, model, length). Labels are small uppercase, groups have no boxes.
+3. **`phase-settings` disclosures** — everything that tunes *how* (camera, lens, persona filter, LoRA, model-specific options, context memory). The summary always states the current value, so a closed disclosure still tells you what is set.
+
+No `hover:scale-105`, no coloured hero buttons per phase (green/cyan/amber/blue): colour would have to mean something, and here it did not.
+
 ## 6. Depth & Elevation
 
 - Use soft, diffuse shadows
