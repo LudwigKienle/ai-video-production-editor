@@ -3602,6 +3602,49 @@ const RelightModal: React.FC<{
         );
     };
 
+/** Compact shot tile for the Storyboard / Filming boards. Details live in the inspector beside the grid. */
+const ShotTile: React.FC<{
+    shot: ShotPrompt;
+    label: string;
+    active: boolean;
+    mode: 'storyboard' | 'filming';
+    onSelect: () => void;
+}> = ({ shot, label, active, mode, onSelect }) => {
+    const image = shot.imageUrl || shot.startFrameUrl || shot.sketchUrl || null;
+    const busy = mode === 'filming'
+        ? Boolean(shot.isFilming)
+        : Boolean(shot.isGenerating || shot.isEditing || shot.isSketching || shot.isAngleGenerating);
+    const hasVideo = Boolean(shot.videoUrl);
+    const critique = shot.cinematographyCritique;
+    const score = critique ? Math.round(((critique.lightingScore + critique.compositionScore) / 2) * 10) : null;
+    return (
+        <button type="button" className={`shot-tile ${active ? 'shot-tile--active' : ''}`} onClick={onSelect} aria-pressed={active} title={shot.description || shot.prompt}>
+            <span className="shot-tile__thumb">
+                {mode === 'filming' && hasVideo ? (
+                    <video src={shot.videoUrl} muted playsInline preload="metadata" />
+                ) : image ? (
+                    <img src={image} alt="" draggable={false} />
+                ) : (
+                    <span className="shot-tile__placeholder"><FilmIcon className="w-5 h-5" /></span>
+                )}
+                {busy && <span className="fx-tile__shimmer" />}
+                <span className="shot-tile__label">{label}</span>
+                <span className="shot-tile__status">
+                    {busy && <span className="pk-chip pk-chip--accent">{mode === 'filming' ? 'Filming…' : 'Generating…'}</span>}
+                    {!busy && hasVideo && <span className="pk-chip pk-chip--ok">Video</span>}
+                    {!busy && !hasVideo && image && mode === 'filming' && <span className="pk-chip">Frame ready</span>}
+                    {!busy && !hasVideo && !image && mode === 'filming' && <span className="pk-chip pk-chip--warn">No frame</span>}
+                    {!busy && mode === 'storyboard' && score !== null && <span className="pk-chip" title="Cinematography score">{score}%</span>}
+                </span>
+            </span>
+            <span className="shot-tile__text">
+                <strong>{shot.sceneSlugline || shot.environment || 'Shot'}</strong>
+                <small>{shot.description || shot.prompt}</small>
+            </span>
+        </button>
+    );
+};
+
 const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     storyBible,
     setStoryBible,
@@ -3724,6 +3767,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return preferred && allowedPhaseIds.includes(preferred) ? preferred : initialPhaseValue;
     });
     const lastAppliedRequestedPhaseRef = useRef<ProductionPhase | null>(null);
+    const [storyboardFocusShot, setStoryboardFocusShot] = useState<number | null>(null);
+    const [filmingFocusShot, setFilmingFocusShot] = useState<number | null>(null);
     const [conceptEntityTab, setConceptEntityTab] = useState<ConceptEntityTab>(() => storedUiPrefs.conceptEntityTab || 'characters');
     const [conceptCharacterSubtab, setConceptCharacterSubtab] = useState<ConceptCharacterSubtab>(() => storedUiPrefs.conceptCharacterSubtab || 'base_ref');
     const [conceptEnvironmentSubtab, setConceptEnvironmentSubtab] = useState<ConceptEnvironmentSubtab>(() => storedUiPrefs.conceptEnvironmentSubtab || 'base_ref');
@@ -4175,6 +4220,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         if (shotPersonaFilter === 'all') return shotPrompts;
         return shotPrompts.filter((shot) => getShotPersonaId(shot) === shotPersonaFilter);
     }, [shotPersonaFilter, shotPrompts, getShotPersonaId]);
+    const focusedFilmingShot = filteredPersonaShots.find((entry) => entry.shot === filmingFocusShot) || filteredPersonaShots[0] || null;
     const continuityReviewedShots = useMemo(
         () => shotPrompts.filter((shot) => Boolean(shot.continuityReview)),
         [shotPrompts],
@@ -4354,6 +4400,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         storyboardSceneFilteringAvailable,
         storyboardSceneView,
     ]);
+    const focusedStoryboardShot = storyboardVisibleShots.find((entry) => entry.shot === storyboardFocusShot) || storyboardVisibleShots[0] || null;
     const storyboardSceneHasNoLinkedShots = storyboardSceneFilteringAvailable
         && storyboardSceneView === 'selected'
         && storyboardVisibleShots.length === 0;
@@ -16310,8 +16357,21 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                                 {shotPrompts.length > 0 ? (
                                     storyboardVisibleShots.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 pb-20">
-                                            {storyboardVisibleShots.map(shot => {
+                                        <div className="shot-page">
+                                            <div className="shot-page__grid">
+                                                {storyboardVisibleShots.map((shot) => (
+                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedStoryboardShot?.shot === shot.shot} mode="storyboard" onSelect={() => setStoryboardFocusShot(shot.shot)} />
+                                                ))}
+                                            </div>
+                                            <aside className="shot-page__inspector">
+                                            <div className="shot-page__inspector-head">
+                                                <span>{focusedStoryboardShot ? `Shot ${formatShotLabel(focusedStoryboardShot)}` : 'Inspector'}</span>
+                                                <span className="pk-actions">
+                                                    <button type="button" className="edit-icon-btn" aria-label="Previous shot" title="Previous shot" disabled={!focusedStoryboardShot || storyboardVisibleShots.findIndex((entry) => entry.shot === focusedStoryboardShot.shot) <= 0} onClick={() => { const index = storyboardVisibleShots.findIndex((entry) => entry.shot === focusedStoryboardShot?.shot); if (index > 0) setStoryboardFocusShot(storyboardVisibleShots[index - 1].shot); }}>‹</button>
+                                                    <button type="button" className="edit-icon-btn" aria-label="Next shot" title="Next shot" disabled={!focusedStoryboardShot || storyboardVisibleShots.findIndex((entry) => entry.shot === focusedStoryboardShot.shot) >= storyboardVisibleShots.length - 1} onClick={() => { const index = storyboardVisibleShots.findIndex((entry) => entry.shot === focusedStoryboardShot?.shot); if (index >= 0 && index < storyboardVisibleShots.length - 1) setStoryboardFocusShot(storyboardVisibleShots[index + 1].shot); }}>›</button>
+                                                </span>
+                                            </div>
+                                            {focusedStoryboardShot ? ((shot: ShotPrompt) => {
                                                 const cameraPreset = CAMERA_PRESETS.find(preset => preset.id === (shot.cameraPresetId || cameraPresetId));
                                                 const lensPreset = LENS_PRESETS.find(preset => preset.id === (shot.lensPresetId || lensPresetId));
                                                 const cameraLabel = cameraPreset?.label || 'Auto';
@@ -17338,7 +17398,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                         </div>
                                                     </div>
                                                 );
-                                            })}
+                                            })(focusedStoryboardShot) : null}
+                                            </aside>
                                         </div>
                                     ) : (
                                         <div className="flex flex-col items-center justify-center py-24 text-gray-600">
@@ -17801,10 +17862,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     </details>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-6 pb-20">
+                                <div className="shot-page">
                                     {shotPrompts.length > 0 ? (
                                         filteredPersonaShots.length > 0 ? (
-                                            filteredPersonaShots.map(shot => {
+                                            <>
+                                            <div className="shot-page__grid">
+                                                {filteredPersonaShots.map((shot) => (
+                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedFilmingShot?.shot === shot.shot} mode="filming" onSelect={() => setFilmingFocusShot(shot.shot)} />
+                                                ))}
+                                            </div>
+                                            <aside className="shot-page__inspector">
+                                            <div className="shot-page__inspector-head">
+                                                <span>{focusedFilmingShot ? `Shot ${formatShotLabel(focusedFilmingShot)}` : 'Inspector'}</span>
+                                                <span className="pk-actions">
+                                                    <button type="button" className="edit-icon-btn" aria-label="Previous shot" title="Previous shot" disabled={!focusedFilmingShot || filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) <= 0} onClick={() => { const index = filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index > 0) setFilmingFocusShot(filteredPersonaShots[index - 1].shot); }}>‹</button>
+                                                    <button type="button" className="edit-icon-btn" aria-label="Next shot" title="Next shot" disabled={!focusedFilmingShot || filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) >= filteredPersonaShots.length - 1} onClick={() => { const index = filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index >= 0 && index < filteredPersonaShots.length - 1) setFilmingFocusShot(filteredPersonaShots[index + 1].shot); }}>›</button>
+                                                </span>
+                                            </div>
+                                            {focusedFilmingShot ? ((shot: ShotPrompt) => {
                                                 const motionRefUploadId = `motion-ref-upload-${shot.shot}`;
                                                 const startFrameUploadId = `start-frame-upload-${shot.shot}`;
                                                 const endFrameUploadId = `end-frame-upload-${shot.shot}`;
@@ -18401,7 +18476,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                         </div>
                                                     </div>
                                                 );
-                                            })
+                                            })(focusedFilmingShot) : null}
+                                            </aside>
+                                            </>
                                         ) : (
                                             <div className="col-span-full flex flex-col items-center justify-center py-24 text-gray-600">
                                                 <FilmIcon className="w-24 h-24 mb-4 opacity-20" />

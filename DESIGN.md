@@ -164,6 +164,11 @@ Every production phase opens with the same bar, in this order:
 
 No `hover:scale-105`, no coloured hero buttons per phase (green/cyan/amber/blue): colour would have to mean something, and here it did not.
 
+
+### Shot boards (Storyboard, Filming)
+
+Shots are a grid of small 16:9 tiles — frame, shot number, scene slugline, one line of description, a status chip (Generating… / Video / Frame ready / No frame / score). One tile is selected; its full editing card renders **once**, in a sticky inspector beside the grid, with ‹ › to step through shots. The board shows *what exists*; the inspector shows *how to change it*. Never render the full card for every shot.
+
 ## 6. Depth & Elevation
 
 - Use soft, diffuse shadows
