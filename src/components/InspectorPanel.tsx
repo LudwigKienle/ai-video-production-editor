@@ -3,7 +3,7 @@ import { ClipEffectLayer, ClipFilters, LutId, TimelineClip, MediaItem, EffectTyp
 import { FunctionDeclaration } from '@google/genai';
 import AIAssistant from './AIAssistant';
 import { TRANSITIONS } from '../constants';
-import { PropertiesIcon, EffectsIcon, ColorIcon, TransitionsIcon, MagicWandIcon, TextIcon, TransformIcon, KeyingIcon, MotionIcon, KeyframeIcon } from './icons';
+import { PropertiesIcon, EffectsIcon, ColorIcon, TransitionsIcon, MagicWandIcon, TextIcon, TransformIcon, KeyingIcon, MotionIcon, KeyframeIcon, XIcon, AddIcon } from './icons';
 import { FILM_LUTS, LOOK_PRESETS, normalizeFilters } from '../utils/colorGrading';
 import { parseCubeLut } from '../utils/lut';
 import { getClipEffectLayers, normalizeEffectLayer, syncClipEffectsLegacyField } from '../utils/effects';
@@ -61,6 +61,30 @@ const mergeFontFamilies = (...groups: string[][]) => {
     });
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
 };
+
+/** One labelled slider row: name left, live value right (mono), track underneath. */
+const SliderRow: React.FC<{
+    id: string;
+    label: string;
+    value: number;
+    display: string;
+    min: number;
+    max: number;
+    step?: number;
+    disabled?: boolean;
+    onChange: (value: number) => void;
+    onReset?: () => void;
+}> = ({ id, label, value, display, min, max, step = 1, disabled, onChange, onReset }) => (
+    <label htmlFor={id} className={`insp-slider ${disabled ? 'insp-slider--disabled' : ''}`}>
+        <span className="insp-slider__head">
+            <span>{label}</span>
+            <span className="insp-slider__value" onDoubleClick={onReset} title={onReset ? 'Double-click to reset' : undefined}>{display}</span>
+        </span>
+        <input id={id} type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} onDoubleClick={onReset} />
+    </label>
+);
+
+const POSITIONS: Array<NonNullable<TimelineClip['textConfig']>['position']> = ['top-left', 'top-center', 'top-right', 'center', 'center', 'center', 'bottom-left', 'bottom-center', 'bottom-right'];
 
 const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
     const { selectedClip, selectedMedia, onUpdateClip, onUpdateClipFilters, onApplyCSSEffect, onUpdateClipTransition, onUpdateTextConfig, onUpdateClipSpeed, onUpdateClipTransform, onUpdateChromaKeyConfig } = props;
@@ -442,557 +466,314 @@ const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
         }
 
         switch (activeTab) {
-            case 'PROPERTIES':
+            case 'PROPERTIES': {
                 const displayDuration = (selectedMedia.type === 'video' ? (selectedMedia.duration || 5) : selectedClip.duration) / selectedClip.speed;
                 return (
-                    <div className="p-4 space-y-4 text-sm">
-                        <div>
-                            <label className="font-semibold text-gray-400">Clip Name</label>
-                            <p className="text-white truncate">{selectedMedia.name}</p>
+                    <div className="insp-body">
+                        <div className="pk-card">
+                            <dl className="insp-facts">
+                                <div><dt>Name</dt><dd title={selectedMedia.name}>{selectedMedia.name}</dd></div>
+                                <div><dt>Type</dt><dd className="capitalize">{selectedMedia.type}</dd></div>
+                                <div><dt>On timeline</dt><dd className="pk-mono">{displayDuration.toFixed(2)}s</dd></div>
+                                <div><dt>In · out</dt><dd className="pk-mono">{selectedClip.start.toFixed(2)}s · {selectedClip.end.toFixed(2)}s</dd></div>
+                            </dl>
                         </div>
-                        <div>
-                            <label className="font-semibold text-gray-400">Timeline Duration</label>
-                            <p className="text-white">{displayDuration.toFixed(2)}s</p>
-                        </div>
-                        <div>
-                           <label htmlFor="speed" className="font-semibold text-gray-400 flex justify-between">
-                                Speed <span>{selectedClip.speed.toFixed(2)}x</span>
+                        <div className="pk-card">
+                            <SliderRow id="speed" label="Speed" value={selectedClip.speed} display={`${selectedClip.speed.toFixed(2)}×`} min={0.25} max={4} step={0.05} onChange={handleSpeedChange} onReset={() => handleSpeedChange(1)} />
+                            <label className="pk-field">
+                                <span>Blend</span>
+                                <select id="blendMode" value={selectedClip.blendMode || 'normal'} onChange={handleBlendModeChange}>
+                                    <option value="normal">Normal</option>
+                                    <option value="screen">Screen · lighten</option>
+                                    <option value="overlay">Overlay · contrast</option>
+                                    <option value="multiply">Multiply · darken</option>
+                                    <option value="darken">Darken</option>
+                                    <option value="lighten">Lighten</option>
+                                    <option value="color-dodge">Color dodge</option>
+                                    <option value="soft-light">Soft light</option>
+                                    <option value="difference">Difference</option>
+                                </select>
                             </label>
-                            <input
-                                type="range"
-                                id="speed"
-                                name="speed"
-                                min="0.25"
-                                max="4"
-                                step="0.05"
-                                value={selectedClip.speed}
-                                onChange={e => handleSpeedChange(parseFloat(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo mt-1"
-                            />
-                        </div>
-                        <div>
-                           <label htmlFor="blendMode" className="font-semibold text-gray-400 block mb-1">Blending Mode</label>
-                           <select
-                                id="blendMode"
-                                value={selectedClip.blendMode || 'normal'}
-                                onChange={handleBlendModeChange}
-                                className="w-full bg-gray-700 text-white p-2 rounded border border-gray-600 focus:border-indigo-500 outline-none"
-                           >
-                               <option value="normal">Normal</option>
-                               <option value="screen">Screen (Lighten)</option>
-                               <option value="overlay">Overlay (Contrast)</option>
-                               <option value="multiply">Multiply (Darken)</option>
-                               <option value="darken">Darken</option>
-                               <option value="lighten">Lighten</option>
-                               <option value="color-dodge">Color Dodge</option>
-                               <option value="soft-light">Soft Light</option>
-                               <option value="difference">Difference</option>
-                           </select>
                         </div>
                     </div>
                 );
-            case 'EFFECTS':
+            }
+            case 'EFFECTS': {
                 const chromaKeyConfig = selectedClip.chromaKey;
                 const activeEffects = getEffectLayers(selectedClip);
                 return (
-                    <div className="p-4 space-y-4">
-                        <h4 className="font-semibold text-gray-300">Effect Stack</h4>
-                        {activeEffects.length > 0 ? (
-                            <div className="space-y-2">
-                                {activeEffects.map((effectLayer) => (
-                                    <div key={effectLayer.id} className="rounded-lg border border-gray-700 bg-gray-800/60 p-2">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="text-white text-sm font-medium">{effectLayer.effect}</span>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => handleAddKeyframe('effectIntensity', effectLayer.id)}
-                                                    className="text-[10px] rounded border border-indigo-500/40 bg-indigo-700/20 px-2 py-1 text-indigo-200"
-                                                >
-                                                    + KF
-                                                </button>
-                                                <button
-                                                    onClick={() => handleCreateEffectBurst(effectLayer.id, 20)}
-                                                    className="text-[10px] rounded border border-amber-500/40 bg-amber-700/20 px-2 py-1 text-amber-200"
-                                                >
-                                                    20f Burst
-                                                </button>
-                                                <button
-                                                    onClick={() => handleRemoveEffectLayer(effectLayer.id)}
-                                                    className="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded"
-                                                >
-                                                    Remove
-                                                </button>
+                    <div className="insp-body">
+                        <section className="fx-section">
+                            <header className="fx-section__title">Effect stack · {activeEffects.length}</header>
+                            {activeEffects.length > 0 ? (
+                                <div className="pk-list">
+                                    {activeEffects.map((effectLayer) => (
+                                        <div key={effectLayer.id} className="pk-card">
+                                            <div className="pk-card__head">
+                                                <span className="pk-card__title">{effectLayer.effect}</span>
+                                                <span className="pk-actions">
+                                                    <button type="button" className="edit-text-btn" onClick={() => handleAddKeyframe('effectIntensity', effectLayer.id)} title="Add an intensity keyframe at the playhead"><KeyframeIcon className="w-3 h-3" />Key</button>
+                                                    <button type="button" className="edit-text-btn" onClick={() => handleCreateEffectBurst(effectLayer.id, 20)} title="20-frame burst: 0 → 100 → 0 around the playhead">Burst</button>
+                                                    <button type="button" className="edit-icon-btn" onClick={() => handleRemoveEffectLayer(effectLayer.id)} title="Remove effect" aria-label="Remove effect"><XIcon className="w-3.5 h-3.5" /></button>
+                                                </span>
                                             </div>
+                                            <SliderRow id={`fx-${effectLayer.id}`} label="Intensity" value={Math.round(effectLayer.intensity)} display={`${Math.round(effectLayer.intensity)}%`} min={0} max={100} onChange={(value) => handleEffectIntensityChange(effectLayer.id, value)} onReset={() => handleEffectIntensityChange(effectLayer.id, 100)} />
                                         </div>
-                                        <div className="mt-2">
-                                            <label className="text-xs text-gray-400 flex justify-between">
-                                                Intensity <span>{Math.round(effectLayer.intensity)}%</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="100"
-                                                step="1"
-                                                value={Math.round(effectLayer.intensity)}
-                                                onChange={(event) => handleEffectIntensityChange(effectLayer.id, Number(event.target.value))}
-                                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo mt-1"
-                                            />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : <p className="text-gray-500 text-sm">No effects in stack. Add effects from the Effects panel.</p>}
-
-                        <div className="border-t border-gray-700 my-4"></div>
-
-                        <h4 className="font-semibold text-gray-300 flex items-center gap-2"><KeyingIcon className="w-5 h-5" />Chroma Key (Green Screen)</h4>
-                        {!chromaKeyConfig ? (
-                            <p className="text-gray-500 text-sm">No Chroma Key effect applied. Add it from the Effects panel.</p>
-                        ) : (
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-4">
-                                    <label htmlFor="keyColor" className="text-sm font-medium text-gray-300">Key Color</label>
-                                    <input id="keyColor" type="color" value={chromaKeyConfig.color} onChange={e => handleChromaKeyChange('color', e.target.value)} className="w-12 h-10 bg-gray-700 border border-gray-600 rounded-md p-1"/>
+                                    ))}
                                 </div>
-                                <div>
-                                    <label htmlFor="tolerance" className="text-sm font-medium text-gray-300 flex justify-between">Tolerance <span>{Math.round(chromaKeyConfig.tolerance * 100)}%</span></label>
-                                    <input id="tolerance" type="range" min="0" max="1" step="0.01" value={chromaKeyConfig.tolerance} onChange={e => handleChromaKeyChange('tolerance', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo mt-1"/>
+                            ) : (
+                                <div className="pk-empty"><EffectsIcon /><strong>No effects yet</strong><span>Pick one from the Effects browser on the left — it lands here.</span></div>
+                            )}
+                        </section>
+                        <section className="fx-section">
+                            <header className="fx-section__title">Chroma key</header>
+                            {!chromaKeyConfig ? (
+                                <p className="pk-hint">Add “Chroma Key” from the Effects browser to key out a green screen.</p>
+                            ) : (
+                                <div className="pk-card">
+                                    <label className="insp-color">
+                                        <span>Key colour</span>
+                                        <input id="keyColor" type="color" value={chromaKeyConfig.color} onChange={(e) => handleChromaKeyChange('color', e.target.value)} />
+                                        <code className="pk-mono">{chromaKeyConfig.color}</code>
+                                    </label>
+                                    <SliderRow id="tolerance" label="Tolerance" value={chromaKeyConfig.tolerance} display={`${Math.round(chromaKeyConfig.tolerance * 100)}%`} min={0} max={1} step={0.01} onChange={(value) => handleChromaKeyChange('tolerance', value)} />
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </section>
                     </div>
                 );
-            case 'COLOR':
+            }
+            case 'COLOR': {
                 const filters = normalizeFilters(selectedClip.filters);
                 const selectedLut = FILM_LUTS.find((preset) => preset.id === filters.lut);
-                const customLutLabel = filters.customLutName ? `Custom: ${filters.customLutName}` : 'Custom .cube';
-                const selectedLutName = filters.lut === 'custom' ? customLutLabel : selectedLut?.name;
+                const customLutLabel = filters.customLutName ? `Custom · ${filters.customLutName}` : 'Custom .cube';
                 return (
-                    <div className="p-4 space-y-4">
-                        <div className="flex flex-col">
-                            <label htmlFor="lookPreset" className="mb-1 text-sm text-gray-300">Look Presets</label>
-                            <select
-                                id="lookPreset"
-                                value={presetSelection}
-                                onChange={handlePresetChange}
-                                className="w-full bg-gray-700 text-white p-2 rounded border border-gray-600 focus:border-indigo-500 outline-none"
-                            >
-                                <option value="">Choose a preset</option>
-                                {['Film Stock', 'Clean Cinematic', 'Vintage/Lo-fi'].map((category) => {
-                                    const presets = LOOK_PRESETS.filter((preset) => preset.category === category);
-                                    if (presets.length === 0) return null;
-                                    return (
-                                        <optgroup key={category} label={category}>
-                                            {presets.map((preset) => (
-                                                <option key={preset.id} value={preset.id}>{preset.name}</option>
-                                            ))}
-                                        </optgroup>
-                                    );
-                                })}
-                            </select>
-                        </div>
-                        <div className="flex flex-col">
-                            <label htmlFor="brightness" className="mb-1 text-sm text-gray-300 flex justify-between">Brightness <span>{filters.brightness}%</span></label>
-                            <input type="range" id="brightness" name="brightness" min="0" max="200" value={filters.brightness} onChange={e => handleFilterChange('brightness', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
-                         <div className="flex flex-col">
-                            <label htmlFor="contrast" className="mb-1 text-sm text-gray-300 flex justify-between">Contrast <span>{filters.contrast}%</span></label>
-                            <input type="range" id="contrast" name="contrast" min="0" max="200" value={filters.contrast} onChange={e => handleFilterChange('contrast', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
-                         <div className="flex flex-col">
-                            <label htmlFor="saturate" className="mb-1 text-sm text-gray-300 flex justify-between">Saturation <span>{filters.saturate}%</span></label>
-                            <input type="range" id="saturate" name="saturate" min="0" max="200" value={filters.saturate} onChange={e => handleFilterChange('saturate', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
-                        <div className="flex flex-col">
-                            <label htmlFor="hueRotate" className="mb-1 text-sm text-gray-300 flex justify-between">Hue <span>{filters.hueRotate}°</span></label>
-                            <input type="range" id="hueRotate" name="hueRotate" min="0" max="360" value={filters.hueRotate} onChange={e => handleFilterChange('hueRotate', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
-                        <div className="border-t border-gray-700 pt-3 space-y-3">
-                            <div className="flex flex-col">
-                                <label htmlFor="lut" className="mb-1 text-sm text-gray-300 flex justify-between">Film Emulation <span className="text-gray-500 text-xs">{selectedLutName}</span></label>
-                                <select
-                                    id="lut"
-                                    value={filters.lut}
-                                    onChange={(e) => handleFilterChange('lut', e.target.value as LutId)}
-                                    className="w-full bg-gray-700 text-white p-2 rounded border border-gray-600 focus:border-indigo-500 outline-none"
-                                >
-                                    {FILM_LUTS.map((lut) => (
-                                        <option key={lut.id} value={lut.id}>{lut.name}</option>
-                                    ))}
-                                    {filters.customLut ? (
-                                        <option value="custom">{customLutLabel}</option>
-                                    ) : (
-                                        <option value="custom" disabled>Custom .cube (import to enable)</option>
-                                    )}
+                    <div className="insp-body">
+                        <div className="pk-card">
+                            <label className="pk-field">
+                                <span>Look preset</span>
+                                <select id="lookPreset" value={presetSelection} onChange={handlePresetChange}>
+                                    <option value="">Choose a look…</option>
+                                    {['Film Stock', 'Clean Cinematic', 'Vintage/Lo-fi'].map((category) => {
+                                        const presets = LOOK_PRESETS.filter((preset) => preset.category === category);
+                                        if (presets.length === 0) return null;
+                                        return (
+                                            <optgroup key={category} label={category}>
+                                                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                                            </optgroup>
+                                        );
+                                    })}
                                 </select>
-                                {selectedLut?.description && filters.lut !== 'custom' ? (
-                                    <p className="text-xs text-gray-500 mt-1">{selectedLut.description}</p>
-                                ) : null}
-                            </div>
-                            <div className="flex flex-col">
-                                <label htmlFor="lutIntensity" className="mb-1 text-sm text-gray-300 flex justify-between">LUT Strength <span>{filters.lutIntensity}%</span></label>
-                                <input
-                                    type="range"
-                                    id="lutIntensity"
-                                    name="lutIntensity"
-                                    min="0"
-                                    max="100"
-                                    value={filters.lutIntensity}
-                                    onChange={e => handleFilterChange('lutIntensity', parseInt(e.target.value))}
-                                    disabled={filters.lut === 'none'}
-                                    className={`w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo ${filters.lut === 'none' ? 'opacity-40 cursor-not-allowed' : ''}`}
-                                />
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                                <input
-                                    ref={lutInputRef}
-                                    type="file"
-                                    accept=".cube"
-                                    className="hidden"
-                                    onChange={(event) => {
-                                        const file = event.target.files?.[0];
-                                        if (file) handleImportLut(file);
-                                        event.currentTarget.value = '';
-                                    }}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => lutInputRef.current?.click()}
-                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-xs text-gray-200 px-3 py-2 rounded border border-gray-600"
-                                >
-                                    Import .cube LUT
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleClearCustomLut}
-                                    disabled={!filters.customLut}
-                                    className="flex-1 bg-gray-700/60 hover:bg-gray-600 text-xs text-gray-200 px-3 py-2 rounded border border-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                    Clear LUT
-                                </button>
-                            </div>
-                            <div className="flex flex-col">
-                                <label htmlFor="grain" className="mb-1 text-sm text-gray-300 flex justify-between">Film Grain <span>{filters.grain}%</span></label>
-                                <input
-                                    type="range"
-                                    id="grain"
-                                    name="grain"
-                                    min="0"
-                                    max="100"
-                                    value={filters.grain}
-                                    onChange={e => handleFilterChange('grain', parseInt(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                                />
-                            </div>
+                            </label>
                         </div>
-                        <div className="border-t border-gray-700 pt-3 space-y-3">
-                            <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Glow & Lens</h4>
-                            <div className="flex flex-col">
-                                <label htmlFor="halation" className="mb-1 text-sm text-gray-300 flex justify-between">Halation <span>{filters.halation}%</span></label>
-                                <input
-                                    type="range"
-                                    id="halation"
-                                    name="halation"
-                                    min="0"
-                                    max="100"
-                                    value={filters.halation}
-                                    onChange={e => handleFilterChange('halation', parseInt(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                                />
+                        <section className="fx-section">
+                            <header className="fx-section__title">Primaries</header>
+                            <div className="pk-card">
+                                <SliderRow id="brightness" label="Brightness" value={filters.brightness} display={`${filters.brightness}%`} min={0} max={200} onChange={(v) => handleFilterChange('brightness', v)} onReset={() => handleFilterChange('brightness', 100)} />
+                                <SliderRow id="contrast" label="Contrast" value={filters.contrast} display={`${filters.contrast}%`} min={0} max={200} onChange={(v) => handleFilterChange('contrast', v)} onReset={() => handleFilterChange('contrast', 100)} />
+                                <SliderRow id="saturate" label="Saturation" value={filters.saturate} display={`${filters.saturate}%`} min={0} max={200} onChange={(v) => handleFilterChange('saturate', v)} onReset={() => handleFilterChange('saturate', 100)} />
+                                <SliderRow id="hueRotate" label="Hue" value={filters.hueRotate} display={`${filters.hueRotate}°`} min={0} max={360} onChange={(v) => handleFilterChange('hueRotate', v)} onReset={() => handleFilterChange('hueRotate', 0)} />
                             </div>
-                            <div className="flex flex-col">
-                                <label htmlFor="bloom" className="mb-1 text-sm text-gray-300 flex justify-between">Bloom <span>{filters.bloom}%</span></label>
-                                <input
-                                    type="range"
-                                    id="bloom"
-                                    name="bloom"
-                                    min="0"
-                                    max="100"
-                                    value={filters.bloom}
-                                    onChange={e => handleFilterChange('bloom', parseInt(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                                />
+                        </section>
+                        <section className="fx-section">
+                            <header className="fx-section__title">Film</header>
+                            <div className="pk-card">
+                                <label className="pk-field">
+                                    <span>Emulation</span>
+                                    <select id="lut" value={filters.lut} onChange={(e) => handleFilterChange('lut', e.target.value as LutId)}>
+                                        {FILM_LUTS.map((lut) => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
+                                        {filters.customLut ? <option value="custom">{customLutLabel}</option> : <option value="custom" disabled>Custom .cube (import below)</option>}
+                                    </select>
+                                </label>
+                                {selectedLut?.description && filters.lut !== 'custom' ? <p className="pk-hint">{selectedLut.description}</p> : null}
+                                <SliderRow id="lutIntensity" label="Strength" value={filters.lutIntensity} display={`${filters.lutIntensity}%`} min={0} max={100} disabled={filters.lut === 'none'} onChange={(v) => handleFilterChange('lutIntensity', v)} onReset={() => handleFilterChange('lutIntensity', 100)} />
+                                <div className="pk-actions">
+                                    <input ref={lutInputRef} type="file" accept=".cube" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) handleImportLut(file); event.currentTarget.value = ''; }} />
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => lutInputRef.current?.click()}>Import .cube</button>
+                                    <button type="button" className="edit-text-btn" onClick={handleClearCustomLut} disabled={!filters.customLut}>Clear custom</button>
+                                </div>
+                                <SliderRow id="grain" label="Grain" value={filters.grain} display={`${filters.grain}%`} min={0} max={100} onChange={(v) => handleFilterChange('grain', v)} onReset={() => handleFilterChange('grain', 0)} />
                             </div>
-                            <div className="flex flex-col">
-                                <label htmlFor="vignette" className="mb-1 text-sm text-gray-300 flex justify-between">Vignette <span>{filters.vignette}%</span></label>
-                                <input
-                                    type="range"
-                                    id="vignette"
-                                    name="vignette"
-                                    min="0"
-                                    max="100"
-                                    value={filters.vignette}
-                                    onChange={e => handleFilterChange('vignette', parseInt(e.target.value))}
-                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo"
-                                />
+                        </section>
+                        <section className="fx-section">
+                            <header className="fx-section__title">Glow &amp; lens</header>
+                            <div className="pk-card">
+                                <SliderRow id="halation" label="Halation" value={filters.halation} display={`${filters.halation}%`} min={0} max={100} onChange={(v) => handleFilterChange('halation', v)} onReset={() => handleFilterChange('halation', 0)} />
+                                <SliderRow id="bloom" label="Bloom" value={filters.bloom} display={`${filters.bloom}%`} min={0} max={100} onChange={(v) => handleFilterChange('bloom', v)} onReset={() => handleFilterChange('bloom', 0)} />
+                                <SliderRow id="vignette" label="Vignette" value={filters.vignette} display={`${filters.vignette}%`} min={0} max={100} onChange={(v) => handleFilterChange('vignette', v)} onReset={() => handleFilterChange('vignette', 0)} />
                             </div>
-                        </div>
+                        </section>
                     </div>
                 );
-            case 'TRANSFORM':
+            }
+            case 'TRANSFORM': {
                 const transform = selectedClip.transform || DEFAULT_TRANSFORM;
-                 return (
-                    <div className="p-4 space-y-4">
-                         <div className="flex flex-col">
-                            <label htmlFor="scale" className="mb-1 text-sm text-gray-300 flex justify-between">Scale <span>{(transform.scale * 100).toFixed(0)}%</span></label>
-                            <input type="range" id="scale" min="0.1" max="3" step="0.01" value={transform.scale} onChange={e => handleTransformChange('scale', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
+                return (
+                    <div className="insp-body">
+                        <div className="pk-card">
+                            <SliderRow id="scale" label="Scale" value={transform.scale} display={`${(transform.scale * 100).toFixed(0)}%`} min={0.1} max={3} step={0.01} onChange={(v) => handleTransformChange('scale', v)} onReset={() => handleTransformChange('scale', 1)} />
+                            <SliderRow id="opacity" label="Opacity" value={transform.opacity} display={`${(transform.opacity * 100).toFixed(0)}%`} min={0} max={1} step={0.01} onChange={(v) => handleTransformChange('opacity', v)} onReset={() => handleTransformChange('opacity', 1)} />
                         </div>
-                         <div className="flex flex-col">
-                            <label htmlFor="opacity" className="mb-1 text-sm text-gray-300 flex justify-between">Opacity <span>{(transform.opacity * 100).toFixed(0)}%</span></label>
-                            <input type="range" id="opacity" min="0" max="1" step="0.01" value={transform.opacity} onChange={e => handleTransformChange('opacity', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
+                        <div className="pk-card">
+                            <SliderRow id="positionX" label="Position X" value={transform.position.x} display={`${transform.position.x.toFixed(1)}%`} min={0} max={100} step={0.1} onChange={(v) => handleTransformChange('positionX', v)} onReset={() => handleTransformChange('positionX', 50)} />
+                            <SliderRow id="positionY" label="Position Y" value={transform.position.y} display={`${transform.position.y.toFixed(1)}%`} min={0} max={100} step={0.1} onChange={(v) => handleTransformChange('positionY', v)} onReset={() => handleTransformChange('positionY', 50)} />
                         </div>
-                         <div className="flex flex-col">
-                            <label htmlFor="positionX" className="mb-1 text-sm text-gray-300 flex justify-between">Position X <span>{transform.position.x.toFixed(1)}%</span></label>
-                            <input type="range" id="positionX" min="0" max="100" step="0.1" value={transform.position.x} onChange={e => handleTransformChange('positionX', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
-                         <div className="flex flex-col">
-                            <label htmlFor="positionY" className="mb-1 text-sm text-gray-300 flex justify-between">Position Y <span>{transform.position.y.toFixed(1)}%</span></label>
-                            <input type="range" id="positionY" min="0" max="100" step="0.1" value={transform.position.y} onChange={e => handleTransformChange('positionY', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo" />
-                        </div>
+                        <p className="pk-hint">Double-click a value to reset it.</p>
                     </div>
                 );
-            case 'MOTION':
+            }
+            case 'MOTION': {
                 const kenBurns = selectedClip.kenBurns || DEFAULT_KEN_BURNS;
                 return (
-                    <div className="p-4 space-y-6">
-                        <div className="flex items-center justify-between">
-                            <h4 className="font-semibold text-gray-300">Ken Burns Effect</h4>
-                            <button
-                                onClick={toggleKenBurns}
-                                className={`w-10 h-5 rounded-full p-0.5 transition-colors ${kenBurns.enabled ? 'bg-indigo-600' : 'bg-gray-600'}`}
-                            >
-                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${kenBurns.enabled ? 'translate-x-5' : 'translate-x-0'}`}/>
-                            </button>
+                    <div className="insp-body">
+                        <div className="pk-card">
+                            <label className="pk-switch">
+                                <span>
+                                    <span className="pk-card__title" style={{ display: 'block' }}>Ken Burns</span>
+                                    <span className="pk-hint">Slow push and pan from a start to an end framing.</span>
+                                </span>
+                                <input type="checkbox" checked={kenBurns.enabled} onChange={toggleKenBurns} />
+                            </label>
                         </div>
-
-                        {kenBurns.enabled && (
-                            <>
-                                <div>
-                                    <h5 className="text-xs font-bold text-indigo-400 uppercase mb-2">Start Position</h5>
-                                    <div className="space-y-2">
-                                        <div className="flex flex-col">
-                                            <label className="text-xs text-gray-400">Scale {kenBurns.start.scale.toFixed(2)}x</label>
-                                            <input type="range" min="1" max="3" step="0.1" value={kenBurns.start.scale} onChange={e => handleKenBurnsChange('start', 'scale', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <div className="flex-1">
-                                                <label className="text-xs text-gray-400">Pan X</label>
-                                                <input type="range" min="-50" max="50" value={kenBurns.start.x} onChange={e => handleKenBurnsChange('start', 'x', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                            </div>
-                                            <div className="flex-1">
-                                                <label className="text-xs text-gray-400">Pan Y</label>
-                                                <input type="range" min="-50" max="50" value={kenBurns.start.y} onChange={e => handleKenBurnsChange('start', 'y', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                            </div>
-                                        </div>
-                                    </div>
+                        {kenBurns.enabled && (['start', 'end'] as const).map((phase) => (
+                            <section key={phase} className="fx-section">
+                                <header className="fx-section__title">{phase === 'start' ? 'Start' : 'End'} framing</header>
+                                <div className="pk-card">
+                                    <SliderRow id={`kb-${phase}-scale`} label="Scale" value={kenBurns[phase].scale} display={`${kenBurns[phase].scale.toFixed(2)}×`} min={1} max={3} step={0.1} onChange={(v) => handleKenBurnsChange(phase, 'scale', v)} />
+                                    <SliderRow id={`kb-${phase}-x`} label="Pan X" value={kenBurns[phase].x} display={`${kenBurns[phase].x}`} min={-50} max={50} onChange={(v) => handleKenBurnsChange(phase, 'x', v)} onReset={() => handleKenBurnsChange(phase, 'x', 0)} />
+                                    <SliderRow id={`kb-${phase}-y`} label="Pan Y" value={kenBurns[phase].y} display={`${kenBurns[phase].y}`} min={-50} max={50} onChange={(v) => handleKenBurnsChange(phase, 'y', v)} onReset={() => handleKenBurnsChange(phase, 'y', 0)} />
                                 </div>
-
-                                <div className="border-t border-gray-700 pt-2">
-                                    <h5 className="text-xs font-bold text-indigo-400 uppercase mb-2">End Position</h5>
-                                    <div className="space-y-2">
-                                        <div className="flex flex-col">
-                                            <label className="text-xs text-gray-400">Scale {kenBurns.end.scale.toFixed(2)}x</label>
-                                            <input type="range" min="1" max="3" step="0.1" value={kenBurns.end.scale} onChange={e => handleKenBurnsChange('end', 'scale', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <div className="flex-1">
-                                                <label className="text-xs text-gray-400">Pan X</label>
-                                                <input type="range" min="-50" max="50" value={kenBurns.end.x} onChange={e => handleKenBurnsChange('end', 'x', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                            </div>
-                                            <div className="flex-1">
-                                                <label className="text-xs text-gray-400">Pan Y</label>
-                                                <input type="range" min="-50" max="50" value={kenBurns.end.y} onChange={e => handleKenBurnsChange('end', 'y', parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"/>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        )}
+                            </section>
+                        ))}
                     </div>
                 );
-            case 'KEYFRAMES':
-                const keyframes = selectedClip.keyframes || [];
+            }
+            case 'KEYFRAMES': {
+                const keyframes = [...(selectedClip.keyframes || [])].sort((a, b) => a.time - b.time);
                 const effectNameById = new Map(getEffectLayers(selectedClip).map((entry) => [entry.id, entry.effect]));
                 return (
-                    <div className="p-4 space-y-4">
-                        <h4 className="font-semibold text-gray-300 mb-4">Keyframe Animation</h4>
-                        <p className="text-xs text-gray-500 mb-4">Position the playhead on the timeline and click "+" to add a keyframe for a property.</p>
-
-                        <div className="grid grid-cols-2 gap-3 mb-6">
-                            <button onClick={() => handleAddKeyframe('scale')} className="bg-gray-700 hover:bg-gray-600 p-2 rounded text-xs font-medium flex justify-between items-center">Scale <span>+</span></button>
-                            <button onClick={() => handleAddKeyframe('opacity')} className="bg-gray-700 hover:bg-gray-600 p-2 rounded text-xs font-medium flex justify-between items-center">Opacity <span>+</span></button>
-                            <button onClick={() => handleAddKeyframe('x')} className="bg-gray-700 hover:bg-gray-600 p-2 rounded text-xs font-medium flex justify-between items-center">Pos X <span>+</span></button>
-                            <button onClick={() => handleAddKeyframe('y')} className="bg-gray-700 hover:bg-gray-600 p-2 rounded text-xs font-medium flex justify-between items-center">Pos Y <span>+</span></button>
-                            <button onClick={() => handleAddKeyframe('volume')} className="bg-gray-700 hover:bg-gray-600 p-2 rounded text-xs font-medium flex justify-between items-center">Volume <span>+</span></button>
+                    <div className="insp-body">
+                        <p className="pk-hint">Park the playhead where the value should land, then add a key for that property.</p>
+                        <div className="pk-chips">
+                            {([['scale', 'Scale'], ['opacity', 'Opacity'], ['x', 'Pos X'], ['y', 'Pos Y'], ['volume', 'Volume']] as const).map(([property, label]) => (
+                                <button key={property} type="button" className="pk-chip pk-chip--accent" onClick={() => handleAddKeyframe(property)}><AddIcon className="w-3 h-3" />{label}</button>
+                            ))}
                             {getEffectLayers(selectedClip).map((entry) => (
-                                <button
-                                    key={entry.id}
-                                    onClick={() => handleAddKeyframe('effectIntensity', entry.id)}
-                                    className="bg-indigo-900/35 border border-indigo-500/40 hover:bg-indigo-700/30 p-2 rounded text-xs font-medium flex justify-between items-center"
-                                >
-                                    FX {entry.effect.slice(0, 14)} <span>+</span>
-                                </button>
+                                <button key={entry.id} type="button" className="pk-chip pk-chip--accent" onClick={() => handleAddKeyframe('effectIntensity', entry.id)} title={`Intensity of ${entry.effect}`}><AddIcon className="w-3 h-3" />FX · {entry.effect.slice(0, 14)}</button>
                             ))}
                         </div>
-
-                        <div className="space-y-2">
-                            {keyframes.length === 0 && <p className="text-center text-gray-600 text-xs py-4">No keyframes added.</p>}
-                            {keyframes.sort((a,b) => a.time - b.time).map(kf => (
-                                <div key={kf.id} className="flex items-center justify-between bg-gray-900 p-2 rounded border border-gray-700 text-xs">
-                                    <span className="text-indigo-300 font-mono w-12">{kf.time.toFixed(1)}s</span>
-                                    <span className="text-gray-300 font-bold uppercase w-24">
-                                        {kf.property === 'effectIntensity'
-                                            ? `FX ${effectNameById.get(kf.targetEffectId || '') || 'Effect'}`
-                                            : kf.property}
-                                    </span>
-                                    <span className="text-white w-12 text-right">{kf.value.toFixed(2)}</span>
-                                    <button onClick={() => handleRemoveKeyframe(kf.id)} className="text-red-500 hover:text-red-400 px-2">&times;</button>
+                        <section className="fx-section">
+                            <header className="fx-section__title">Keys · {keyframes.length}</header>
+                            {keyframes.length === 0 ? (
+                                <div className="pk-empty"><KeyframeIcon /><strong>No keyframes</strong><span>Add one above — it is placed at the current playhead.</span></div>
+                            ) : (
+                                <div className="pk-list">
+                                    {keyframes.map((kf) => (
+                                        <div key={kf.id} className="pk-row insp-key">
+                                            <span className="pk-mono insp-key__time">{kf.time.toFixed(2)}s</span>
+                                            <span className="insp-key__prop">{kf.property === 'effectIntensity' ? `FX · ${effectNameById.get(kf.targetEffectId || '') || 'Effect'}` : kf.property}</span>
+                                            <span className="pk-mono insp-key__value">{kf.value.toFixed(2)}</span>
+                                            <button type="button" className="edit-icon-btn" onClick={() => handleRemoveKeyframe(kf.id)} aria-label="Remove keyframe" title="Remove"><XIcon className="w-3.5 h-3.5" /></button>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
+                            )}
+                        </section>
                     </div>
-                )
+                );
+            }
             case 'TRANSITIONS':
-                 return (
-                    <div className="p-4 space-y-4">
-                        <h4 className="font-semibold text-gray-300">Outgoing Transition</h4>
+                return (
+                    <div className="insp-body">
                         {!selectedClip.transitionOut ? (
-                            <p className="text-gray-500 text-sm">No transition applied. Add one from the Transitions panel on the left.</p>
+                            <div className="pk-empty"><TransitionsIcon /><strong>No transition</strong><span>Choose one in the Transitions browser — it is added at the end of this clip.</span></div>
                         ) : (
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="text-xs text-gray-400">Type</label>
-                                    <select value={selectedClip.transitionOut.type} onChange={handleTransitionTypeChange} className="w-full bg-gray-700 border border-gray-600 rounded-md p-1 mt-1 text-sm">
-                                        {TRANSITIONS.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            <div className="pk-card">
+                                <div className="pk-card__head"><span className="pk-card__title">Outgoing</span><button type="button" className="edit-text-btn" onClick={() => onUpdateClipTransition(selectedClip.id, null)}>Remove</button></div>
+                                <label className="pk-field">
+                                    <span>Type</span>
+                                    <select value={selectedClip.transitionOut.type} onChange={handleTransitionTypeChange}>
+                                        {TRANSITIONS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                                     </select>
-                                </div>
-                                <div>
-                                    <label className="text-xs text-gray-400">Duration (s)</label>
-                                    <input type="number" value={selectedClip.transitionOut.duration} onChange={handleTransitionDurationChange} step="0.1" min="0.1" className="w-full bg-gray-700 border border-gray-600 rounded-md p-1 mt-1 text-sm"/>
-                                </div>
-                                <button onClick={() => onUpdateClipTransition(selectedClip.id, null)} className="w-full text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded">Remove Transition</button>
+                                </label>
+                                <label className="pk-field">
+                                    <span>Duration</span>
+                                    <span className="pk-inline"><input type="number" value={selectedClip.transitionOut.duration} onChange={handleTransitionDurationChange} step="0.1" min="0.1" style={{ width: '5rem' }} />s</span>
+                                </label>
                             </div>
                         )}
                     </div>
                 );
-            case 'TEXT':
+            case 'TEXT': {
                 const textConfig = selectedClip.textConfig;
-                if (!textConfig) return null; // Should not happen if tab is visible
+                if (!textConfig) return null;
                 const fontOptions = mergeFontFamilies(fontFamilies, [textConfig.font]);
                 const searchTerm = fontSearch.trim().toLowerCase();
-                const visibleFontOptions = searchTerm
-                    ? fontOptions.filter((family) => family.toLowerCase().includes(searchTerm))
-                    : fontOptions;
+                const visibleFontOptions = searchTerm ? fontOptions.filter((family) => family.toLowerCase().includes(searchTerm)) : fontOptions;
                 return (
-                    <div className="p-4 space-y-4">
-                        <div>
-                            <label htmlFor="textContent" className="text-sm font-medium text-gray-300">Text Content</label>
-                            <textarea id="textContent" rows={3} value={textConfig?.content} onChange={e => handleTextConfigChange('content', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 mt-1"/>
-                        </div>
-                        <div className="space-y-2 rounded-md border border-gray-700 bg-gray-900/40 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                                <label htmlFor="fontSearch" className="text-xs font-semibold uppercase tracking-wider text-gray-400">Font Library</label>
-                                <button
-                                    type="button"
-                                    onClick={discoverLocalFonts}
-                                    className="rounded border border-gray-600 px-2 py-1 text-[10px] text-gray-300 hover:border-indigo-400 hover:text-indigo-300"
-                                >
-                                    {fontStatus === 'loading' ? 'Scanning...' : 'Scan Local Fonts'}
-                                </button>
+                    <div className="insp-body">
+                        <label className="pk-field">
+                            <span>Text</span>
+                            <textarea id="textContent" rows={3} value={textConfig.content} onChange={(e) => handleTextConfigChange('content', e.target.value)} style={{ fontFamily: textConfig.font }} />
+                        </label>
+                        <div className="pk-card">
+                            <div className="insp-grid-2">
+                                <label className="pk-field">
+                                    <span>Font</span>
+                                    <select id="font" value={textConfig.font} onChange={(e) => handleTextConfigChange('font', e.target.value)}>
+                                        {visibleFontOptions.length > 0 ? visibleFontOptions.map((family) => <option key={family} value={family}>{family}</option>) : <option value={textConfig.font}>{textConfig.font}</option>}
+                                    </select>
+                                </label>
+                                <label className="pk-field">
+                                    <span>Colour</span>
+                                    <span className="insp-color"><input id="color" type="color" value={textConfig.color} onChange={(e) => handleTextConfigChange('color', e.target.value)} /><code className="pk-mono">{textConfig.color}</code></span>
+                                </label>
                             </div>
-                            <input
-                                id="fontSearch"
-                                value={fontSearch}
-                                onChange={(event) => setFontSearch(event.target.value)}
-                                placeholder="Search fonts..."
-                                className="w-full bg-gray-800 border border-gray-600 rounded-md p-2 text-xs"
-                            />
-                            <div className="flex gap-2">
-                                <input
-                                    value={manualFontFamily}
-                                    onChange={(event) => setManualFontFamily(event.target.value)}
-                                    placeholder="Add font family name"
-                                    className="flex-1 bg-gray-800 border border-gray-600 rounded-md p-2 text-xs"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={addManualFontFamily}
-                                    className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500"
-                                >
-                                    Add
-                                </button>
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => fontUploadInputRef.current?.click()}
-                                    className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:border-indigo-400 hover:text-indigo-300"
-                                >
-                                    Upload Font File
-                                </button>
-                                <span className="text-[10px] text-gray-500">{visibleFontOptions.length} fonts</span>
-                            </div>
-                            <input
-                                ref={fontUploadInputRef}
-                                type="file"
-                                accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
-                                multiple
-                                className="hidden"
-                                onChange={(event) => {
-                                    handleUploadFonts(event.target.files);
-                                    event.currentTarget.value = '';
-                                }}
-                            />
-                            {fontStatusMessage && <p className="text-[10px] text-gray-500">{fontStatusMessage}</p>}
-                        </div>
-                         <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label htmlFor="font" className="text-sm font-medium text-gray-300">Font</label>
-                                <select id="font" value={textConfig?.font} onChange={e => handleTextConfigChange('font', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 mt-1">
-                                    {visibleFontOptions.length > 0
-                                        ? visibleFontOptions.map((family) => (
-                                            <option key={family} value={family}>{family}</option>
-                                        ))
-                                        : <option value={textConfig?.font}>{textConfig?.font}</option>}
-                                </select>
-                            </div>
-                             <div>
-                                <label htmlFor="color" className="text-sm font-medium text-gray-300">Color</label>
-                                <input id="color" type="color" value={textConfig?.color} onChange={e => handleTextConfigChange('color', e.target.value)} className="w-full h-10 bg-gray-700 border border-gray-600 rounded-md p-1 mt-1"/>
+                            <SliderRow id="size" label="Size" value={textConfig.size} display={`${textConfig.size}px`} min={12} max={128} onChange={(v) => handleTextConfigChange('size', v)} />
+                            <div className="pk-field">
+                                <span>Position</span>
+                                <div className="insp-posgrid" role="radiogroup" aria-label="Text position">
+                                    {POSITIONS.map((position, index) => {
+                                        const isCenterCell = index === 4;
+                                        const isDead = (index === 3 || index === 5);
+                                        if (isDead) return <span key={index} aria-hidden="true" />;
+                                        const active = textConfig.position === position;
+                                        return (
+                                            <button key={index} type="button" role="radio" aria-checked={active} aria-label={position} title={position.replace('-', ' ')} className={`insp-posgrid__cell ${active ? 'insp-posgrid__cell--active' : ''} ${isCenterCell ? 'insp-posgrid__cell--center' : ''}`} onClick={() => handleTextConfigChange('position', position)}>
+                                                <span />
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         </div>
-                         <div>
-                            <label htmlFor="size" className="text-sm font-medium text-gray-300 flex justify-between">Size <span>{textConfig?.size}px</span></label>
-                            <input id="size" type="range" min="12" max="128" value={textConfig?.size} onChange={e => handleTextConfigChange('size', parseInt(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-thumb-indigo mt-1"/>
-                        </div>
-                         <div>
-                            <label htmlFor="position" className="text-sm font-medium text-gray-300">Position</label>
-                            <select id="position" value={textConfig?.position} onChange={e => handleTextConfigChange('position', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 mt-1">
-                                <option value="center">Center</option>
-                                <option value="top-left">Top Left</option>
-                                <option value="top-center">Top Center</option>
-                                <option value="top-right">Top Right</option>
-                                <option value="bottom-left">Bottom Left</option>
-                                <option value="bottom-center">Bottom Center</option>
-                                <option value="bottom-right">Bottom Right</option>
-                            </select>
-                        </div>
+                        <details className="pk-details">
+                            <summary>Font library<small>{visibleFontOptions.length} fonts</small></summary>
+                            <div className="pk-details__body">
+                                <input id="fontSearch" type="search" value={fontSearch} onChange={(event) => setFontSearch(event.target.value)} placeholder="Search fonts" aria-label="Search fonts" />
+                                <div className="pk-actions">
+                                    <input value={manualFontFamily} onChange={(event) => setManualFontFamily(event.target.value)} placeholder="Add a font family by name" style={{ flex: 1 }} />
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={addManualFontFamily}>Add</button>
+                                </div>
+                                <div className="pk-actions">
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => fontUploadInputRef.current?.click()}>Upload font file</button>
+                                    <button type="button" className="edit-text-btn" onClick={discoverLocalFonts}>{fontStatus === 'loading' ? 'Scanning…' : 'Scan local fonts'}</button>
+                                </div>
+                                <input ref={fontUploadInputRef} type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" multiple className="hidden" onChange={(event) => { handleUploadFonts(event.target.files); event.currentTarget.value = ''; }} />
+                                {fontStatusMessage && <p className="pk-hint">{fontStatusMessage}</p>}
+                            </div>
+                        </details>
                     </div>
                 );
+            }
             case 'AI':
-                return <AIAssistant
-                    apiKeyReady={props.apiKeyReady}
-                    tools={props.aiTools}
-                    toolExecutor={props.aiToolExecutor}
-                    context={assistantContext}
-                />;
+                return <AIAssistant apiKeyReady={props.apiKeyReady} tools={props.aiTools} toolExecutor={props.aiToolExecutor} context={assistantContext} />;
         }
     }
 
-    let tabs: {id: InspectorTab, icon: React.FC<{className?: string}>, name: string }[] = [
-        { id: 'PROPERTIES', icon: PropertiesIcon, name: 'Properties' },
+    const tabs: { id: InspectorTab; icon: React.FC<{ className?: string }>; name: string }[] = [
+        { id: 'PROPERTIES', icon: PropertiesIcon, name: 'Clip' },
     ];
-
     if (selectedMedia?.type === 'video' || selectedMedia?.type === 'image') {
         tabs.push(
             { id: 'TRANSFORM', icon: TransformIcon, name: 'Transform' },
@@ -1000,41 +781,44 @@ const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
             { id: 'KEYFRAMES', icon: KeyframeIcon, name: 'Keyframes' },
             { id: 'EFFECTS', icon: EffectsIcon, name: 'Effects' },
             { id: 'COLOR', icon: ColorIcon, name: 'Color' },
-            { id: 'TRANSITIONS', icon: TransitionsIcon, name: 'Transitions' },
+            { id: 'TRANSITIONS', icon: TransitionsIcon, name: 'Transition' },
         );
     }
-
-    if (selectedClip?.textConfig) {
-        tabs.push({ id: 'TEXT', icon: TextIcon, name: 'Text' });
-    }
-    tabs.push({ id: 'AI', icon: MagicWandIcon, name: 'AI Assistant' });
-
+    if (selectedClip?.textConfig) tabs.push({ id: 'TEXT', icon: TextIcon, name: 'Text' });
+    tabs.push({ id: 'AI', icon: MagicWandIcon, name: 'Assistant' });
+    const activeMeta = tabs.find((tab) => tab.id === activeTab) || tabs[0];
 
     return (
-        <div className="w-full h-full flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden">
-            <header className="flex-shrink-0 flex items-center justify-between p-3 border-b border-gray-700 bg-gray-800">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-300">{selectedClip ? 'Inspector' : 'AI Assistant'}</h2>
-            </header>
+        <div className="insp">
+            <div className="insp__header">
+                <div className="insp__title">
+                    <h3>{selectedClip ? 'Inspector' : 'Assistant'}</h3>
+                    {selectedMedia && selectedClip && (
+                        <span className="insp__subject" title={selectedMedia.name}>
+                            <span className={`fl-strip__badge fl-strip__badge--${selectedMedia.type === 'audio' ? 'audio' : 'video'}`}>{selectedMedia.type === 'audio' ? 'A' : selectedClip.textConfig ? 'T' : 'V'}</span>
+                            <span>{selectedClip.textConfig?.content?.split('\n')[0] || selectedMedia.name}</span>
+                        </span>
+                    )}
+                </div>
+                {!selectedClip && <p className="pk-hint">Select a clip to edit it here. Until then, ask the assistant anything about the cut.</p>}
+            </div>
 
             {selectedClip && (
-                 <div className="flex-shrink-0 flex border-b border-gray-700 bg-gray-900/30">
-                    {tabs.map(tab => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            title={tab.name}
-                            className={`flex-1 py-3 flex justify-center transition-all relative group ${activeTab === tab.id ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                        >
-                            <tab.icon className="w-5 h-5"/>
-                            {activeTab === tab.id && (
-                                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500"></span>
-                            )}
-                        </button>
-                    ))}
+                <div className="insp__tabs" role="tablist" aria-label="Inspector sections">
+                    {tabs.map((tab) => {
+                        const active = activeTab === tab.id;
+                        return (
+                            <button key={tab.id} type="button" role="tab" aria-selected={active} aria-label={tab.name} title={tab.name} className={`insp__tab ${active ? 'insp__tab--active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+                                <tab.icon className="w-4 h-4" />
+                                {active && <span>{tab.name}</span>}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
 
-            <div className="flex-grow overflow-y-auto custom-scrollbar">
+            <div className="insp__scroll">
+                {selectedClip && activeTab !== 'AI' && <div className="insp__section-name">{activeMeta.name}</div>}
                 {renderTabContent()}
             </div>
         </div>

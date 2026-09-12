@@ -12705,18 +12705,18 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             {/* Main Workspace Area */}
             <div className="flex-grow overflow-hidden relative">
                 {isLoading && (
-                    <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
-                        <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-500 mb-4"></div>
-                        <p className="text-xl font-bold text-white animate-pulse">{isLoading}</p>
+                    <div className="project-hub__loading" role="status" aria-live="polite">
+                        <span className="pk-spinner" />
+                        <span>{typeof isLoading === 'string' ? isLoading : 'Working…'}</span>
                     </div>
                 )}
 
                 <div className="h-full overflow-y-auto project-hub__scroll custom-scrollbar">
                     <div className="project-hub__inner">
                         {error && (
-                            <div className="mb-6 bg-red-500/10 border border-red-500/50 text-red-200 p-4 rounded-lg flex justify-between items-center">
-                                <p>{error}</p>
-                                <button onClick={() => setError(null)} className="text-white hover:text-red-100">&times;</button>
+                            <div className="pk-alert pk-alert--danger mb-4 flex justify-between items-start gap-3" role="alert">
+                                <span>{error}</span>
+                                <button type="button" onClick={() => setError(null)} className="edit-icon-btn" aria-label="Dismiss">&times;</button>
                             </div>
                         )}
 
@@ -12741,10 +12741,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     }}
                                 >
                                     {PRODUCTION_FORMATS.map((format) => (
-                                        <option key={format.id} value={format.id}>{format.label} · {format.tagline}</option>
+                                        <option key={format.id} value={format.id}>{format.label}</option>
                                     ))}
                                 </select>
-                                <span className="project-hub__format-hint">{getProductionFormat(storyBible.productionFormat).description}</span>
+                                <span className="project-hub__format-hint">{getProductionFormat(storyBible.productionFormat).tagline} — {getProductionFormat(storyBible.productionFormat).description}</span>
                             </label>
 
                             <ol className="project-hub__phases" role="list">
@@ -12816,12 +12816,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             </details>
 
                             {getProductionFormat(storyBible.productionFormat).tips.length > 0 && (
-                                <div className="project-hub__tips">
-                                    <div className="project-hub-kicker">Tips for {getProductionFormat(storyBible.productionFormat).label}</div>
+                                <details className="project-hub__tips">
+                                    <summary>Tips for {getProductionFormat(storyBible.productionFormat).label}</summary>
                                     <ul>
                                         {getProductionFormat(storyBible.productionFormat).tips.map((tip) => <li key={tip}>{tip}</li>)}
                                     </ul>
-                                </div>
+                                </details>
                             )}
 
                             {canUseSceneWall && sceneWallEnabled && (
