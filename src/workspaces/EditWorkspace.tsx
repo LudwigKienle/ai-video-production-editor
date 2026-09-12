@@ -33,9 +33,9 @@ import { ChevronLeftIcon, ChevronRightIcon, BrushIcon, MaximizeIcon, KeyboardIco
 import EditTransportBar from '../components/EditTransportBar';
 import { formatTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
 import AutoCutPanel from '../components/AutoCutPanel';
+import LookbookPanel from '../components/LookbookPanel';
+import MusicAssistantPanel from '../components/MusicAssistantPanel';
 import { VideoSegment } from '../services/autoCutService';
-import { generateMusicPromptForTimeline } from '../services/geminiService';
-import { generateSpeechWithElevenLabs } from '../services/elevenLabsService';
 import { useLibraryAssets, type LibraryAsset } from '../hooks/useLibraryAssets';
 
 interface EditWorkspaceProps {
@@ -145,101 +145,6 @@ interface EditWorkspaceProps {
 
 /* ─── Sub-panels ─── */
 
-const LookbookPanel: React.FC<any> = ({ references, onGenerateVideoFromRef, onEditImageRef }) => (
-    <div className="edit-subpanel">
-        <h3 className="edit-panel-title">Lookbook</h3>
-        <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-2">
-            {references.length === 0 && <p className="edit-empty-note">No references yet. Run the production pipeline in the Project workspace to generate characters and environments.</p>}
-            {references.map((ref: ReferenceItem) => (
-                <div key={ref.id} className="bg-gray-900/50 p-3 rounded-lg border border-gray-700">
-                    <p className="font-semibold capitalize text-indigo-300">{ref.type}: {ref.name}</p>
-                    {ref.isGenerating && <div className="text-center text-sm text-yellow-400 mt-2">Generating...</div>}
-                    {ref.imageUrl && (
-                        <div className="mt-2 flex items-center gap-2">
-                            <img src={ref.imageUrl} className="w-16 h-16 object-cover rounded" alt={`Reference for ${ref.name}`} />
-                            <div className="flex flex-col gap-1">
-                                <button onClick={() => onEditImageRef(ref)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded disabled:opacity-50" disabled={ref.isGenerating}>Edit</button>
-                                <button onClick={() => onGenerateVideoFromRef(ref)} className="text-xs bg-green-700 hover:bg-green-600 px-2 py-1 rounded disabled:opacity-50" disabled={ref.isGenerating}>To Video</button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            ))}
-        </div>
-    </div>
-);
-
-const MusicAssistantPanel: React.FC<{
-    timelineClips: TimelineClip[];
-    mediaItems: MediaItem[];
-    onAddGeneratedMedia: (item: MediaItem) => void;
-    apiKeyReady: boolean;
-}> = ({ timelineClips, mediaItems, onAddGeneratedMedia, apiKeyReady }) => {
-    const [prompt, setPrompt] = useState('');
-    const [mood, setMood] = useState('');
-    const [duration, setDuration] = useState<number | null>(null);
-    const [bpm, setBpm] = useState<number | null>(null);
-    const [instruments, setInstruments] = useState<string[]>([]);
-    const [mixNotes, setMixNotes] = useState('');
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [error, setError] = useState('');
-    const [voiceId, setVoiceId] = useState('JBFqnCBsd6RMkjVDRZzb');
-    const [modelId, setModelId] = useState('eleven_multilingual_v2');
-    const [outputFormat, setOutputFormat] = useState('mp3_44100_128');
-
-    const handleAnalyze = async () => {
-        if (!apiKeyReady) return setError('Add a Google Gemini API key in Settings.');
-        if (timelineClips.length === 0) return setError('Add clips to the timeline first.');
-        setError('');
-        setIsAnalyzing(true);
-        try {
-            const result = await generateMusicPromptForTimeline(timelineClips, mediaItems);
-            setPrompt(result.prompt); setMood(result.mood); setDuration(result.duration);
-            setBpm(typeof result.bpm === 'number' ? result.bpm : null);
-            setInstruments(result.instruments || []); setMixNotes(result.mixNotes || '');
-        } catch (e: any) { setError(e instanceof Error ? e.message : String(e)); } finally { setIsAnalyzing(false); }
-    };
-
-    const handleGenerateAudio = async () => {
-        if (!prompt.trim()) return setError('Generate or enter a prompt first.');
-        setError(''); setIsGenerating(true);
-        try { const item = await generateSpeechWithElevenLabs(prompt, { voiceId, modelId, outputFormat }); onAddGeneratedMedia(item); }
-        catch (e: any) { setError(e instanceof Error ? e.message : String(e)); } finally { setIsGenerating(false); }
-    };
-
-    return (
-        <div className="edit-subpanel overflow-y-auto">
-            <h3 className="edit-panel-title">Music Assistant</h3>
-            <div className="space-y-3 text-xs text-gray-300">
-                <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg">
-                    {isAnalyzing ? 'Analyzing Timeline...' : 'Analyze Edit'}
-                </button>
-                <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className="w-full bg-gray-900/70 border border-gray-700 rounded-lg p-2 text-xs" rows={5} placeholder="Music prompt will appear here..." />
-                <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-400">
-                    <div>Mood: <span className="text-gray-200">{mood || '-'}</span></div>
-                    <div>Duration: <span className="text-gray-200">{duration ? `${duration.toFixed(1)}s` : '-'}</span></div>
-                    <div>BPM: <span className="text-gray-200">{bpm ?? '-'}</span></div>
-                    <div>Instruments: <span className="text-gray-200">{instruments.length ? instruments.join(', ') : '-'}</span></div>
-                </div>
-                {mixNotes && <p className="text-[10px] text-gray-400">Mix Notes: {mixNotes}</p>}
-                <div className="space-y-2 pt-2 border-t border-gray-700">
-                    <label className="text-[10px] text-gray-500 uppercase">ElevenLabs Voice ID</label>
-                    <input value={voiceId} onChange={(e) => setVoiceId(e.target.value)} className="w-full bg-gray-900/70 border border-gray-700 rounded-lg p-2 text-xs" />
-                    <label className="text-[10px] text-gray-500 uppercase">ElevenLabs Model</label>
-                    <input value={modelId} onChange={(e) => setModelId(e.target.value)} className="w-full bg-gray-900/70 border border-gray-700 rounded-lg p-2 text-xs" />
-                    <label className="text-[10px] text-gray-500 uppercase">Output Format</label>
-                    <input value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)} className="w-full bg-gray-900/70 border border-gray-700 rounded-lg p-2 text-xs" />
-                    <button onClick={handleGenerateAudio} disabled={isGenerating} className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg">
-                        {isGenerating ? 'Generating Audio...' : 'Generate Audio (ElevenLabs)'}
-                    </button>
-                </div>
-                {error && <p className="text-xs text-red-400">{error}</p>}
-            </div>
-        </div>
-    );
-};
-
 type LibraryTabId = 'media' | 'lookbook' | 'titles' | 'effects' | 'transitions' | 'music' | 'autocut' | 'agent';
 const LIBRARY_TAB_META: Array<{ id: LibraryTabId; label: string; description: string; icon: React.FC<{ className?: string }> }> = [
     { id: 'media', label: 'Media', description: 'Source files and generated assets', icon: FilmIcon },
@@ -267,7 +172,7 @@ const LibraryPanel: React.FC<any> = (props) => {
     const renderTabContent = () => {
         switch (activeTab) {
             case 'lookbook':
-                return <LookbookPanel {...props} onGenerateVideoFromRef={props.onGenerateVideoFromReference} onEditImageRef={props.onEditReferenceImage} />;
+                return <LookbookPanel references={props.references || []} onGenerateVideoFromRef={props.onGenerateVideoFromReference} onEditImageRef={props.onEditReferenceImage} />;
             case 'media':
                 return (
                     <MediaBin
@@ -327,9 +232,7 @@ const LibraryPanel: React.FC<any> = (props) => {
                 return <MusicAssistantPanel timelineClips={props.timelineClips} mediaItems={props.mediaItems} onAddGeneratedMedia={props.onAddGeneratedMedia} apiKeyReady={props.apiKeyReady} />;
             case 'autocut':
                 return (
-                    <div className="edit-subpanel overflow-y-auto">
-                        <h3 className="edit-panel-title">Auto Cut</h3>
-                        <AutoCutPanel
+                    <AutoCutPanel
                             timelineClips={props.timelineClips}
                             timelineTracks={props.timelineTracks}
                             mediaItems={props.mediaItems}
@@ -347,7 +250,6 @@ const LibraryPanel: React.FC<any> = (props) => {
                                 }
                             }}
                         />
-                    </div>
                 );
             case 'agent':
                 return (

@@ -17,6 +17,7 @@ import { trackTask } from '../services/taskCenter';
 import { TimelineClip, MediaItem, TimelineTrack } from '../types';
 import { getRegisteredMediaFile } from '../services/mediaSourceService';
 import { parseScriptDocument } from '../services/documentParsingService';
+import { ScissorsIcon } from './icons';
 
 const AUTO_CUT_MODEL_PRO = 'gemini-3.1-pro-preview';
 const AUTO_CUT_MODEL_FLASH = 'gemini-3.1-flash-preview';
@@ -105,6 +106,7 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
     const [selectedClipForAnalysis, setSelectedClipForAnalysis] = useState<string | null>(null);
     const [customModelId, setCustomModelId] = useState<string>('');
     const [analysisScope, setAnalysisScope] = useState<'clip' | 'timeline' | 'pool' | null>(null);
+    const [scope, setScope] = useState<'clip' | 'timeline' | 'pool'>(selectedClipId ? 'clip' : 'pool');
     const [timelineGroups, setTimelineGroups] = useState<TimelineSegmentGroup[]>([]);
     const [timelineSelected, setTimelineSelected] = useState<Set<string>>(new Set());
     const [timelineScore, setTimelineScore] = useState<number>(0);
@@ -907,837 +909,354 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
         return 'bg-red-500/20';
     };
 
-    return (
-        <div className="flex flex-col h-full overflow-hidden">
-            {/* Clip Selection */}
-            {(status === 'idle' || status === 'error') && (
-                <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Select Video Clip to Analyze
-                    </label>
-                    {videoClips.length === 0 ? (
-                        <p className="text-gray-500 text-sm">
-                            {mediaPoolVideos.length > 0
-                                ? 'No timeline clips yet. You can still analyze the media pool below.'
-                                : 'Add video clips to the timeline or media pool first'}
-                        </p>
-                    ) : (
-                        <select
-                            value={selectedClipForAnalysis || selectedClipId || ''}
-                            onChange={(e) => setSelectedClipForAnalysis(e.target.value || null)}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white text-sm"
-                        >
-                            <option value="">-- Select a clip --</option>
-                            {videoClips.map(clip => {
-                                const media = mediaItems.find(m => m.id === clip.mediaId);
-                                return (
-                                    <option key={clip.id} value={clip.id}>
-                                        {media?.name || 'Unknown'} ({formatTime(clip.start)} - {formatTime(clip.end)})
-                                    </option>
-                                );
-                            })}
-                        </select>
-                    )}
-                </div>
-            )}
+    const scoreClass = (score: number) => (score >= 85 ? 'pk-score--good' : score >= 70 ? 'pk-score--mid' : 'pk-score--low');
+    const isBusy = status === 'analyzing' || status === 'verifying';
+    const effectiveScope = scope === 'clip' && !selectedClip ? (videoClips.length > 0 ? 'clip' : 'pool') : scope;
+    const runAnalysis = () => {
+        if (effectiveScope === 'clip') return handleAnalyze();
+        if (effectiveScope === 'timeline') return handleAnalyzeTimeline();
+        return handleAnalyzeMediaPool();
+    };
+    const analyzeLabel = effectiveScope === 'clip' ? 'Analyze clip' : effectiveScope === 'timeline' ? 'Analyze timeline' : 'Analyze media pool';
+    const analyzeDisabled = effectiveScope === 'clip' ? !selectedClip : effectiveScope === 'timeline' ? videoClips.length === 0 : mediaPoolCandidates.length === 0;
+    const resetResults = () => { setStatus('idle'); setError(null); };
 
-            {/* Config Options */}
-            {status === 'idle' && (videoClips.length > 0 || mediaPoolVideos.length > 0) && (
-                <div className="mb-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                    <h4 className="text-xs font-medium text-gray-400 uppercase mb-2">Analysis Criteria</h4>
-                    <div className="flex flex-wrap gap-3">
-                        <label className="flex items-center gap-2 text-xs text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={config.criteria.technicalQuality}
-                                onChange={(e) => setConfig(prev => ({
-                                    ...prev,
-                                    criteria: { ...prev.criteria, technicalQuality: e.target.checked }
-                                }))}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                            />
-                            Technical
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={config.criteria.contentRelevance}
-                                onChange={(e) => setConfig(prev => ({
-                                    ...prev,
-                                    criteria: { ...prev.criteria, contentRelevance: e.target.checked }
-                                }))}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                            />
-                            Content
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={config.criteria.emotionalImpact}
-                                onChange={(e) => setConfig(prev => ({
-                                    ...prev,
-                                    criteria: { ...prev.criteria, emotionalImpact: e.target.checked }
-                                }))}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                            />
-                            Emotion
-                        </label>
-                    </div>
-                    <div className="mt-3 grid gap-2">
-                        <label className="text-xs text-gray-400">Model</label>
-                        <select
-                            value={modelChoice}
-                            onChange={(e) => {
-                                const value = e.target.value;
-                                if (value === 'pro') {
-                                    setConfig(prev => ({ ...prev, modelId: AUTO_CUT_MODEL_PRO }));
-                                } else if (value === 'flash') {
-                                    setConfig(prev => ({ ...prev, modelId: AUTO_CUT_MODEL_FLASH }));
-                                } else {
-                                    const fallback = customModelId || config.modelId || AUTO_CUT_MODEL_PRO;
-                                    setCustomModelId(fallback);
-                                    setConfig(prev => ({ ...prev, modelId: fallback }));
-                                }
-                            }}
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white text-sm"
-                        >
-                            <option value="pro">Quality (gemini-3.1-pro-preview)</option>
-                            <option value="flash">Fast (gemini-3.1-flash-preview)</option>
-                            <option value="custom">Custom model ID</option>
-                        </select>
-                        {modelChoice === 'custom' && (
-                            <input
-                                type="text"
-                                value={customModelId || config.modelId}
-                                onChange={(e) => {
-                                    const value = e.target.value.trim();
-                                    setCustomModelId(value);
-                                    setConfig(prev => ({ ...prev, modelId: value || prev.modelId }));
-                                }}
-                                placeholder="e.g. gemini-3.1-pro-preview"
-                                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white text-sm"
-                            />
-                        )}
-                    </div>
-                    <div className="mt-3 p-2 rounded border border-gray-700 bg-gray-900/40 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                            <label className="text-xs text-gray-400">Auto-edit script</label>
-                            <span className="text-[10px] text-gray-500">{activeScriptSummary}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
-                            <label className="flex items-center gap-2 rounded border border-gray-700 px-2 py-1.5">
-                                <input
-                                    type="radio"
-                                    name="autocut-script-source"
-                                    checked={activeScriptMode === 'project'}
-                                    disabled={!hasProjectScript}
-                                    onChange={() => setScriptSourceMode('project')}
-                                    className="w-3 h-3 border-gray-600 bg-gray-700 text-indigo-500 disabled:opacity-50"
-                                />
-                                Project script
-                            </label>
-                            <label className="flex items-center gap-2 rounded border border-gray-700 px-2 py-1.5">
-                                <input
-                                    type="radio"
-                                    name="autocut-script-source"
-                                    checked={activeScriptMode === 'custom'}
-                                    onChange={() => setScriptSourceMode('custom')}
-                                    className="w-3 h-3 border-gray-600 bg-gray-700 text-indigo-500"
-                                />
-                                Custom script
-                            </label>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <label className="inline-flex cursor-pointer items-center rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:border-gray-600 hover:text-white">
-                                <input
-                                    type="file"
-                                    accept=".pdf,.docx,.txt,.md,.json,.xlsx,.xls,.csv,text/*"
-                                    className="hidden"
-                                    onChange={handleCustomScriptUpload}
-                                />
-                                {isParsingScript ? 'Importing script...' : 'Upload script'}
-                            </label>
-                            <button
-                                onClick={() => {
-                                    setCustomScriptText('');
-                                    setCustomScriptName('');
-                                    setScriptImportError(null);
-                                }}
-                                disabled={!customScriptText && !customScriptName}
-                                className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-600 hover:text-white disabled:opacity-40"
-                            >
-                                Clear custom
+    const renderSegmentRow = (
+        segment: VideoSegment,
+        index: number,
+        selected: boolean,
+        onToggle: () => void,
+        extra?: React.ReactNode,
+    ) => (
+        <label key={segment.id} className={`pk-row pk-row--clickable ${selected ? 'pk-row--selected' : ''}`}>
+            <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Segment ${index + 1}`} />
+            <div className="pk-row__body">
+                <div className="pk-row__title"><span className="pk-mono">#{index + 1}</span> <span className="pk-mono" style={{ fontWeight: 500 }}>{formatTime(segment.startTime)} → {formatTime(segment.endTime)}</span></div>
+                <div className="pk-row__meta pk-row__meta--clamp">{segment.reason}</div>
+                {segment.scriptMatch && (
+                    <div className="pk-row__meta" style={{ color: 'var(--app-accent-strong)' }}>Script · {segment.scriptMatch.beatLabel} · {segment.scriptMatch.similarity}/100</div>
+                )}
+            </div>
+            <div className="pk-row__aside">
+                <span className={`pk-score ${scoreClass(segment.score)}`}>{segment.score}</span>
+                {extra}
+            </div>
+        </label>
+    );
+
+    const resultCount = analysisScope === 'clip'
+        ? segments.length
+        : analysisScope === 'timeline'
+            ? timelineGroups.reduce((sum, group) => sum + group.segments.length, 0)
+            : mediaPoolGroups.reduce((sum, group) => sum + group.segments.length, 0);
+    const resultScore = analysisScope === 'clip' ? finalScore : analysisScope === 'timeline' ? timelineScore : mediaPoolScore;
+    const selectedCount = analysisScope === 'clip' ? selectedSegments.size : analysisScope === 'timeline' ? timelineSelected.size : mediaPoolSelected.size;
+    const selectAll = analysisScope === 'clip' ? handleSelectAll : analysisScope === 'timeline' ? handleSelectAllTimeline : handleSelectAllMediaPool;
+    const selectNone = analysisScope === 'clip' ? handleDeselectAll : analysisScope === 'timeline' ? handleDeselectAllTimeline : handleDeselectAllMediaPool;
+    const applyResults = analysisScope === 'clip' ? handleApplySegments : analysisScope === 'timeline' ? handleApplyTimelineCut : handleApplyMediaPoolCut;
+    const applyLabel = analysisScope === 'clip'
+        ? `Split into ${selectedCount} clip${selectedCount === 1 ? '' : 's'}`
+        : analysisScope === 'timeline'
+            ? `Append ${selectedCount} segment${selectedCount === 1 ? '' : 's'}`
+            : `Build rough cut · ${selectedCount}`;
+    const showResults = status === 'complete' && analysisScope !== null;
+
+    return (
+        <div className="fx-browser">
+            <div className="fx-browser__header">
+                <h3 className="fx-browser__title">Auto Cut</h3>
+                {showResults ? (
+                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={resetResults}>‹ New analysis</button>
+                ) : (
+                    <span className="pk-chip">{videoClips.length} clip{videoClips.length === 1 ? '' : 's'} · {mediaPoolVideos.length} in pool</span>
+                )}
+            </div>
+
+            <div className="fx-browser__scroll">
+                {!showResults && (
+                    <div className="pk-stack">
+                        <div className="pk-card">
+                            <div className="pk-card__head"><span className="pk-card__title">What to analyze</span></div>
+                            <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                                <button type="button" aria-pressed={effectiveScope === 'clip'} onClick={() => setScope('clip')} disabled={videoClips.length === 0}>Clip</button>
+                                <button type="button" aria-pressed={effectiveScope === 'timeline'} onClick={() => setScope('timeline')} disabled={videoClips.length === 0}>Timeline</button>
+                                <button type="button" aria-pressed={effectiveScope === 'pool'} onClick={() => setScope('pool')} disabled={mediaPoolVideos.length === 0}>Media pool</button>
+                            </div>
+                            {effectiveScope === 'clip' && (
+                                <select value={selectedClipForAnalysis || selectedClipId || ''} onChange={(e) => setSelectedClipForAnalysis(e.target.value || null)} aria-label="Clip to analyze">
+                                    <option value="">Choose a clip…</option>
+                                    {videoClips.map((clip) => {
+                                        const media = mediaItems.find((m) => m.id === clip.mediaId);
+                                        return <option key={clip.id} value={clip.id}>{media?.name || 'Clip'} · {formatTime(clip.start)}–{formatTime(clip.end)}</option>;
+                                    })}
+                                </select>
+                            )}
+                            {effectiveScope === 'timeline' && <p className="pk-hint">Finds the best moments in every video clip on the timeline and appends them as new clips.</p>}
+                            {effectiveScope === 'pool' && (
+                                <>
+                                    <label className="pk-check"><input type="checkbox" checked={unusedOnlyInPool} onChange={(e) => setUnusedOnlyInPool(e.target.checked)} />Only footage not yet in the cut <span className="pk-chip">{mediaPoolCandidates.length}/{mediaPoolVideos.length}</span></label>
+                                    <p className="pk-hint">Builds a rough cut from the strongest takes in the media pool, in script order when a script is loaded.</p>
+                                </>
+                            )}
+                            {videoClips.length === 0 && mediaPoolVideos.length === 0 && <p className="pk-hint">Import video on the Media page first.</p>}
+                            <button type="button" className="edit-text-btn edit-text-btn--primary w-full justify-center" onClick={runAnalysis} disabled={isBusy || analyzeDisabled}>
+                                {isBusy ? 'Analyzing…' : analyzeLabel}
                             </button>
                         </div>
-                        {scriptImportError && (
-                            <p className="text-[10px] text-red-400">{scriptImportError}</p>
+
+                        {isBusy && (
+                            <div className="pk-progress"><span className="pk-spinner" />{progress || 'Working…'}</div>
                         )}
-                        {activeScriptMode === 'custom' && (
-                            <textarea
-                                value={customScriptText}
-                                onChange={(e) => {
-                                    setCustomScriptText(e.target.value);
-                                    setScriptImportError(null);
-                                }}
-                                placeholder="Paste a shooting script, interview transcript, beat sheet, or edit outline just for this rough cut."
-                                rows={7}
-                                className="w-full resize-y rounded-lg border border-gray-700 bg-gray-950/70 p-2 text-xs text-white placeholder:text-gray-500"
-                            />
-                        )}
-                        <p className="text-[10px] text-gray-500">
-                            This script only guides Auto Cut and rough-cut scene matching. It does not overwrite the Project workspace script.
-                        </p>
-                        {scriptBeats.length > 0 && (
-                            <p className="text-[10px] text-green-400">
-                                Scene detect ready: {scriptBeats.length} derived scene beats from the active script.
-                            </p>
-                        )}
-                        {!hasProjectScript && (
-                            <p className="text-[10px] text-yellow-400">
-                                No Project workspace script is loaded. Use the custom script field for standalone rough cuts.
-                            </p>
-                        )}
-                    </div>
-                    <div className="mt-3 p-2 rounded border border-gray-700 bg-gray-900/40 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                            <label className="text-xs text-gray-400">Script-aware ranking</label>
-                            <input
-                                type="checkbox"
-                                checked={config.useScriptMatching}
-                                disabled={!hasScriptGuidance}
-                                onChange={(e) => setConfig(prev => ({ ...prev, useScriptMatching: e.target.checked }))}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500 disabled:opacity-50"
-                            />
-                        </div>
-                        <p className="text-[10px] text-gray-500">
-                            {hasScriptGuidance
-                                ? 'Segments are semantically ranked against your script/context using Gemini embeddings.'
-                                : 'Load a project script, paste a custom script, or provide story context to enable embedding-based footage matching.'}
-                        </p>
-                        <label className="block text-xs text-gray-400">
-                            Script weight: {config.scriptWeight}%
-                        </label>
-                        <input
-                            type="range"
-                            min="0"
-                            max="80"
-                            step="5"
-                            value={config.scriptWeight}
-                            disabled={!hasScriptGuidance || !config.useScriptMatching}
-                            onChange={(e) => setConfig(prev => ({ ...prev, scriptWeight: parseInt(e.target.value, 10) || 0 }))}
-                            className="w-full"
-                        />
-                        <label className="block text-xs text-gray-400">Embedding model</label>
-                        <input
-                            type="text"
-                            value={config.embeddingModelId}
-                            disabled={!hasScriptGuidance || !config.useScriptMatching}
-                            onChange={(e) => setConfig(prev => ({ ...prev, embeddingModelId: e.target.value.trim() || prev.embeddingModelId }))}
-                            placeholder="gemini-embedding-001"
-                            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white text-sm disabled:opacity-50"
-                        />
-                    </div>
-                    <div className="mt-3 p-2 rounded border border-gray-700 bg-gray-900/40 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                            <label className="text-xs text-gray-400">Media pool scope</label>
-                            <span className="text-[10px] text-gray-500">
-                                {mediaPoolCandidates.length}/{mediaPoolVideos.length} videos
-                            </span>
-                        </div>
-                        <label className="flex items-center gap-2 text-xs text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={unusedOnlyInPool}
-                                onChange={(e) => setUnusedOnlyInPool(e.target.checked)}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                            />
-                            Only unused footage
-                        </label>
-                        <p className="text-[10px] text-gray-500">
-                            Analyze project footage directly from the media pool and build a rough cut from the best script matches.
-                        </p>
-                    </div>
-                    <div className="mt-3">
-                        <label className="text-xs text-gray-400">
-                            Threshold: {config.qualityThreshold}%
-                        </label>
-                        <input
-                            type="range"
-                            min="50"
-                            max="100"
-                            value={config.qualityThreshold}
-                            onChange={(e) => setConfig(prev => ({
-                                ...prev,
-                                qualityThreshold: parseInt(e.target.value)
-                            }))}
-                            className="w-full mt-1"
-                        />
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-300">
-                        <label className="flex items-center gap-2">
-                            Min seg (s)
-                            <input
-                                type="number"
-                                min="0.2"
-                                step="0.1"
-                                value={config.minSegmentDuration}
-                                onChange={(e) => setConfig(prev => ({ ...prev, minSegmentDuration: parseFloat(e.target.value) || 0.8 }))}
-                                className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-                            />
-                        </label>
-                        <label className="flex items-center gap-2">
-                            Max seg (s)
-                            <input
-                                type="number"
-                                min="0.5"
-                                step="0.5"
-                                value={config.maxSegmentDuration}
-                                onChange={(e) => setConfig(prev => ({ ...prev, maxSegmentDuration: parseFloat(e.target.value) || 6 }))}
-                                className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-                            />
-                        </label>
-                        <label className="flex items-center gap-2">
-                            Top N
-                            <input
-                                type="number"
-                                min="1"
-                                max="12"
-                                step="1"
-                                value={config.maxSegmentsPerClip}
-                                onChange={(e) => setConfig(prev => ({ ...prev, maxSegmentsPerClip: parseInt(e.target.value, 10) || 6 }))}
-                                className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-                            />
-                        </label>
-                        <label className="flex items-center gap-2">
-                            Verify
-                            <input
-                                type="checkbox"
-                                checked={config.verifyTransitions}
-                                onChange={(e) => setConfig(prev => ({ ...prev, verifyTransitions: e.target.checked }))}
-                                className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                            />
-                        </label>
-                    </div>
-                </div>
-            )}
-
-            {/* Progress */}
-            {(status === 'analyzing' || status === 'verifying') && (
-                <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
-                    <div className="flex items-center gap-3">
-                        <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full" />
-                        <span className="text-sm text-indigo-300">{progress}</span>
-                    </div>
-                </div>
-            )}
-
-            {/* Error */}
-            {error && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                    <p className="text-sm text-red-400">{error}</p>
-                </div>
-            )}
-
-            {/* Results (Single Clip) */}
-            {status === 'complete' && analysisScope === 'clip' && segments.length > 0 && (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                    {/* Summary */}
-                    <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700 flex items-center justify-between">
-                        <div className="text-xs">
-                            <span className="text-gray-400">Found </span>
-                            <span className="text-white font-bold">{segments.length}</span>
-                            <span className="text-gray-400"> segments</span>
-                        </div>
-                        <div className={`px-2 py-0.5 rounded-full text-xs ${getScoreBg(finalScore)}`}>
-                            <span className={`font-bold ${getScoreColor(finalScore)}`}>
-                                {finalScore}/100
-                            </span>
-                        </div>
-                    </div>
-
-                    {/* Selection Controls */}
-                    <div className="flex gap-2 mb-2 text-xs">
-                        <button
-                            onClick={handleSelectAll}
-                            className="text-indigo-400 hover:text-indigo-300"
-                        >
-                            All
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <button
-                            onClick={handleDeselectAll}
-                            className="text-indigo-400 hover:text-indigo-300"
-                        >
-                            None
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <span className="text-gray-400">
-                            {selectedSegments.size} selected
-                        </span>
-                    </div>
-
-                    {/* Segments List */}
-                    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                        {segments.map((segment, index) => (
-                            <div
-                                key={segment.id}
-                                className={`p-2 rounded-lg border cursor-pointer transition-all ${selectedSegments.has(segment.id)
-                                    ? 'bg-indigo-500/20 border-indigo-500/50'
-                                    : 'bg-gray-800/50 border-gray-700 hover:border-gray-600'
-                                    }`}
-                                onClick={() => handleToggleSegment(segment.id)}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedSegments.has(segment.id)}
-                                            onChange={() => handleToggleSegment(segment.id)}
-                                            className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                        <div className="text-xs">
-                                            <span className="text-white font-medium">#{index + 1}</span>
-                                            <span className="text-gray-400 ml-2">
-                                                {formatTime(segment.startTime)} → {formatTime(segment.endTime)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleTrimToSingleSegment(segment);
-                                            }}
-                                            className="text-[10px] px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
-                                                title="Trim clip to this segment only"
-                                            >
-                                                Apply
-                                        </button>
-                                        <div className={`px-1.5 py-0.5 rounded text-xs ${getScoreBg(segment.score)}`}>
-                                            <span className={getScoreColor(segment.score)}>{segment.score}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-1">{segment.reason}</p>
-                                {segment.scriptMatch && (
-                                    <>
-                                        <p className="text-[10px] text-indigo-300 mt-1 ml-5">
-                                            Script match: {segment.scriptMatch.beatLabel} · {segment.scriptMatch.similarity}/100
-                                        </p>
-                                        <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-2">{segment.scriptMatch.excerpt}</p>
-                                    </>
-                                )}
+                        {error && (
+                            <div className="pk-alert pk-alert--danger">
+                                {error}
+                                <div style={{ marginTop: '0.4rem' }}><button type="button" className="edit-text-btn edit-text-btn--outline" onClick={runAnalysis}>Try again</button></div>
                             </div>
-                        ))}
-                    </div>
+                        )}
 
-                    {/* Apply Button */}
-                    <div className="mt-3 pt-3 border-t border-gray-700">
-                        <button
-                            onClick={handleApplySegments}
-                            disabled={selectedSegments.size === 0}
-                            className="w-full py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                            Split into {selectedSegments.size} Clips
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Results (Timeline) */}
-            {status === 'complete' && analysisScope === 'timeline' && timelineGroups.length > 0 && (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                    <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700 flex items-center justify-between">
-                        <div className="text-xs">
-                            <span className="text-gray-400">Found </span>
-                            <span className="text-white font-bold">
-                                {timelineGroups.reduce((sum, group) => sum + group.segments.length, 0)}
-                            </span>
-                            <span className="text-gray-400"> segments across </span>
-                            <span className="text-white font-bold">{timelineGroups.length}</span>
-                            <span className="text-gray-400"> clips</span>
-                        </div>
-                        <div className={`px-2 py-0.5 rounded-full text-xs ${getScoreBg(timelineScore)}`}>
-                            <span className={`font-bold ${getScoreColor(timelineScore)}`}>
-                                {timelineScore}/100
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="flex gap-2 mb-2 text-xs">
-                        <button onClick={handleSelectAllTimeline} className="text-indigo-400 hover:text-indigo-300">
-                            All
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <button onClick={handleDeselectAllTimeline} className="text-indigo-400 hover:text-indigo-300">
-                            None
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <span className="text-gray-400">
-                            {timelineSelected.size} selected
-                        </span>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                        {timelineGroups.map(group => (
-                            <div key={group.clipId} className="bg-gray-800/40 border border-gray-700 rounded-lg p-2">
-                                <div className="text-xs font-semibold text-gray-200">{group.clipLabel}</div>
-                                <div className="mt-2 space-y-2">
-                                    {group.segments.map((segment, index) => {
-                                        const key = buildTimelineKey(group.clipId, segment.id);
-                                        const isSelected = timelineSelected.has(key);
-                                        return (
-                                            <div
-                                                key={key}
-                                                className={`p-2 rounded-lg border cursor-pointer transition-all ${isSelected
-                                                    ? 'bg-indigo-500/20 border-indigo-500/50'
-                                                    : 'bg-gray-900/40 border-gray-700 hover:border-gray-600'
-                                                    }`}
-                                                onClick={() => handleToggleTimelineSegment(key)}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isSelected}
-                                                            onChange={() => handleToggleTimelineSegment(key)}
-                                                            className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        />
-                                                        <div className="text-xs">
-                                                            <span className="text-white font-medium">#{index + 1}</span>
-                                                            <span className="text-gray-400 ml-2">
-                                                                {formatTime(segment.startTime)} → {formatTime(segment.endTime)}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div className={`px-1.5 py-0.5 rounded text-xs ${getScoreBg(segment.score)}`}>
-                                                        <span className={getScoreColor(segment.score)}>{segment.score}</span>
-                                                    </div>
-                                                </div>
-                                                <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-1">{segment.reason}</p>
-                                                {segment.scriptMatch && (
-                                                    <>
-                                                        <p className="text-[10px] text-indigo-300 mt-1 ml-5">
-                                                            Script match: {segment.scriptMatch.beatLabel} · {segment.scriptMatch.similarity}/100
-                                                        </p>
-                                                        <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-2">{segment.scriptMatch.excerpt}</p>
-                                                    </>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-                        <p className="text-[10px] text-gray-500">
-                            This will append the selected segments as new clips at the end of the active video track.
-                        </p>
-                        <button
-                            onClick={handleApplyTimelineCut}
-                            disabled={timelineSelected.size === 0}
-                            className="w-full py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                            Append {timelineSelected.size} Segments to Timeline
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {status === 'complete' && analysisScope === 'pool' && mediaPoolGroups.length > 0 && (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                    <div className="mb-3 p-2 bg-gray-800/50 rounded-lg border border-gray-700 flex items-center justify-between">
-                        <div className="text-xs">
-                            <span className="text-gray-400">Found </span>
-                            <span className="text-white font-bold">
-                                {mediaPoolGroups.reduce((sum, group) => sum + group.segments.length, 0)}
-                            </span>
-                            <span className="text-gray-400"> segments across </span>
-                            <span className="text-white font-bold">{mediaPoolGroups.length}</span>
-                            <span className="text-gray-400"> media files</span>
-                        </div>
-                        <div className={`px-2 py-0.5 rounded-full text-xs ${getScoreBg(mediaPoolScore)}`}>
-                            <span className={`font-bold ${getScoreColor(mediaPoolScore)}`}>
-                                {mediaPoolScore}/100
-                            </span>
-                        </div>
-                    </div>
-
-                    {sceneDailies.length > 0 && (
-                        <div className="mb-3 rounded-lg border border-gray-700 bg-gray-800/40 p-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <div>
-                                    <p className="text-xs font-semibold text-white">Scene Dailies</p>
-                                    <p className="text-[10px] text-gray-500">
-                                        Covered {coveredSceneCount}/{sceneDailies.length} script scenes with matched footage.
+                        {effectiveScope === 'clip' && selectedClip && !isBusy && (
+                            <details className="pk-details">
+                                <summary>Quick cut · offline<small>{localMode === 'silence' ? 'Silence' : localMode === 'scenes' ? 'Scenes' : 'Fillers'}</small></summary>
+                                <div className="pk-details__body">
+                                    <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                                        {([['silence', 'Silence'], ['scenes', 'Scenes'], ['filler', 'Fillers']] as Array<['silence' | 'scenes' | 'filler', string]>).map(([id, label]) => (
+                                            <button key={id} type="button" aria-pressed={localMode === id} onClick={() => { setLocalMode(id); setLocalResult(null); }}>{label}</button>
+                                        ))}
+                                    </div>
+                                    <p className="pk-hint">
+                                        {localMode === 'silence' && 'Keeps speech, drops dead air — adaptive loudness threshold, no API needed.'}
+                                        {localMode === 'scenes' && 'Finds hard cuts from frame differences, ignores camera moves — no API needed.'}
+                                        {localMode === 'filler' && 'Transcribes with word timings and removes ums, ähs and long pauses (needs a Gemini key).'}
                                     </p>
-                                </div>
-                                <button
-                                    onClick={handleSelectBestPerScene}
-                                    className="rounded border border-gray-700 px-2 py-1 text-[10px] text-gray-300 hover:border-gray-600 hover:text-white"
-                                >
-                                    Select best per scene
-                                </button>
-                            </div>
-                            <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-1">
-                                {sceneDailies.map((entry) => (
-                                    <div key={entry.beatId} className="rounded border border-gray-700 bg-gray-900/40 p-2">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="min-w-0">
-                                                <p className="text-xs font-medium text-gray-100">{entry.beatLabel}</p>
-                                                <p className="mt-0.5 line-clamp-2 text-[10px] text-gray-500">{entry.excerpt}</p>
-                                            </div>
-                                            <div className="shrink-0 text-right text-[10px] text-gray-400">
-                                                <p>{entry.candidateCount} takes</p>
-                                                <p>{entry.selectedCount} selected</p>
-                                            </div>
+                                    {localMode === 'silence' && (
+                                        <div className="pk-inline">
+                                            <label className="pk-inline">Margin<input type="number" step={0.05} min={0} value={localSettings.margin} onChange={(e) => setLocalSettings((p) => ({ ...p, margin: Number(e.target.value) }))} />s</label>
+                                            <label className="pk-inline">Min cut<input type="number" step={0.05} min={0} value={localSettings.minCut} onChange={(e) => setLocalSettings((p) => ({ ...p, minCut: Number(e.target.value) }))} />s</label>
+                                            <label className="pk-inline">Min clip<input type="number" step={0.05} min={0} value={localSettings.minClip} onChange={(e) => setLocalSettings((p) => ({ ...p, minClip: Number(e.target.value) }))} />s</label>
+                                            <label className="pk-inline">Threshold<input type="number" step={1} min={2} max={30} value={localSettings.threshold} onChange={(e) => setLocalSettings((p) => ({ ...p, threshold: Number(e.target.value) }))} />dB</label>
                                         </div>
-                                        {entry.topCandidate ? (
-                                            <div className="mt-2 text-[10px] text-gray-300">
-                                                <p>
-                                                    Best: {entry.topCandidate.mediaName} · {formatTime(entry.topCandidate.startTime)} → {formatTime(entry.topCandidate.endTime)} · {entry.topCandidate.score}/100
-                                                </p>
-                                                <p className="mt-0.5 line-clamp-2 text-gray-500">
-                                                    {entry.topCandidate.summary || entry.topCandidate.reason}
-                                                </p>
-                                            </div>
-                                        ) : (
-                                            <p className="mt-2 text-[10px] text-yellow-400">
-                                                No matching footage found for this scene yet.
-                                            </p>
+                                    )}
+                                    {localMode === 'scenes' && (
+                                        <div className="pk-inline">
+                                            <label className="pk-inline">Sensitivity<input type="number" step={0.5} min={1.5} max={8} value={localSettings.sceneSensitivity} onChange={(e) => setLocalSettings((p) => ({ ...p, sceneSensitivity: Number(e.target.value) }))} />×</label>
+                                            <label className="pk-inline">Min scene<input type="number" step={0.5} min={0.2} value={localSettings.minScene} onChange={(e) => setLocalSettings((p) => ({ ...p, minScene: Number(e.target.value) }))} />s</label>
+                                        </div>
+                                    )}
+                                    {localMode === 'filler' && (
+                                        <label className="pk-inline">Cut pauses over<input type="number" step={0.1} min={0} value={localSettings.removePauses} onChange={(e) => setLocalSettings((p) => ({ ...p, removePauses: Number(e.target.value) }))} />s</label>
+                                    )}
+                                    <div className="pk-actions">
+                                        <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={runLocalDetection} disabled={Boolean(localBusy)}>{localBusy || 'Detect'}</button>
+                                        {localResult && (
+                                            <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={applyLocalResult} disabled={localResult.segments.length === 0}>
+                                                Apply {localResult.segments.length} segment{localResult.segments.length === 1 ? '' : 's'}
+                                            </button>
                                         )}
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+                                    {localResult && (
+                                        <div className="pk-alert pk-alert--info">
+                                            {localResult.notes.map((note, index) => <div key={index}>{note}</div>)}
+                                            {localResult.removedSeconds > 0 && <div>Removes {localResult.removedSeconds.toFixed(1)}s of {localResult.duration.toFixed(1)}s.</div>}
+                                        </div>
+                                    )}
+                                </div>
+                            </details>
+                        )}
 
-                    <div className="flex gap-2 mb-2 text-xs">
-                        <button onClick={handleSelectAllMediaPool} className="text-indigo-400 hover:text-indigo-300">
-                            All
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <button onClick={handleDeselectAllMediaPool} className="text-indigo-400 hover:text-indigo-300">
-                            None
-                        </button>
-                        <span className="text-gray-600">|</span>
-                        <span className="text-gray-400">
-                            {mediaPoolSelected.size} selected
-                        </span>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                        {mediaPoolGroups.map(group => (
-                            <div key={group.mediaId} className="bg-gray-800/40 border border-gray-700 rounded-lg p-2">
-                                <div className="text-xs font-semibold text-gray-200">{group.mediaName}</div>
-                                <div className="mt-2 space-y-2">
-                                    {group.segments.map((segment, index) => {
-                                        const key = buildMediaPoolKey(group.mediaId, segment.id);
-                                        const isSelected = mediaPoolSelected.has(key);
-                                        return (
-                                            <div
-                                                key={key}
-                                                className={`p-2 rounded-lg border cursor-pointer transition-all ${isSelected
-                                                    ? 'bg-indigo-500/20 border-indigo-500/50'
-                                                    : 'bg-gray-900/40 border-gray-700 hover:border-gray-600'
-                                                    }`}
-                                                onClick={() => handleToggleMediaPoolSegment(key)}
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isSelected}
-                                                            onChange={() => handleToggleMediaPoolSegment(key)}
-                                                            className="w-3 h-3 rounded border-gray-600 bg-gray-700 text-indigo-500"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        />
-                                                        <div className="text-xs">
-                                                            <span className="text-white font-medium">#{index + 1}</span>
-                                                            <span className="text-gray-400 ml-2">
-                                                                {formatTime(segment.startTime)} → {formatTime(segment.endTime)}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div className={`px-1.5 py-0.5 rounded text-xs ${getScoreBg(segment.score)}`}>
-                                                        <span className={getScoreColor(segment.score)}>{segment.score}</span>
-                                                    </div>
-                                                </div>
-                                                <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-1">{segment.reason}</p>
-                                                {segment.scriptMatch && (
-                                                    <>
-                                                        <p className="text-[10px] text-indigo-300 mt-1 ml-5">
-                                                            Script match: {segment.scriptMatch.beatLabel} · {segment.scriptMatch.similarity}/100
-                                                        </p>
-                                                        <p className="text-[10px] text-gray-500 mt-1 ml-5 line-clamp-2">{segment.scriptMatch.excerpt}</p>
-                                                    </>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
+                        <details className="pk-details">
+                            <summary>Analysis settings<small>{modelChoice === 'pro' ? 'Quality' : modelChoice === 'flash' ? 'Fast' : 'Custom'} · {config.qualityThreshold}%</small></summary>
+                            <div className="pk-details__body">
+                                <div className="pk-field">
+                                    <span>Judge by</span>
+                                    <div className="pk-actions">
+                                        <label className="pk-check"><input type="checkbox" checked={config.criteria.technicalQuality} onChange={(e) => setConfig((prev) => ({ ...prev, criteria: { ...prev.criteria, technicalQuality: e.target.checked } }))} />Technical</label>
+                                        <label className="pk-check"><input type="checkbox" checked={config.criteria.contentRelevance} onChange={(e) => setConfig((prev) => ({ ...prev, criteria: { ...prev.criteria, contentRelevance: e.target.checked } }))} />Content</label>
+                                        <label className="pk-check"><input type="checkbox" checked={config.criteria.emotionalImpact} onChange={(e) => setConfig((prev) => ({ ...prev, criteria: { ...prev.criteria, emotionalImpact: e.target.checked } }))} />Emotion</label>
+                                    </div>
+                                </div>
+                                <label className="pk-field">
+                                    <span>Model</span>
+                                    <select
+                                        value={modelChoice}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (value === 'pro') setConfig((prev) => ({ ...prev, modelId: AUTO_CUT_MODEL_PRO }));
+                                            else if (value === 'flash') setConfig((prev) => ({ ...prev, modelId: AUTO_CUT_MODEL_FLASH }));
+                                            else { const fallback = customModelId || config.modelId || AUTO_CUT_MODEL_PRO; setCustomModelId(fallback); setConfig((prev) => ({ ...prev, modelId: fallback })); }
+                                        }}
+                                    >
+                                        <option value="pro">Quality · Gemini 3.1 Pro</option>
+                                        <option value="flash">Fast · Gemini 3.1 Flash</option>
+                                        <option value="custom">Custom model ID</option>
+                                    </select>
+                                    {modelChoice === 'custom' && (
+                                        <input type="text" value={customModelId || config.modelId} onChange={(e) => { const value = e.target.value.trim(); setCustomModelId(value); setConfig((prev) => ({ ...prev, modelId: value || prev.modelId })); }} placeholder="e.g. gemini-3.1-pro-preview" />
+                                    )}
+                                </label>
+                                <label className="pk-field">
+                                    <span>Keep segments scoring at least {config.qualityThreshold}%</span>
+                                    <input type="range" min="50" max="100" value={config.qualityThreshold} onChange={(e) => setConfig((prev) => ({ ...prev, qualityThreshold: parseInt(e.target.value, 10) }))} />
+                                </label>
+                                <div className="pk-inline">
+                                    <label className="pk-inline">Min<input type="number" min="0.2" step="0.1" value={config.minSegmentDuration} onChange={(e) => setConfig((prev) => ({ ...prev, minSegmentDuration: parseFloat(e.target.value) || 0.8 }))} />s</label>
+                                    <label className="pk-inline">Max<input type="number" min="0.5" step="0.5" value={config.maxSegmentDuration} onChange={(e) => setConfig((prev) => ({ ...prev, maxSegmentDuration: parseFloat(e.target.value) || 6 }))} />s</label>
+                                    <label className="pk-inline">Top<input type="number" min="1" max="12" step="1" value={config.maxSegmentsPerClip} onChange={(e) => setConfig((prev) => ({ ...prev, maxSegmentsPerClip: parseInt(e.target.value, 10) || 6 }))} /></label>
+                                    <label className="pk-check"><input type="checkbox" checked={config.verifyTransitions} onChange={(e) => setConfig((prev) => ({ ...prev, verifyTransitions: e.target.checked }))} />Verify cuts</label>
                                 </div>
                             </div>
+                        </details>
+
+                        <details className="pk-details">
+                            <summary>Script guidance<small>{hasScriptGuidance ? (config.useScriptMatching ? `on · ${config.scriptWeight}%` : 'off') : 'no script'}</small></summary>
+                            <div className="pk-details__body">
+                                <p className="pk-hint">Rank footage against a script or story context. Only guides Auto Cut — the project script stays untouched.</p>
+                                <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                                    <button type="button" aria-pressed={activeScriptMode === 'project'} disabled={!hasProjectScript} onClick={() => setScriptSourceMode('project')}>Project script</button>
+                                    <button type="button" aria-pressed={activeScriptMode === 'custom'} onClick={() => setScriptSourceMode('custom')}>Custom script</button>
+                                </div>
+                                <p className="pk-hint">{activeScriptSummary}{scriptBeats.length > 0 ? ` · ${scriptBeats.length} scene beats` : ''}</p>
+                                {activeScriptMode === 'custom' && (
+                                    <>
+                                        <div className="pk-actions">
+                                            <label className="edit-text-btn edit-text-btn--outline" style={{ cursor: 'pointer' }}>
+                                                <input type="file" accept=".pdf,.docx,.txt,.md,.json,.xlsx,.xls,.csv,text/*" className="hidden" onChange={handleCustomScriptUpload} />
+                                                {isParsingScript ? 'Importing…' : 'Upload script'}
+                                            </label>
+                                            <button type="button" className="edit-text-btn" onClick={() => { setCustomScriptText(''); setCustomScriptName(''); setScriptImportError(null); }} disabled={!customScriptText && !customScriptName}>Clear</button>
+                                        </div>
+                                        <textarea value={customScriptText} onChange={(e) => { setCustomScriptText(e.target.value); setScriptImportError(null); }} placeholder="Paste a shooting script, transcript, beat sheet or outline for this rough cut." rows={5} />
+                                    </>
+                                )}
+                                {scriptImportError && <p className="pk-hint" style={{ color: 'var(--app-danger)' }}>{scriptImportError}</p>}
+                                <label className="pk-switch">
+                                    <span>Script-aware ranking</span>
+                                    <input type="checkbox" checked={config.useScriptMatching} disabled={!hasScriptGuidance} onChange={(e) => setConfig((prev) => ({ ...prev, useScriptMatching: e.target.checked }))} />
+                                </label>
+                                <label className="pk-field">
+                                    <span>Script weight · {config.scriptWeight}%</span>
+                                    <input type="range" min="0" max="80" step="5" value={config.scriptWeight} disabled={!hasScriptGuidance || !config.useScriptMatching} onChange={(e) => setConfig((prev) => ({ ...prev, scriptWeight: parseInt(e.target.value, 10) || 0 }))} />
+                                </label>
+                                <label className="pk-field">
+                                    <span>Embedding model</span>
+                                    <input type="text" value={config.embeddingModelId} disabled={!hasScriptGuidance || !config.useScriptMatching} onChange={(e) => setConfig((prev) => ({ ...prev, embeddingModelId: e.target.value.trim() || prev.embeddingModelId }))} placeholder="gemini-embedding-001" />
+                                </label>
+                            </div>
+                        </details>
+                    </div>
+                )}
+
+                {showResults && (
+                    <div className="pk-stack">
+                        <div className="pk-card">
+                            <div className="pk-card__head">
+                                <span className="pk-card__title">
+                                    {resultCount} segment{resultCount === 1 ? '' : 's'}
+                                    {analysisScope === 'timeline' && ` in ${timelineGroups.length} clip${timelineGroups.length === 1 ? '' : 's'}`}
+                                    {analysisScope === 'pool' && ` in ${mediaPoolGroups.length} file${mediaPoolGroups.length === 1 ? '' : 's'}`}
+                                </span>
+                                <span className={`pk-score ${scoreClass(resultScore)}`}>{resultScore}/100</span>
+                            </div>
+                            {resultCount > 0 && (
+                                <div className="pk-actions pk-actions--split">
+                                    <span className="pk-hint">{selectedCount} selected</span>
+                                    <span className="pk-actions">
+                                        <button type="button" className="edit-text-btn" onClick={selectAll}>All</button>
+                                        <button type="button" className="edit-text-btn" onClick={selectNone}>None</button>
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {resultCount === 0 && (
+                            <div className="pk-empty">
+                                <ScissorsIcon />
+                                <strong>No usable segments</strong>
+                                <span>
+                                    {analysisScope === 'pool' && hasScriptGuidance && config.useScriptMatching ? 'Nothing in the pool matched the script. ' : ''}
+                                    Lower the score threshold in Analysis settings{analysisScope === 'pool' ? ' or include used footage' : ''} and try again.
+                                </span>
+                            </div>
+                        )}
+
+                        {analysisScope === 'pool' && sceneDailies.length > 0 && (
+                            <details className="pk-details" open>
+                                <summary>Scene coverage<small>{coveredSceneCount}/{sceneDailies.length} scenes</small></summary>
+                                <div className="pk-details__body">
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={handleSelectBestPerScene}>Select the best take per scene</button>
+                                    <div className="pk-list">
+                                        {sceneDailies.map((entry) => (
+                                            <div key={entry.beatId} className="pk-row">
+                                                <div className="pk-row__body">
+                                                    <div className="pk-row__title">{entry.beatLabel}</div>
+                                                    <div className="pk-row__meta pk-row__meta--clamp">{entry.excerpt}</div>
+                                                    {entry.topCandidate ? (
+                                                        <div className="pk-row__meta">Best · {entry.topCandidate.mediaName} · <span className="pk-mono">{formatTime(entry.topCandidate.startTime)}–{formatTime(entry.topCandidate.endTime)}</span></div>
+                                                    ) : (
+                                                        <div className="pk-row__meta" style={{ color: 'var(--app-warm)' }}>No matching footage yet</div>
+                                                    )}
+                                                </div>
+                                                <div className="pk-row__aside">
+                                                    <span className="pk-chip">{entry.candidateCount} takes</span>
+                                                    {entry.selectedCount > 0 && <span className="pk-chip pk-chip--accent">{entry.selectedCount} picked</span>}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </details>
+                        )}
+
+                        {analysisScope === 'clip' && segments.length > 0 && (
+                            <div className="pk-list">
+                                {segments.map((segment, index) =>
+                                    renderSegmentRow(segment, index, selectedSegments.has(segment.id), () => handleToggleSegment(segment.id), (
+                                        <button type="button" className="edit-text-btn" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleTrimToSingleSegment(segment); }} title="Trim the clip to just this segment">Trim to</button>
+                                    ))
+                                )}
+                            </div>
+                        )}
+
+                        {analysisScope === 'timeline' && timelineGroups.map((group) => (
+                            <section key={group.clipId} className="fx-section">
+                                <header className="fx-section__title">{group.clipLabel}</header>
+                                <div className="pk-list">
+                                    {group.segments.map((segment, index) => {
+                                        const key = buildTimelineKey(group.clipId, segment.id);
+                                        return renderSegmentRow(segment, index, timelineSelected.has(key), () => handleToggleTimelineSegment(key));
+                                    })}
+                                </div>
+                            </section>
+                        ))}
+
+                        {analysisScope === 'pool' && mediaPoolGroups.map((group) => (
+                            <section key={group.mediaId} className="fx-section">
+                                <header className="fx-section__title">{group.mediaName}</header>
+                                <div className="pk-list">
+                                    {group.segments.map((segment, index) => {
+                                        const key = buildMediaPoolKey(group.mediaId, segment.id);
+                                        return renderSegmentRow(segment, index, mediaPoolSelected.has(key), () => handleToggleMediaPoolSegment(key));
+                                    })}
+                                </div>
+                            </section>
                         ))}
                     </div>
+                )}
+            </div>
 
-                    <div className="mt-3 pt-3 border-t border-gray-700 space-y-2">
-                        <p className="text-[10px] text-gray-500">
-                            This will append the selected media-pool segments as source trims on the end of the first unlocked video track, ordered by script scene when available.
-                        </p>
-                        <button
-                            onClick={handleApplyMediaPoolCut}
-                            disabled={mediaPoolSelected.size === 0}
-                            className="w-full py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                            Build Rough Cut from {mediaPoolSelected.size} Segments
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* No Results */}
-            {status === 'complete' && analysisScope === 'clip' && segments.length === 0 && (
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-gray-400 text-sm">
-                        <p>No usable segments found.</p>
-                        <p className="text-xs mt-1">Try lowering the threshold.</p>
-                    </div>
-                </div>
-            )}
-
-            {status === 'complete' && analysisScope === 'timeline' && timelineGroups.length === 0 && (
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-gray-400 text-sm">
-                        <p>No usable segments found across the timeline.</p>
-                        <p className="text-xs mt-1">Try lowering the threshold.</p>
-                    </div>
-                </div>
-            )}
-
-            {status === 'complete' && analysisScope === 'pool' && mediaPoolGroups.length === 0 && (
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-gray-400 text-sm">
-                        <p>
-                            {hasScriptGuidance && config.useScriptMatching
-                                ? 'No usable script-matched footage found in the media pool.'
-                                : 'No usable footage found in the media pool.'}
-                        </p>
-                        <p className="text-xs mt-1">Try lowering the threshold or include used footage.</p>
-                    </div>
-                </div>
-            )}
-
-            {status === 'idle' && selectedClip && (
-                <div className="autocut-local">
-                    <div className="autocut-local__head">
-                        <span>Quick cut (offline)</span>
-                        <div className="toolbar-segmented">
-                            {([['silence', 'Silence'], ['scenes', 'Scenes'], ['filler', 'Fillers']] as Array<['silence' | 'scenes' | 'filler', string]>).map(([id, label]) => (
-                                <button key={id} type="button" className={`toolbar-segmented__item ${localMode === id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => { setLocalMode(id); setLocalResult(null); }}>{label}</button>
-                            ))}
-                        </div>
-                    </div>
-                    {localMode === 'silence' && (
-                        <div className="autocut-local__grid">
-                            <label>Margin <input type="number" step={0.05} min={0} value={localSettings.margin} onChange={(e) => setLocalSettings((p) => ({ ...p, margin: Number(e.target.value) }))} /> s</label>
-                            <label>Min cut <input type="number" step={0.05} min={0} value={localSettings.minCut} onChange={(e) => setLocalSettings((p) => ({ ...p, minCut: Number(e.target.value) }))} /> s</label>
-                            <label>Min clip <input type="number" step={0.05} min={0} value={localSettings.minClip} onChange={(e) => setLocalSettings((p) => ({ ...p, minClip: Number(e.target.value) }))} /> s</label>
-                            <label>Threshold <input type="number" step={1} min={2} max={30} value={localSettings.threshold} onChange={(e) => setLocalSettings((p) => ({ ...p, threshold: Number(e.target.value) }))} /> dB</label>
-                        </div>
-                    )}
-                    {localMode === 'scenes' && (
-                        <div className="autocut-local__grid">
-                            <label>Sensitivity <input type="number" step={0.5} min={1.5} max={8} value={localSettings.sceneSensitivity} onChange={(e) => setLocalSettings((p) => ({ ...p, sceneSensitivity: Number(e.target.value) }))} /> ×</label>
-                            <label>Min scene <input type="number" step={0.5} min={0.2} value={localSettings.minScene} onChange={(e) => setLocalSettings((p) => ({ ...p, minScene: Number(e.target.value) }))} /> s</label>
-                        </div>
-                    )}
-                    {localMode === 'filler' && (
-                        <div className="autocut-local__grid">
-                            <label>Cut pauses over <input type="number" step={0.1} min={0} value={localSettings.removePauses} onChange={(e) => setLocalSettings((p) => ({ ...p, removePauses: Number(e.target.value) }))} /> s</label>
-                        </div>
-                    )}
-                    <p className="autocut-local__hint">
-                        {localMode === 'silence' && 'Adaptive loudness threshold with hysteresis, like auto-editor: keeps speech, drops dead air.'}
-                        {localMode === 'scenes' && 'Adaptive frame-difference detector (PySceneDetect style): finds hard cuts, ignores camera moves.'}
-                        {localMode === 'filler' && 'Transcribes with word timings and removes ums, ähs and long pauses (needs a Gemini key).'}
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <button type="button" className="app-button app-secondary text-xs" onClick={runLocalDetection} disabled={Boolean(localBusy)}>
-                            {localBusy || 'Detect'}
-                        </button>
-                        {localResult && (
-                            <button type="button" className="app-button app-primary text-xs" onClick={applyLocalResult} disabled={localResult.segments.length === 0}>
-                                Apply {localResult.segments.length} segment{localResult.segments.length === 1 ? '' : 's'}
-                            </button>
-                        )}
-                    </div>
-                    {localResult && (
-                        <div className="autocut-local__result">
-                            {localResult.notes.map((note, index) => <p key={index}>{note}</p>)}
-                            {localResult.removedSeconds > 0 && <p>Removes {localResult.removedSeconds.toFixed(1)}s of {localResult.duration.toFixed(1)}s.</p>}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Analyze Button */}
-            {status === 'idle' && selectedClip && (
-                <div className="space-y-2">
-                    <button
-                        onClick={handleAnalyze}
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                        Analyze Clip
-                    </button>
-                    <button
-                        onClick={handleAnalyzeTimeline}
-                        className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                        Analyze Full Timeline
-                    </button>
-                    <button
-                        onClick={handleAnalyzeMediaPool}
-                        className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                        Analyze Media Pool
-                    </button>
-                </div>
-            )}
-
-            {status === 'idle' && !selectedClip && (
-                <div className="space-y-2">
-                    <button
-                        onClick={handleAnalyzeTimeline}
-                        className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                        Analyze Full Timeline
-                    </button>
-                    <button
-                        onClick={handleAnalyzeMediaPool}
-                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                        Analyze Media Pool
-                    </button>
-                </div>
-            )}
-
-            {/* Retry Button */}
-            {status === 'error' && (
-                <button
-                    onClick={analysisScope === 'timeline'
-                        ? handleAnalyzeTimeline
-                        : analysisScope === 'pool'
-                            ? handleAnalyzeMediaPool
-                            : handleAnalyze}
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-                >
-                    Retry
-                </button>
-            )}
+            <footer className={`fx-browser__footer ${showResults && resultCount > 0 ? 'fx-browser__footer--bar' : ''}`}>
+                {showResults && resultCount > 0 ? (
+                    <>
+                        <span>
+                            {analysisScope === 'clip' && 'Splits the clip into the chosen segments'}
+                            {analysisScope === 'timeline' && 'Appends to the end of the active video track'}
+                            {analysisScope === 'pool' && 'Appends to the first unlocked video track, in script order'}
+                        </span>
+                        <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={applyResults} disabled={selectedCount === 0}>{applyLabel}</button>
+                    </>
+                ) : (
+                    <span>Auto Cut never changes the timeline until you apply a result.</span>
+                )}
+            </footer>
         </div>
     );
 };

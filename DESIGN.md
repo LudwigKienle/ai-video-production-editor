@@ -57,12 +57,22 @@ The UI should help users move through complex AI workflows without making the pr
 
 ### Type Hierarchy
 
-- App Title: 28px / semibold / tight tracking
-- Section Title: 22px / semibold
-- Card Title: 16px / semibold
-- Body: 14px–15px / regular
-- Meta / helper copy: 12px–13px / medium
-- Micro labels: 11px / medium / restrained tracking
+Use the rem-based scale tokens in `index.css` (`--fs-2xs` … `--fs-2xl`, ratio ≈ 1.2) instead of ad-hoc pixel sizes.
+
+- App Title: `--fs-2xl` / semibold / tight tracking
+- Section Title: `--fs-xl` / semibold
+- Card / panel title: `--fs-md` (0.9rem) / semibold — the browser panels (Effects, Transitions, Titles…) all use this one size
+- Body: `--fs-sm` / regular / line-height `--lh-body` (1.45)
+- Meta / helper copy: `--fs-xs` / medium
+- Micro labels: `--fs-2xs` (≈10.5px) / semibold / 0.08em tracking — **this is the floor; never go smaller**
+- Timecodes and numbers: IBM Plex Mono with tabular figures
+
+### Readability rules (apply everywhere)
+
+- Line height 1.45 for any copy longer than a label; 1.2 for titles
+- Lines of helper copy stay under ~70 characters — wrap the container, don't shrink the type
+- Muted text uses `--app-muted`, never a lighter grey: contrast stays ≥ 4.5:1 in both themes
+- Never colour text with fixed Tailwind greys (`text-gray-*`) in new code; use the tokens. Legacy panels are mapped to the tokens by the global overrides in `index.css` (search "Global type scale")
 
 ## 4. Component Stylings
 
@@ -102,6 +112,39 @@ The UI should help users move through complex AI workflows without making the pr
 
 ## 5. Layout Principles
 
+### Page anatomy (post pages)
+
+Every post page (Media, Cut, Edit, Fusion, Color, Fairlight, Deliver) follows the same left-to-right reading order, so users only learn it once:
+
+1. **Browser / sources on the left** — what you can bring in (media, effects, tools, generators)
+2. **Viewer in the centre, top** — the one fixed point on the page; it always shows the shared program
+3. **Work area under the viewer** — the page's own surface (media pool, node comp, tool forms)
+4. **Inspector / mixer on the right** — properties of what is selected
+5. **Clip strip + shared timeline at the bottom** — the same timeline, playhead and selection on every page
+
+Selection lives in exactly one place per page (the viewer / the timeline), and every panel reads from it. Never keep a second, private selection.
+
+### Browsers (Effects, Transitions, Titles…)
+
+### Panel kit (`pk-*` classes in `index.css`)
+
+Every browser panel is assembled from the same few parts, so new panels look finished on day one:
+
+- `fx-browser` shell: header (`fx-browser__title` + one `edit-seg`), `fx-search`, `fx-filters`, `fx-browser__scroll`, `fx-browser__footer` (or `--bar` when it carries the primary action)
+- `pk-steps` / `pk-step` for guided flows (Music: read → refine → generate)
+- `pk-card`, `pk-row`, `pk-list` for content; `pk-seg` for mutually exclusive choices; `pk-switch` for on/off
+- `pk-details` for progressive disclosure — expert settings live behind a summary that states the current value
+- `pk-chip`, `pk-score`, `pk-alert`, `pk-progress`, `pk-empty` for status. Empty states say what to do next, never just "nothing here"
+- Tiles: `fx-tile` (button) or `fx-tile fx-tile--div` when the tile carries its own `fx-tile__actions`
+
+
+- Header row: title on the left, one segmented control on the right
+- One rounded search field directly beneath
+- One row of pill filters; "All" groups results into sections with quiet uppercase headers
+- Content as a thumbnail grid (16:9 tiles, name below, tooltip carries the description). Show the effect *on the actual frame* rather than describing it in prose
+- Footer line with the single hint that matters right now (e.g. "Select a clip to apply effects")
+- Disabled state = dimmed, never hidden; the user should see what exists before they can use it
+
 - Prioritize whitespace and grouping over dense panel stacking
 - Top-level screens should answer:
   - what this area does
@@ -116,7 +159,21 @@ The UI should help users move through complex AI workflows without making the pr
 - Limit strong glows and sharp gradients
 - Prefer layered paper/surface depth over sci-fi glow depth
 
-## 7. Do's and Don'ts
+## 7. Principles that make the software feel effortless
+
+Distilled from the NLE research (Resolve, FCP, Premiere) and the UI/typography feedback; check new work against these.
+
+1. **Reduce to the essential.** A panel shows one primary action and hides expert options behind progressive disclosure (`<details>`, "Advanced", segmented sub-tools). If a screen needs a legend, it has too much on it.
+2. **Visual hierarchy before decoration.** Size and weight carry hierarchy; colour is reserved for the one primary action and the accent on the selected item.
+3. **Consistency is the feature.** Same header, same search, same filter pills, same tile, same inspector layout on every page. Reused patterns are what let people work "without thinking".
+4. **Immediate feedback.** Every action answers within 100 ms: hover lifts a tile, a fader moves the meter, a generate button reads "Generating…" and the status line says where the result landed.
+5. **Whitespace is structure.** Group with spacing first, borders second, boxes-in-boxes never.
+6. **Typography is the interface.** One sans family for UI, one mono family for numbers, a fixed scale, a readability floor. Text that is hard to read is a bug.
+7. **Accessible by default.** Keyboard reachable buttons, `aria-label` on icon-only controls, visible focus rings, contrast ≥ 4.5:1, no colour-only meaning.
+8. **The timeline is the truth.** Whatever a page does, it reads from and writes to the shared sequence, so nothing the user does is ever "somewhere else".
+9. **Make it a pleasure.** Small, fast, physical motion (a tile lifting, a meter bouncing) rewards use; long spinners and modal detours punish it.
+
+## 7b. Do's and Don'ts
 
 ### Do
 

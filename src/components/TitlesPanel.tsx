@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MediaItem, TimelineClip, TitleMotionPreset } from '../types';
+import { TextIcon, CheckCircleIcon, ScissorsIcon } from './icons';
 
 export type TitlePreset = {
   id: string;
@@ -371,329 +372,232 @@ const TitlesPanel: React.FC<TitlesPanelProps> = ({
     }
   };
 
+  const [view, setView] = useState<'presets' | 'style' | 'subtitles' | 'review'>('presets');
+  const [presetFilter, setPresetFilter] = useState<'all' | TitlePreset['family']>('all');
+
+  const FAMILY_LABEL: Record<TitlePreset['family'], string> = { 'lower-third': 'Lower thirds', kinetic: 'Kinetic', subtitle: 'Subtitles' };
+  const FAMILY_ORDER: TitlePreset['family'][] = ['lower-third', 'kinetic', 'subtitle'];
+  const visiblePresets = TITLE_PRESETS.filter((preset) => presetFilter === 'all' || preset.family === presetFilter);
+  const groupedPresets = FAMILY_ORDER.map((family) => ({ family, items: visiblePresets.filter((preset) => preset.family === family) })).filter((group) => group.items.length > 0);
+  const currentTreatment: 'clear' | 'subtitle-plate' | 'lower-third-bar' = selectedClip?.textConfig?.background?.enabled ? (selectedClip.textConfig.background.style === 'lower-third-bar' ? 'lower-third-bar' : 'subtitle-plate') : 'clear';
+  const currentMotion = selectedClip?.textConfig?.motionPreset || 'clear';
+  const canTranscribe = Boolean(apiKeyReady && selectedClipMedia && (selectedClipMedia.type === 'video' || selectedClipMedia.type === 'audio'));
+
+  const renderPresetTile = (preset: TitlePreset) => {
+    const position = preset.textConfig.position;
+    const align = position.includes('left') ? 'flex-start' : position.includes('right') ? 'flex-end' : 'center';
+    const valign = position.startsWith('top') ? 'flex-start' : position.startsWith('bottom') ? 'flex-end' : 'center';
+    const bg = preset.textConfig.background;
+    const fontSize = Math.max(7, Math.min(13, preset.textConfig.size * 0.11));
+    return (
+      <div key={preset.id} className="fx-tile fx-tile--div" role="group" aria-label={preset.label} title={`${preset.label}\n${preset.description}\n${preset.safeNote}`} onClick={() => onCreateTitleClip(preset)}>
+        <div className="fx-tile__thumb">
+          {previewFrameUrl ? <img src={previewFrameUrl} alt="" draggable={false} /> : <div className="fx-tile__placeholder" />}
+          <div className="title-tile__text" style={{ justifyContent: align, alignItems: valign }}>
+            <span
+              className="title-tile__copy"
+              style={{
+                fontFamily: preset.textConfig.font,
+                fontSize,
+                color: preset.textConfig.color,
+                textAlign: align === 'flex-start' ? 'left' : align === 'flex-end' ? 'right' : 'center',
+                background: bg?.enabled ? `rgb(${parseInt(bg.color.slice(1, 3), 16) || 0} ${parseInt(bg.color.slice(3, 5), 16) || 0} ${parseInt(bg.color.slice(5, 7), 16) || 0} / ${bg.opacity ?? 0.8})` : undefined,
+                padding: bg?.enabled ? '0.15em 0.4em' : undefined,
+                borderRadius: bg?.enabled ? Math.max(2, (bg.radius || 0) * 0.12) : undefined,
+              }}
+            >
+              {preset.content}
+            </span>
+          </div>
+          <span className="fx-tile__badge">{preset.duration.toFixed(1)}s</span>
+          <div className="fx-tile__actions">
+            <button type="button" className="fx-tile__action fx-tile__action--primary" onClick={(event) => { event.stopPropagation(); onCreateTitleClip(preset); }}>Add</button>
+            <button type="button" className="fx-tile__action" disabled={!selectedClip} onClick={(event) => { event.stopPropagation(); onApplyPresetToSelected(preset); }} title={selectedClip ? 'Apply this style to the selected clip' : 'Select a clip first'}>To selected</button>
+          </div>
+        </div>
+        <span className="fx-tile__name">{preset.label}</span>
+      </div>
+    );
+  };
+
   return (
-    <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-white">Titles</h3>
-          <p className="text-[11px] text-gray-400 mt-1">Lower thirds, kinetic cards, subtitle styles, and a built-in title review pass.</p>
-        </div>
-        <div className="text-[10px] uppercase tracking-wider text-gray-500">
-          {selectedClipHasText ? 'Selected clip can take a text preset' : 'Preset clips stay standalone by default'}
-        </div>
-      </div>
-
-      {previewFrameUrl && (
-        <div className="mb-4 rounded-lg border border-gray-700 bg-gray-900/60 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-gray-500">
-            <span>Safe Area Preview</span>
-            <span className="normal-case tracking-normal text-gray-400">{previewSourceLabel || 'Current source frame'}</span>
-          </div>
-          <div className="relative h-28 overflow-hidden rounded-md border border-gray-700 bg-black">
-            <img src={previewFrameUrl} alt="Safe area reference frame" className="h-full w-full object-cover opacity-90" />
-            <div className="absolute inset-[8%] border border-emerald-300/70 rounded-sm pointer-events-none" />
-            <div className="absolute inset-[14%] border border-indigo-300/40 rounded-sm pointer-events-none" />
-            <div className="absolute bottom-[14%] left-[14%] text-[10px] text-emerald-200 bg-black/55 px-2 py-1 rounded">
-              Safe title box
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="mb-4 grid grid-cols-1 gap-3">
-        <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Title Treatments</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Add readable plates for subtitles or turn lower thirds into anchored bars.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">
-              {selectedClipHasText ? 'Ready for selected title' : 'Select a text clip first'}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => onApplyTreatmentToSelected('subtitle-plate')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Apply Subtitle Plate
-            </button>
-            <button
-              onClick={() => onApplyTreatmentToSelected('lower-third-bar')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Apply Lower Third Bar
-            </button>
-            <button
-              onClick={() => onApplyTreatmentToSelected('clear')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-rose-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Clear Background
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Motion Presets</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Apply simple title animation curves for bars, plates, and overlay cards.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">
-              {selectedClipHasText ? 'Applied to selected title' : 'Select a text clip first'}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => onApplyMotionToSelected('slide-in')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Slide In
-            </button>
-            <button
-              onClick={() => onApplyMotionToSelected('soft-fade')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Soft Fade
-            </button>
-            <button
-              onClick={() => onApplyMotionToSelected('blur-settle')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-fuchsia-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Blur Settle
-            </button>
-            <button
-              onClick={() => onApplyMotionToSelected('clear')}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-rose-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Clear Motion
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Legibility</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Sample the current frame behind text and flip colors when highlights or shadows would kill readability.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">
-              {selectedClipAutoContrast ? 'Auto contrast on' : 'Auto contrast off'}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => onToggleAutoContrastForSelected(!selectedClipAutoContrast)}
-              disabled={!selectedClipHasText}
-              className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {selectedClipAutoContrast ? 'Disable Auto Contrast' : 'Enable Auto Contrast'}
-            </button>
-            <span className="text-[11px] text-gray-500">The program monitor now shows title-safe guides whenever a text overlay is active.</span>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Transcript-Driven Subtitles</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Transcribe the selected audio or video clip and distribute subtitle cards across its timeline range.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">
-              {selectedClipMedia ? selectedClipMedia.type : 'No clip selected'}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => void handleGenerateSubtitles()}
-              disabled={!apiKeyReady || !selectedClipMedia || (selectedClipMedia.type !== 'video' && selectedClipMedia.type !== 'audio') || subtitleStatus.state === 'running'}
-              className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {subtitleStatus.state === 'running' ? 'Generating Subtitles...' : 'Generate Subtitles from Selected Clip'}
-            </button>
-            {!apiKeyReady && <span className="text-[11px] text-amber-300">Add a Gemini API key in Settings first.</span>}
-          </div>
-          {subtitleStatus.message && (
-            <div className={`mt-3 rounded-md px-3 py-2 text-xs ${
-              subtitleStatus.state === 'done'
-                ? 'border border-emerald-500/20 bg-emerald-900/10 text-emerald-200'
-                : subtitleStatus.state === 'error'
-                  ? 'border border-rose-500/20 bg-rose-900/10 text-rose-200'
-                  : 'border border-indigo-500/20 bg-indigo-900/10 text-indigo-200'
-            }`}>
-              {subtitleStatus.message}
-            </div>
-          )}
-          {subtitleStatus.transcript && (
-            <div className="mt-3 rounded-md border border-gray-700 bg-gray-950/70 p-3">
-              <div className="text-[10px] uppercase tracking-widest text-gray-500">Transcript Preview</div>
-              <div className="mt-2 text-[11px] text-gray-300 line-clamp-5">{subtitleStatus.transcript}</div>
-            </div>
-          )}
+    <div className="fx-browser">
+      <div className="fx-browser__header">
+        <h3 className="fx-browser__title">Titles</h3>
+        <div className="edit-seg" role="tablist" aria-label="Titles view">
+          {([
+            { id: 'presets', label: 'Presets' },
+            { id: 'style', label: 'Style' },
+            { id: 'subtitles', label: 'Subtitles' },
+            { id: 'review', label: reviewFindings.length > 0 ? `Review · ${reviewFindings.length}` : 'Review' },
+          ] as const).map((tab) => (
+            <button key={tab.id} type="button" role="tab" aria-selected={view === tab.id} className={`edit-seg__item ${view === tab.id ? 'edit-seg__item--active' : ''}`} onClick={() => setView(tab.id)}>{tab.label}</button>
+          ))}
         </div>
       </div>
 
-      {activeSubtitleGroup.length > 0 && (
-        <div className="mb-4 rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Transcript Editor</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Fine-tune generated subtitle segments, then split or merge them without leaving the Titles tab.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">
-              {activeSubtitleGroup.length} segment{activeSubtitleGroup.length === 1 ? '' : 's'}
-            </div>
-          </div>
-          <div className="mt-3 space-y-2">
-            {activeSubtitleGroup.map((clip, index) => (
-              <div key={clip.id} className="rounded-md border border-gray-700 bg-gray-950/60 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[11px] uppercase tracking-wide text-gray-500">
-                    {clip.start.toFixed(2)}s to {clip.end.toFixed(2)}s
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onSelectClip(clip.id)}
-                      className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-200 hover:border-indigo-500"
-                    >
-                      Focus
-                    </button>
-                    <button
-                      onClick={() => onSplitSubtitleClip(clip.id)}
-                      disabled={(clip.subtitleSegment?.words.length || 0) < 2}
-                      className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-200 hover:border-sky-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Split
-                    </button>
-                    <button
-                      onClick={() => onMergeSubtitleClip(clip.id, 'previous')}
-                      disabled={index === 0}
-                      className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-200 hover:border-amber-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Merge Prev
-                    </button>
-                    <button
-                      onClick={() => onMergeSubtitleClip(clip.id, 'next')}
-                      disabled={index === activeSubtitleGroup.length - 1}
-                      className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-200 hover:border-amber-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Merge Next
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  rows={2}
-                  value={transcriptDrafts[clip.id] ?? clip.textConfig?.content ?? ''}
-                  onChange={(event) => setTranscriptDrafts((prev) => ({ ...prev, [clip.id]: event.target.value }))}
-                  onBlur={() => onUpdateSubtitleClipContent(clip.id, transcriptDrafts[clip.id] ?? clip.textConfig?.content ?? '')}
-                  className="mt-3 w-full rounded-md border border-gray-700 bg-black/40 p-2 text-sm text-gray-100"
-                />
-              </div>
-            ))}
-          </div>
+      {view === 'presets' && (
+        <div className="fx-filters" role="tablist" aria-label="Preset family">
+          {([{ id: 'all', label: 'All' }, { id: 'lower-third', label: 'Lower thirds' }, { id: 'kinetic', label: 'Kinetic' }, { id: 'subtitle', label: 'Subtitles' }] as const).map((entry) => (
+            <button key={entry.id} type="button" role="tab" aria-selected={presetFilter === entry.id} className={`fx-filters__item ${presetFilter === entry.id ? 'fx-filters__item--active' : ''}`} onClick={() => setPresetFilter(entry.id)}>{entry.label}</button>
+          ))}
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 overflow-y-auto pr-1">
-        {TITLE_PRESETS.map((preset) => (
-          <div key={preset.id} className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-semibold text-white">{preset.label}</h4>
-                  <span className="rounded border border-gray-600 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-300">{preset.family}</span>
-                </div>
-                <p className="mt-1 text-[11px] text-gray-400">{preset.description}</p>
-              </div>
-              <div className="text-[10px] text-gray-500">{preset.duration.toFixed(1)}s</div>
-            </div>
-
-            <div className="mt-3 rounded-md border border-gray-700 bg-black/40 p-3">
-              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Preset Copy</div>
-              <div
-                className="text-white whitespace-pre-line"
-                style={{
-                  fontFamily: preset.textConfig.font,
-                  fontSize: Math.max(18, preset.textConfig.size * 0.32),
-                  textAlign: preset.textConfig.position.includes('left') ? 'left' : preset.textConfig.position.includes('right') ? 'right' : 'center',
-                  color: preset.textConfig.color,
-                }}
-              >
-                {preset.content}
-              </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="text-[11px] text-gray-500">{preset.safeNote}</p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onCreateTitleClip(preset)}
-                  className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
-                >
-                  Add Title Clip
-                </button>
-                <button
-                  onClick={() => onApplyPresetToSelected(preset)}
-                  disabled={!selectedClip}
-                  className="rounded border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Apply to Selected
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-semibold text-white">Overlay Review</h4>
-              <p className="mt-1 text-[11px] text-gray-400">Heuristic pass for safe margins, line length, timing, and likely readability issues.</p>
-            </div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-500">{reviewFindings.length} findings</div>
-          </div>
-
-          {reviewFindings.length === 0 ? (
-            <div className="mt-3 rounded-md border border-emerald-500/20 bg-emerald-900/10 px-3 py-2 text-xs text-emerald-200">
-              No immediate title or subtitle issues detected in the current timeline.
-            </div>
+      <div className="fx-browser__scroll">
+        {view === 'presets' && (
+          presetFilter === 'all' ? (
+            groupedPresets.map((group) => (
+              <section key={group.family} className="fx-section">
+                <header className="fx-section__title">{FAMILY_LABEL[group.family]}</header>
+                <div className="fx-grid">{group.items.map(renderPresetTile)}</div>
+              </section>
+            ))
           ) : (
-            <div className="mt-3 space-y-2">
-              {reviewFindings.map((finding) => (
-                <button
-                  key={finding.id}
-                  onClick={() => onSelectClip(finding.clipId)}
-                  className="w-full rounded-md border border-gray-700 bg-gray-950/60 p-3 text-left hover:border-indigo-500/60"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-white">{finding.title}</div>
-                      <div className="mt-1 text-[11px] text-gray-400">{finding.detail}</div>
-                      <div className="mt-2 text-[11px] text-indigo-300">{finding.suggestion}</div>
-                    </div>
-                    <span className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                      finding.severity === 'high'
-                        ? 'bg-rose-900/50 text-rose-200'
-                        : finding.severity === 'medium'
-                          ? 'bg-amber-900/50 text-amber-200'
-                          : 'bg-sky-900/50 text-sky-200'
-                    }`}>
-                      {finding.severity}
-                    </span>
+            <div className="fx-grid">{visiblePresets.map(renderPresetTile)}</div>
+          )
+        )}
+
+        {view === 'style' && (
+          <div className="pk-stack">
+            {previewFrameUrl && (
+              <div className="fx-tile__thumb" style={{ aspectRatio: '16 / 9' }} title="Title-safe area on the current frame">
+                <img src={previewFrameUrl} alt="" draggable={false} style={{ opacity: 0.9 }} />
+                <div style={{ position: 'absolute', inset: '8%', border: '1px solid rgb(87 184 148 / 0.8)', borderRadius: 2, pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', inset: '14%', border: '1px dashed rgb(255 255 255 / 0.4)', borderRadius: 2, pointerEvents: 'none' }} />
+                <span className="fx-tile__badge fx-tile__badge--left">Safe area · {previewSourceLabel || 'source'}</span>
+              </div>
+            )}
+
+            {!selectedClipHasText ? (
+              <div className="pk-empty">
+                <TextIcon />
+                <strong>Select a title clip</strong>
+                <span>Treatments, motion and legibility apply to the text clip selected on the timeline.</span>
+              </div>
+            ) : (
+              <>
+                <div className="pk-card">
+                  <div className="pk-card__head"><span className="pk-card__title">Background</span><span className="pk-hint">Readable plate behind the text</span></div>
+                  <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                    <button type="button" aria-pressed={currentTreatment === 'clear'} onClick={() => onApplyTreatmentToSelected('clear')}>None</button>
+                    <button type="button" aria-pressed={currentTreatment === 'subtitle-plate'} onClick={() => onApplyTreatmentToSelected('subtitle-plate')}>Subtitle plate</button>
+                    <button type="button" aria-pressed={currentTreatment === 'lower-third-bar'} onClick={() => onApplyTreatmentToSelected('lower-third-bar')}>Lower-third bar</button>
                   </div>
-                </button>
-              ))}
+                </div>
+                <div className="pk-card">
+                  <div className="pk-card__head"><span className="pk-card__title">Motion</span><span className="pk-hint">How the title enters</span></div>
+                  <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                    <button type="button" aria-pressed={currentMotion === 'clear'} onClick={() => onApplyMotionToSelected('clear')}>None</button>
+                    <button type="button" aria-pressed={currentMotion === 'slide-in'} onClick={() => onApplyMotionToSelected('slide-in')}>Slide in</button>
+                    <button type="button" aria-pressed={currentMotion === 'soft-fade'} onClick={() => onApplyMotionToSelected('soft-fade')}>Soft fade</button>
+                    <button type="button" aria-pressed={currentMotion === 'blur-settle'} onClick={() => onApplyMotionToSelected('blur-settle')}>Blur settle</button>
+                  </div>
+                </div>
+                <div className="pk-card">
+                  <label className="pk-switch">
+                    <span>
+                      <span className="pk-card__title" style={{ display: 'block' }}>Auto contrast</span>
+                      <span className="pk-hint">Flips the text colour when the frame behind it is too bright or too dark.</span>
+                    </span>
+                    <input type="checkbox" checked={selectedClipAutoContrast} onChange={(event) => onToggleAutoContrastForSelected(event.target.checked)} />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {view === 'subtitles' && (
+          <div className="pk-stack">
+            <div className="pk-card">
+              <div className="pk-card__head">
+                <span className="pk-card__title">From the selected clip</span>
+                <span className="pk-chip">{selectedClipMedia ? selectedClipMedia.type : 'nothing selected'}</span>
+              </div>
+              <p className="pk-hint">Transcribes the clip and lays subtitle cards across its range on the timeline.</p>
+              <button type="button" className="edit-text-btn edit-text-btn--primary w-full justify-center" onClick={() => void handleGenerateSubtitles()} disabled={!canTranscribe || subtitleStatus.state === 'running'}>
+                {subtitleStatus.state === 'running' ? 'Transcribing…' : 'Generate subtitles'}
+              </button>
+              {!apiKeyReady && <p className="pk-hint" style={{ color: 'var(--app-warm)' }}>Add a Gemini API key in Settings first.</p>}
+              {apiKeyReady && !canTranscribe && <p className="pk-hint">Select a video or audio clip on the timeline.</p>}
+              {subtitleStatus.message && (
+                <div className={`pk-alert ${subtitleStatus.state === 'done' ? 'pk-alert--ok' : subtitleStatus.state === 'error' ? 'pk-alert--danger' : 'pk-alert--info'}`}>{subtitleStatus.message}</div>
+              )}
+              {subtitleStatus.transcript && (
+                <details className="pk-details">
+                  <summary>Transcript</summary>
+                  <div className="pk-details__body"><p className="pk-body">{subtitleStatus.transcript}</p></div>
+                </details>
+              )}
             </div>
-          )}
-        </div>
+
+            {activeSubtitleGroup.length > 0 ? (
+              <section className="fx-section">
+                <header className="fx-section__title">Segments · {activeSubtitleGroup.length}</header>
+                <div className="pk-list">
+                  {activeSubtitleGroup.map((clip, index) => (
+                    <div key={clip.id} className={`pk-row ${clip.id === selectedClip?.id ? 'pk-row--selected' : ''}`}>
+                      <div className="pk-row__body">
+                        <div className="pk-actions pk-actions--split">
+                          <button type="button" className="pk-chip pk-mono" onClick={() => onSelectClip(clip.id)} title="Select this segment">{clip.start.toFixed(2)}s – {clip.end.toFixed(2)}s</button>
+                          <span className="pk-actions">
+                            <button type="button" className="edit-text-btn" onClick={() => onSplitSubtitleClip(clip.id)} disabled={(clip.subtitleSegment?.words.length || 0) < 2} title="Split at the midpoint"><ScissorsIcon className="w-3 h-3" />Split</button>
+                            <button type="button" className="edit-text-btn" onClick={() => onMergeSubtitleClip(clip.id, 'previous')} disabled={index === 0} title="Merge with the previous segment">‹ Merge</button>
+                            <button type="button" className="edit-text-btn" onClick={() => onMergeSubtitleClip(clip.id, 'next')} disabled={index === activeSubtitleGroup.length - 1} title="Merge with the next segment">Merge ›</button>
+                          </span>
+                        </div>
+                        <textarea
+                          rows={2}
+                          value={transcriptDrafts[clip.id] ?? clip.textConfig?.content ?? ''}
+                          onChange={(event) => setTranscriptDrafts((prev) => ({ ...prev, [clip.id]: event.target.value }))}
+                          onBlur={() => onUpdateSubtitleClipContent(clip.id, transcriptDrafts[clip.id] ?? clip.textConfig?.content ?? '')}
+                          aria-label={`Subtitle text ${index + 1}`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <p className="pk-hint">Generated segments show up here for editing, splitting and merging.</p>
+            )}
+          </div>
+        )}
+
+        {view === 'review' && (
+          <div className="pk-stack">
+            <p className="pk-hint">A quick pass over every title on the timeline: safe margins, line length, timing and readability.</p>
+            {reviewFindings.length === 0 ? (
+              <div className="pk-empty">
+                <CheckCircleIcon />
+                <strong>All titles look good</strong>
+                <span>No margin, length, timing or readability issues found.</span>
+              </div>
+            ) : (
+              <div className="pk-list">
+                {reviewFindings.map((finding) => (
+                  <button key={finding.id} type="button" className="pk-row pk-row--clickable" onClick={() => onSelectClip(finding.clipId)} title="Select the affected clip">
+                    <div className="pk-row__body">
+                      <div className="pk-row__title">{finding.title}</div>
+                      <div className="pk-row__meta">{finding.detail}</div>
+                      <div className="pk-row__meta" style={{ color: 'var(--app-accent-strong)' }}>{finding.suggestion}</div>
+                    </div>
+                    <span className={`pk-chip ${finding.severity === 'high' ? 'pk-chip--danger' : finding.severity === 'medium' ? 'pk-chip--warn' : ''}`}>{finding.severity}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      <footer className="fx-browser__footer">
+        {view === 'presets' && <span>Click a preset to add it as a new clip at the playhead · hover for “To selected”</span>}
+        {view === 'style' && <span>{selectedClipHasText ? 'Changes apply instantly to the selected title' : 'Select a title clip on the timeline'}</span>}
+        {view === 'subtitles' && <span>Subtitle cards are regular text clips — edit them here or in the Inspector</span>}
+        {view === 'review' && <span>Click a finding to jump to the clip</span>}
+      </footer>
     </div>
   );
 };

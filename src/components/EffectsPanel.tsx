@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Effect, EffectType } from '../types';
+import React, { useMemo, useState } from 'react';
+import { Effect, EffectStackPreset, EffectType } from '../types';
 import { EFFECTS, EFFECT_STACK_PRESETS } from '../constants';
-import { MagicWandIcon, PaintBucketIcon, TextIcon, KeyingIcon } from './icons';
+import { MagicWandIcon, PaintBucketIcon, TextIcon, KeyingIcon, SearchIcon, LayersIcon, SparklesIcon } from './icons';
 import { buildStyleFilterForEffect } from '../utils/effects';
 
 interface EffectsPanelProps {
@@ -14,6 +14,82 @@ interface EffectsPanelProps {
   previewSourceLabel?: string;
 }
 
+type EffectCategory = 'looks' | 'stylize' | 'vfx' | 'tools' | 'ai';
+type LibraryFilter = 'all' | EffectCategory;
+type PresetFilter = 'all' | EffectStackPreset['category'];
+
+const CATEGORY_LABEL: Record<EffectCategory, string> = {
+  looks: 'Looks',
+  stylize: 'Stylize',
+  vfx: 'VFX',
+  tools: 'Tools',
+  ai: 'AI',
+};
+
+const CATEGORY_ORDER: EffectCategory[] = ['looks', 'stylize', 'vfx', 'tools', 'ai'];
+
+const LIBRARY_FILTERS: Array<{ id: LibraryFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'looks', label: 'Looks' },
+  { id: 'stylize', label: 'Stylize' },
+  { id: 'vfx', label: 'VFX' },
+  { id: 'tools', label: 'Tools' },
+  { id: 'ai', label: 'AI' },
+];
+
+const PRESET_FILTERS: Array<{ id: PresetFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'look', label: 'Looks' },
+  { id: 'stylize', label: 'Stylize' },
+  { id: 'vfx', label: 'VFX' },
+];
+
+const STYLIZE_IDS = new Set<EffectType>([EffectType.VAN_GOGH, EffectType.ANIME, EffectType.WATERCOLOR, EffectType.COMIC]);
+const VFX_IDS = new Set<EffectType>([EffectType.FIRE_OVERLAY, EffectType.LIGHTNING_OVERLAY, EffectType.EXPLOSION_OVERLAY, EffectType.GLITCH_OVERLAY]);
+
+const getEffectCategory = (effect: Effect): EffectCategory => {
+  if (effect.type === 'ai') return 'ai';
+  if (effect.type === 'native') return 'tools';
+  if (STYLIZE_IDS.has(effect.id)) return 'stylize';
+  if (VFX_IDS.has(effect.id)) return 'vfx';
+  return 'looks';
+};
+
+/** Short display name: strips the "(Model)" suffix and generic verbs so tiles stay readable. */
+const shortName = (name: string) =>
+  name
+    .replace(/\s*\((.*?)\)\s*$/, (_m, inner: string) => ` · ${inner}`)
+    .replace(/ Stylize$/, '')
+    .replace(/ Overlay$/, '');
+
+/** Static overlay decoration for VFX/comic tiles so they read correctly without animation. */
+const TileOverlay: React.FC<{ effect: EffectType }> = ({ effect }) => {
+  switch (effect) {
+    case EffectType.FIRE_OVERLAY:
+      return <div className="fx-tile__overlay" style={{ background: 'linear-gradient(to top, rgba(255,72,0,0.8), rgba(255,163,55,0.4) 45%, transparent 75%)' }} />;
+    case EffectType.LIGHTNING_OVERLAY:
+      return (
+        <>
+          <div className="fx-tile__overlay" style={{ background: 'rgba(214,232,255,0.22)' }} />
+          <div className="fx-tile__overlay" style={{ left: '46%', width: 2, background: 'rgba(255,255,255,0.9)', transform: 'skewX(-16deg)', boxShadow: '0 0 6px 1px rgba(200,225,255,0.9)' }} />
+        </>
+      );
+    case EffectType.EXPLOSION_OVERLAY:
+      return <div className="fx-tile__overlay" style={{ background: 'radial-gradient(circle at 50% 55%, rgba(255,244,190,0.95) 0%, rgba(255,152,70,0.6) 30%, rgba(255,78,0,0) 62%)' }} />;
+    case EffectType.GLITCH_OVERLAY:
+      return (
+        <>
+          <div className="fx-tile__overlay" style={{ top: '28%', height: 3, background: 'rgba(103,232,249,0.55)' }} />
+          <div className="fx-tile__overlay" style={{ top: '61%', height: 3, background: 'rgba(240,171,252,0.5)' }} />
+        </>
+      );
+    case EffectType.COMIC:
+      return <div className="fx-tile__overlay" style={{ opacity: 0.25, backgroundImage: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4) 1px, transparent 1px, transparent 4px)' }} />;
+    default:
+      return null;
+  }
+};
+
 const EffectsPanel: React.FC<EffectsPanelProps> = ({
   onApplyEffect,
   onApplyAIEffect,
@@ -24,40 +100,9 @@ const EffectsPanel: React.FC<EffectsPanelProps> = ({
   previewSourceLabel,
 }) => {
   const [search, setSearch] = useState('');
-  const [panelView, setPanelView] = useState<'library' | 'marketplace'>('library');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'looks' | 'stylize' | 'vfx' | 'native' | 'ai'>('all');
-  const [stackFilter, setStackFilter] = useState<'all' | 'look' | 'stylize' | 'vfx'>('all');
-  const [hoveredEffect, setHoveredEffect] = useState<EffectType | null>(null);
-  const [previewTick, setPreviewTick] = useState(0);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setPreviewTick((prev) => (prev + 0.02) % 1);
-    }, 40);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const getEffectCategory = (effect: Effect): 'looks' | 'stylize' | 'vfx' | 'native' | 'ai' => {
-    if (effect.type === 'ai') return 'ai';
-    if (effect.type === 'native') return 'native';
-    if (
-      effect.id === EffectType.VAN_GOGH ||
-      effect.id === EffectType.ANIME ||
-      effect.id === EffectType.WATERCOLOR ||
-      effect.id === EffectType.COMIC
-    ) {
-      return 'stylize';
-    }
-    if (
-      effect.id === EffectType.FIRE_OVERLAY ||
-      effect.id === EffectType.LIGHTNING_OVERLAY ||
-      effect.id === EffectType.EXPLOSION_OVERLAY ||
-      effect.id === EffectType.GLITCH_OVERLAY
-    ) {
-      return 'vfx';
-    }
-    return 'looks';
-  };
+  const [panelView, setPanelView] = useState<'library' | 'presets'>('library');
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>('all');
+  const [presetFilter, setPresetFilter] = useState<PresetFilter>('all');
 
   const isEffectUnavailable = (effect: Effect) =>
     disabled && (
@@ -65,307 +110,237 @@ const EffectsPanel: React.FC<EffectsPanelProps> = ({
       (effect.type === 'native' && effect.id !== EffectType.NATIVE_SOLID_COLOR && effect.id !== EffectType.TEXT)
     );
 
-  const handleEffectClick = async (effect: Effect) => {
+  const handleEffectClick = (effect: Effect) => {
     if (isEffectUnavailable(effect)) return;
-
     if (effect.type === 'ai') {
-        onApplyAIEffect(effect);
+      onApplyAIEffect(effect);
     } else if (effect.type === 'native') {
-        if (effect.id === EffectType.NATIVE_SOLID_COLOR) {
-            const color = window.prompt(`Enter a color (e.g., #RRGGBB, color name):`, '#2563eb');
-            if (color) {
-                onApplyNativeEffect(effect, color);
-            }
-        } else if (effect.id === EffectType.TEXT || effect.id === EffectType.CHROMA_KEY) {
-            // No value needed, the handler in App.tsx will toggle the effect
-            onApplyNativeEffect(effect, '');
-        }
-    } else { // 'css'
-        onApplyEffect(effect.id);
+      if (effect.id === EffectType.NATIVE_SOLID_COLOR) {
+        const color = window.prompt('Enter a color (e.g., #RRGGBB, color name):', '#2563eb');
+        if (color) onApplyNativeEffect(effect, color);
+      } else if (effect.id === EffectType.TEXT || effect.id === EffectType.CHROMA_KEY) {
+        onApplyNativeEffect(effect, '');
+      }
+    } else {
+      onApplyEffect(effect.id);
     }
   };
 
   const getIcon = (effect: Effect) => {
-      if (effect.type === 'ai') return <MagicWandIcon className="w-5 h-5 text-indigo-400 flex-shrink-0" />;
-      if (effect.id === EffectType.TEXT) return <TextIcon className="w-5 h-5 text-indigo-400 flex-shrink-0" />;
-      if (effect.id === EffectType.CHROMA_KEY) return <KeyingIcon className="w-5 h-5 text-indigo-400 flex-shrink-0" />;
-      if (effect.id === EffectType.NATIVE_SOLID_COLOR) return <PaintBucketIcon className="w-5 h-5 text-indigo-400 flex-shrink-0" />;
-      return null;
+    const cls = 'fx-tile__icon';
+    if (effect.type === 'ai') return <MagicWandIcon className={cls} />;
+    if (effect.id === EffectType.TEXT) return <TextIcon className={cls} />;
+    if (effect.id === EffectType.CHROMA_KEY) return <KeyingIcon className={cls} />;
+    if (effect.id === EffectType.NATIVE_SOLID_COLOR) return <PaintBucketIcon className={cls} />;
+    return null;
   };
 
-  const filteredEffects = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return EFFECTS.filter((effect) => {
-      if (typeFilter !== 'all' && getEffectCategory(effect) !== typeFilter) return false;
-      if (!term) return true;
-      return (
-        effect.name.toLowerCase().includes(term) ||
-        effect.description.toLowerCase().includes(term) ||
-        getEffectCategory(effect).toLowerCase().includes(term)
-      );
-    });
-  }, [search, typeFilter]);
+  const term = search.trim().toLowerCase();
 
-  const filteredStacks = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return EFFECT_STACK_PRESETS.filter((stack) => {
-      if (stackFilter !== 'all' && stack.category !== stackFilter) return false;
-      if (!term) return true;
-      return (
-        stack.name.toLowerCase().includes(term) ||
-        stack.description.toLowerCase().includes(term) ||
-        stack.baseEffect.toLowerCase().includes(term) ||
-        (stack.effects || []).some((entry) => entry.effect.toLowerCase().includes(term))
-      );
-    });
-  }, [search, stackFilter]);
-
-  const activePreviewEffect = useMemo(
+  const filteredEffects = useMemo(
     () =>
-      EFFECTS.find((entry) => entry.id === hoveredEffect) ||
-      filteredEffects[0] ||
-      null,
-    [hoveredEffect, filteredEffects]
+      EFFECTS.filter((effect) => {
+        const category = getEffectCategory(effect);
+        if (libraryFilter !== 'all' && category !== libraryFilter) return false;
+        if (!term) return true;
+        return (
+          effect.name.toLowerCase().includes(term) ||
+          effect.description.toLowerCase().includes(term) ||
+          CATEGORY_LABEL[category].toLowerCase().includes(term)
+        );
+      }),
+    [term, libraryFilter]
   );
 
-  const renderPreview = () => {
-    if (!activePreviewEffect) {
-      return (
-        <div className="mb-3 rounded-lg border border-gray-700 bg-gray-900/60 p-3 text-[11px] text-gray-500">
-          Hover an effect card to preview it.
-        </div>
-      );
+  const groupedEffects = useMemo(() => {
+    const groups = new Map<EffectCategory, Effect[]>();
+    for (const effect of filteredEffects) {
+      const category = getEffectCategory(effect);
+      if (!groups.has(category)) groups.set(category, []);
+      groups.get(category)!.push(effect);
     }
+    return CATEGORY_ORDER.filter((c) => groups.has(c)).map((c) => ({ category: c, effects: groups.get(c)! }));
+  }, [filteredEffects]);
 
-    const progress = (Math.sin(previewTick * Math.PI * 2) + 1) / 2;
-    const previewFilter = buildStyleFilterForEffect(activePreviewEffect.id, 1) || 'none';
-    const overlays: React.ReactNode[] = [];
+  const filteredStacks = useMemo(
+    () =>
+      EFFECT_STACK_PRESETS.filter((stack) => {
+        if (presetFilter !== 'all' && stack.category !== presetFilter) return false;
+        if (!term) return true;
+        return (
+          stack.name.toLowerCase().includes(term) ||
+          stack.description.toLowerCase().includes(term) ||
+          stack.baseEffect.toLowerCase().includes(term) ||
+          (stack.effects || []).some((entry) => entry.effect.toLowerCase().includes(term))
+        );
+      }),
+    [term, presetFilter]
+  );
 
-    if (activePreviewEffect.id === EffectType.FIRE_OVERLAY) {
-      overlays.push(
-        <div
-          key="fire"
-          className="absolute inset-x-0 bottom-0 h-2/5"
-          style={{
-            opacity: 0.75,
-            background: 'linear-gradient(to top, rgba(255,72,0,0.78), rgba(255,163,55,0.42), rgba(255,214,130,0))',
-          }}
-        />
-      );
-    }
-    if (activePreviewEffect.id === EffectType.LIGHTNING_OVERLAY) {
-      overlays.push(<div key="storm" className="absolute inset-0 bg-sky-100/15" style={{ opacity: Math.max(0, Math.sin(progress * Math.PI) * 0.9) }} />);
-      overlays.push(<div key="bolt" className="absolute w-0.5 bg-white/90" style={{ height: '100%', left: `${20 + progress * 55}%`, transform: 'skewX(-18deg)' }} />);
-    }
-    if (activePreviewEffect.id === EffectType.EXPLOSION_OVERLAY) {
-      overlays.push(
-        <div
-          key="burst"
-          className="absolute rounded-full"
-          style={{
-            width: `${20 + progress * 70}%`,
-            height: `${20 + progress * 70}%`,
-            left: `${40 - progress * 20}%`,
-            top: `${40 - progress * 20}%`,
-            opacity: Math.max(0, Math.sin(progress * Math.PI) * 0.82),
-            background: 'radial-gradient(circle, rgba(255,244,190,0.95) 0%, rgba(255,152,70,0.58) 56%, rgba(255,78,0,0) 100%)',
-          }}
-        />
-      );
-    }
-    if (activePreviewEffect.id === EffectType.GLITCH_OVERLAY) {
-      overlays.push(<div key="scan1" className="absolute inset-x-0 h-1 bg-cyan-300/45" style={{ top: `${12 + progress * 68}%` }} />);
-      overlays.push(<div key="scan2" className="absolute inset-x-0 h-1 bg-fuchsia-300/40" style={{ top: `${65 - progress * 40}%` }} />);
-    }
-    if (activePreviewEffect.id === EffectType.COMIC) {
-      overlays.push(
-        <div
-          key="comic-lines"
-          className="absolute inset-0 opacity-25"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.35), rgba(0,0,0,0.35) 1px, transparent 1px, transparent 4px)',
-          }}
-        />
-      );
-    }
-
+  const renderThumb = (effectId: EffectType, extraFilter?: string) => {
+    const filter = extraFilter ?? (buildStyleFilterForEffect(effectId, 1) || 'none');
     return (
-      <div className="mb-3 rounded-lg border border-gray-700 bg-gray-900/60 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="text-[10px] uppercase tracking-widest text-gray-500">Source Frame Preview</div>
-          <div className="text-[11px] text-indigo-300">{activePreviewEffect.name}</div>
-        </div>
-        <div className="relative h-24 overflow-hidden rounded-md border border-gray-700 bg-black">
-          {previewFrameUrl ? (
-            <div className="absolute inset-0" style={{ filter: previewFilter, transform: `scale(${1 + progress * 0.02})` }}>
-              <img src={previewFrameUrl} className="h-full w-full object-cover" alt="Effect preview source frame" />
-            </div>
-          ) : (
-            <>
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-600/40 via-indigo-600/40 to-blue-500/35" />
-              <div className="absolute inset-0" style={{ filter: previewFilter, transform: `scale(${1 + progress * 0.02})` }}>
-                <div className="h-full w-full bg-gradient-to-br from-orange-300/55 via-pink-300/45 to-sky-300/40" />
-              </div>
-            </>
-          )}
-          {overlays}
-          <div className="absolute bottom-0 left-0 h-0.5 bg-indigo-400" style={{ width: `${progress * 100}%` }} />
-        </div>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <div className="text-[10px] uppercase tracking-wide text-gray-500">{getEffectCategory(activePreviewEffect)}</div>
-          {previewFrameUrl ? (
-            <div className="text-[10px] text-gray-500 truncate max-w-[55%]">{previewSourceLabel || 'Source monitor'}</div>
-          ) : (
-            <div className="text-[10px] text-gray-500">No source frame available</div>
-          )}
-        </div>
+      <div className="fx-tile__thumb">
+        {previewFrameUrl ? (
+          <img src={previewFrameUrl} alt="" draggable={false} style={{ filter }} />
+        ) : (
+          <div className="fx-tile__placeholder" style={{ filter }} />
+        )}
+        <TileOverlay effect={effectId} />
       </div>
     );
   };
 
+  const renderEffectTile = (effect: Effect) => {
+    const unavailable = isEffectUnavailable(effect);
+    const isFilter = effect.type === 'css';
+    const icon = getIcon(effect);
+    return (
+      <button
+        key={effect.id}
+        type="button"
+        title={`${effect.name}\n${effect.description}`}
+        aria-label={effect.name}
+        disabled={unavailable}
+        onClick={() => handleEffectClick(effect)}
+        draggable={isFilter && !unavailable}
+        onDragStart={(event) => {
+          if (!isFilter) return;
+          event.dataTransfer.setData('application/x-effect-id', effect.id);
+          event.dataTransfer.effectAllowed = 'copy';
+        }}
+        className={`fx-tile ${unavailable ? 'fx-tile--disabled' : ''}`}
+      >
+        {isFilter ? (
+          renderThumb(effect.id)
+        ) : (
+          <div className={`fx-tile__thumb fx-tile__thumb--${effect.type}`}>{icon}</div>
+        )}
+        <span className="fx-tile__name">{shortName(effect.name)}</span>
+      </button>
+    );
+  };
+
+  const renderPresetTile = (stack: EffectStackPreset) => {
+    const layerCount = stack.effects?.length || 1;
+    // Compose the preset's layer filters so the thumb shows the whole stack, not just the base.
+    const composed = (stack.effects && stack.effects.length > 0 ? stack.effects : [{ effect: stack.baseEffect, intensity: 100 }])
+      .map((layer) => buildStyleFilterForEffect(layer.effect, (layer.intensity ?? 100) / 100))
+      .filter(Boolean)
+      .join(' ');
+    return (
+      <button
+        key={stack.id}
+        type="button"
+        title={`${stack.name}\n${stack.description}`}
+        aria-label={stack.name}
+        disabled={disabled}
+        onClick={() => onApplyEffectStack(stack.id)}
+        draggable={!disabled}
+        onDragStart={(event) => {
+          event.dataTransfer.setData('application/x-effect-stack-id', stack.id);
+          event.dataTransfer.effectAllowed = 'copy';
+        }}
+        className={`fx-tile ${disabled ? 'fx-tile--disabled' : ''}`}
+      >
+        {renderThumb(stack.baseEffect, composed || 'none')}
+        <span className="fx-tile__badge">
+          <LayersIcon className="w-3 h-3" />
+          {layerCount}
+        </span>
+        <span className="fx-tile__name">{stack.name}</span>
+      </button>
+    );
+  };
+
+  const filters = panelView === 'library' ? LIBRARY_FILTERS : PRESET_FILTERS;
+  const activeFilter = panelView === 'library' ? libraryFilter : presetFilter;
+  const setFilter = (id: string) => {
+    if (panelView === 'library') setLibraryFilter(id as LibraryFilter);
+    else setPresetFilter(id as PresetFilter);
+  };
+
+  const isEmpty = panelView === 'library' ? filteredEffects.length === 0 : filteredStacks.length === 0;
+
   return (
-    <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-      <h3 className="text-lg font-semibold mb-3 text-white">Effects Library</h3>
-      <div className="mb-3 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-wide">
-        <button
-          type="button"
-          onClick={() => setPanelView('library')}
-          className={`rounded border px-2 py-1 ${panelView === 'library' ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}
-        >
-          Library
-        </button>
-        <button
-          type="button"
-          onClick={() => setPanelView('marketplace')}
-          className={`rounded border px-2 py-1 ${panelView === 'marketplace' ? 'border-indigo-500 bg-indigo-600/20 text-indigo-200' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}
-        >
-          Marketplace
-        </button>
-      </div>
-      {panelView === 'library' && renderPreview()}
-      <div className="space-y-2 mb-3">
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search effects..."
-          className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200"
-        />
-        <div className="flex items-center gap-2">
-          {panelView === 'library' ? (
-            <>
-              {([
-                { id: 'all', label: 'All' },
-                { id: 'looks', label: 'Looks' },
-                { id: 'stylize', label: 'Stylize' },
-                { id: 'vfx', label: 'VFX' },
-                { id: 'native', label: 'Native' },
-                { id: 'ai', label: 'AI' },
-              ] as const).map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setTypeFilter(entry.id)}
-                  className={`px-2.5 py-1 rounded text-[10px] border ${typeFilter === entry.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-gray-900 text-gray-400 border-gray-700 hover:text-gray-200'}`}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </>
-          ) : (
-            <>
-              {([
-                { id: 'all', label: 'All' },
-                { id: 'look', label: 'Look' },
-                { id: 'stylize', label: 'Stylize' },
-                { id: 'vfx', label: 'VFX' },
-              ] as const).map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setStackFilter(entry.id)}
-                  className={`px-2.5 py-1 rounded text-[10px] border ${stackFilter === entry.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-gray-900 text-gray-400 border-gray-700 hover:text-gray-200'}`}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </>
-          )}
+    <div className="fx-browser">
+      <div className="fx-browser__header">
+        <h3 className="fx-browser__title">Effects</h3>
+        <div className="edit-seg" role="tablist" aria-label="Effects view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelView === 'library'}
+            className={`edit-seg__item ${panelView === 'library' ? 'edit-seg__item--active' : ''}`}
+            onClick={() => setPanelView('library')}
+          >
+            Library
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelView === 'presets'}
+            className={`edit-seg__item ${panelView === 'presets' ? 'edit-seg__item--active' : ''}`}
+            onClick={() => setPanelView('presets')}
+          >
+            <SparklesIcon className="w-3 h-3" />
+            Presets
+          </button>
         </div>
       </div>
-      <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-2">
-        {panelView === 'library' ? (
-          <>
-            {filteredEffects.map(effect => (
-              <div
-                key={effect.id}
-                onClick={() => handleEffectClick(effect)}
-                onMouseEnter={() => setHoveredEffect(effect.id)}
-                onMouseLeave={() => setHoveredEffect((current) => (current === effect.id ? null : current))}
-                draggable={effect.type === 'css'}
-                onDragStart={(event) => {
-                  if (effect.type !== 'css') return;
-                  event.dataTransfer.setData('application/x-effect-id', effect.id);
-                  event.dataTransfer.effectAllowed = 'copy';
-                }}
-                className={`p-3 rounded-lg border-2 transition-all duration-200 ${
-                  isEffectUnavailable(effect)
-                    ? 'bg-gray-800 border-gray-700 text-gray-600 cursor-not-allowed'
-                    : 'bg-gray-900/50 border-gray-700 hover:border-indigo-500 hover:bg-gray-800 cursor-pointer'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  {getIcon(effect)}
-                  <div className="flex-grow">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold text-white">{effect.name}</p>
-                      <span className="text-[10px] uppercase tracking-wide text-gray-500">{getEffectCategory(effect)}</span>
-                    </div>
-                    <p className="text-sm text-gray-400">{effect.description}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {filteredEffects.length === 0 && (
-              <p className="text-xs text-center text-gray-500 mt-4">No matching effects found.</p>
-            )}
-            {disabled && <p className="text-xs text-center text-gray-500 mt-4">Select a clip for clip-based effects. Solid Color and Text Overlay can also create standalone clips.</p>}
-          </>
-        ) : (
-          <>
-            {filteredStacks.map((stack) => (
-              <div
-                key={stack.id}
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.setData('application/x-effect-stack-id', stack.id);
-                  event.dataTransfer.effectAllowed = 'copy';
-                }}
-                className={`rounded-lg border p-3 ${disabled ? 'border-gray-700 bg-gray-800/40 opacity-70' : 'border-gray-700 bg-gray-900/50 hover:border-indigo-500/60'}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">{stack.name}</p>
-                    <p className="mt-1 text-xs text-gray-400">{stack.description}</p>
-                    <p className="mt-1 text-[10px] uppercase tracking-wide text-gray-500">
-                      {stack.category} · {stack.effects?.length || 1} FX · Base: {stack.baseEffect}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onApplyEffectStack(stack.id)}
-                    className="rounded border border-indigo-500/40 bg-indigo-600/20 px-2 py-1 text-[10px] uppercase tracking-wide text-indigo-200 disabled:opacity-40"
-                  >
-                    Apply
-                  </button>
-                </div>
-              </div>
-            ))}
-            {filteredStacks.length === 0 && <p className="text-xs text-center text-gray-500 mt-4">No matching stacks found.</p>}
-            <p className="text-[10px] text-gray-500 mt-2">Tip: Drag an effect or stack directly onto a clip in the timeline.</p>
-          </>
-        )}
+
+      <label className="fx-search">
+        <SearchIcon className="fx-search__icon" />
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={panelView === 'library' ? 'Search effects' : 'Search presets'}
+          aria-label={panelView === 'library' ? 'Search effects' : 'Search presets'}
+        />
+      </label>
+
+      <div className="fx-filters" role="tablist" aria-label="Category">
+        {filters.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            aria-selected={activeFilter === entry.id}
+            onClick={() => setFilter(entry.id)}
+            className={`fx-filters__item ${activeFilter === entry.id ? 'fx-filters__item--active' : ''}`}
+          >
+            {entry.label}
+          </button>
+        ))}
       </div>
+
+      <div className="fx-browser__scroll">
+        {panelView === 'library' ? (
+          libraryFilter === 'all' && !term ? (
+            groupedEffects.map((group) => (
+              <section key={group.category} className="fx-section">
+                <header className="fx-section__title">{CATEGORY_LABEL[group.category]}</header>
+                <div className="fx-grid">{group.effects.map(renderEffectTile)}</div>
+              </section>
+            ))
+          ) : (
+            <div className="fx-grid">{filteredEffects.map(renderEffectTile)}</div>
+          )
+        ) : (
+          <div className="fx-grid">{filteredStacks.map(renderPresetTile)}</div>
+        )}
+
+        {isEmpty && <p className="fx-empty">No results for “{search.trim()}”</p>}
+      </div>
+
+      <footer className="fx-browser__footer">
+        {disabled ? (
+          <span>Select a clip to apply effects. Solid Color and Text can be added without a selection.</span>
+        ) : (
+          <span>Click to apply · drag onto a clip{previewFrameUrl && previewSourceLabel ? ` · previewing ${previewSourceLabel}` : ''}</span>
+        )}
+      </footer>
     </div>
   );
 };
