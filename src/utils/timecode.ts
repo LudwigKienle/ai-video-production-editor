@@ -41,3 +41,36 @@ export const pickRulerStep = (pixelsPerSecond: number, minLabelPx = 84): number 
     }
     return RULER_STEPS[RULER_STEPS.length - 1];
 };
+
+/**
+ * Parses user-typed positions: "hh:mm:ss:ff", "mm:ss:ff", "mm:ss", "12.5" (seconds),
+ * "1230" (digits, right-aligned as hh:mm:ss:ff) and "+12"/"-1:00" relative to `current`.
+ * Returns seconds or null when the input cannot be understood.
+ */
+export const parseTimecode = (input: string, fps = DEFAULT_TIMELINE_FPS, current = 0): number | null => {
+    const raw = input.trim();
+    if (!raw) return null;
+    const relative = raw.startsWith('+') || raw.startsWith('-') ? (raw.startsWith('-') ? -1 : 1) : 0;
+    const body = relative ? raw.slice(1).trim() : raw;
+    let seconds: number | null = null;
+    if (/^\d+$/.test(body) && body.length > 2) {
+        const padded = body.padStart(8, '0').slice(-8);
+        const hh = Number(padded.slice(0, 2));
+        const mm = Number(padded.slice(2, 4));
+        const ss = Number(padded.slice(4, 6));
+        const ff = Number(padded.slice(6, 8));
+        seconds = hh * 3600 + mm * 60 + ss + Math.min(ff, fps - 1) / fps;
+    } else if (/^[\d.]+$/.test(body)) {
+        const value = Number.parseFloat(body);
+        seconds = Number.isFinite(value) ? value : null;
+    } else {
+        const parts = body.split(/[:;]/).map((part) => part.trim());
+        if (parts.some((part) => part === '' || !/^\d+(\.\d+)?$/.test(part))) return null;
+        const numbers = parts.map(Number);
+        if (numbers.length === 2) seconds = numbers[0] * 60 + numbers[1];
+        else if (numbers.length === 3) seconds = numbers[0] * 60 + numbers[1] + Math.min(numbers[2], fps - 1) / fps;
+        else if (numbers.length === 4) seconds = numbers[0] * 3600 + numbers[1] * 60 + numbers[2] + Math.min(numbers[3], fps - 1) / fps;
+    }
+    if (seconds === null || !Number.isFinite(seconds)) return null;
+    return Math.max(0, relative ? current + relative * seconds : seconds);
+};

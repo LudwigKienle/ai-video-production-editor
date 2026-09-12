@@ -15,19 +15,23 @@ import {
   type CorridorKeyResult,
   type CorridorKeyStatus,
 } from '../services/corridorKeyService';
-import { LayersIcon, UploadIcon } from '../components/icons';
+import { LayersIcon, UploadIcon, FilmIcon } from '../components/icons';
+import EditorPageShell, { type SharedSequenceProps } from '../components/EditorPageShell';
+import { formatTimecode } from '../utils/timecode';
 import NatronCompositorPanel from '../components/NatronCompositorPanel';
 import ArtRelightPanel from '../components/ArtRelightPanel';
 import CompositingNodeStudioView from '../components/CompositingNodeStudioView';
 import { COMPOSITING_WORKSPACE_VIEWS, type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
 
-interface CompositingWorkspaceProps {
-  mediaItems: MediaItem[];
+interface CompositingWorkspaceProps extends SharedSequenceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
   apiKeyReady?: boolean;
   seedVideoUrl?: string | null;
   onConsumeSeed?: () => void;
   currentProjectPath?: string | null;
+  /** Places a result on the shared timeline at the playhead. */
+  onAddToTimeline?: (item: MediaItem) => void;
+  onSwitchToEdit?: () => void;
 }
 
 type BlendMode = 'source-over' | 'screen' | 'multiply' | 'overlay' | 'soft-light';
@@ -64,14 +68,18 @@ const parseOptionalInteger = (value: string) => {
   return Number.isFinite(parsed) ? Math.round(parsed) : undefined;
 };
 
-const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
-  mediaItems,
-  onAddGeneratedMedia,
-  apiKeyReady,
-  seedVideoUrl,
-  onConsumeSeed,
-  currentProjectPath,
-}) => {
+const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
+  const {
+    mediaItems,
+    onAddGeneratedMedia,
+    apiKeyReady,
+    seedVideoUrl,
+    onConsumeSeed,
+    currentProjectPath,
+    onAddToTimeline,
+  } = props;
+  const timelineClip = props.timelineClips.find((clip) => clip.id === props.selectedClipId) || null;
+  const timelineMedia = timelineClip ? mediaItems.find((item) => item.id === timelineClip.mediaId) || null : null;
   const [openPoseFile, setOpenPoseFile] = useState<File | null>(null);
   const [openPoseStatus, setOpenPoseStatus] = useState<string | null>(null);
   const [openPoseResult, setOpenPoseResult] = useState<MediaItem | null>(null);
@@ -644,16 +652,40 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
     }
   };
 
-  return (
-    <div className="studio-workspace p-6 h-full overflow-auto">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold">Video Compositing</h2>
-            <p className="text-gray-400">Combine OpenPose, reframe, animate replace, and layer compositing.</p>
-          </div>
-          <LayersIcon className="w-8 h-8 text-indigo-300" />
-        </div>
+  const fromTimeline = timelineClip && timelineMedia ? (
+    <div className="fusion-source">
+      <div className="fusion-source__text">
+        <FilmIcon className="w-4 h-4" />
+        <span>Timeline clip</span>
+        <strong>{timelineMedia.name}</strong>
+        <small>{timelineMedia.type} · {formatTimecode(timelineClip.end - timelineClip.start)}</small>
+      </div>
+      <div className="fusion-source__actions">
+        {timelineMedia.type === 'image' && (
+          <>
+            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setBackgroundMediaId(timelineMedia.id); setBackgroundSource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Use as background</button>
+            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setOverlayMediaId(timelineMedia.id); setOverlaySource('media'); setCompositingView('tools'); setCompositeTab('layer'); }}>Use as overlay</button>
+          </>
+        )}
+        {timelineMedia.type === 'video' && (
+          <>
+            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setCorridorKeySourceMediaId(timelineMedia.id); setCorridorKeySourceKind('media'); setCompositingView('tools'); setCompositeTab('key'); }}>Key this clip</button>
+            <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { setReframeVideoMediaId(timelineMedia.id); setReframeVideoSource('media'); setCompositingView('tools'); setCompositeTab('reframe'); }}>Reframe this clip</button>
+          </>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="fusion-source fusion-source--empty">
+      <FilmIcon className="w-4 h-4" />
+      <span>Select a clip in the film strip or timeline to composite it. Results can be placed back at the playhead.</span>
+    </div>
+  );
+
+  const main = (
+    <div className="page-shell__scroll">
+      <div className="max-w-6xl mx-auto space-y-6 p-6">
+        {fromTimeline}
 
         {apiKeyReady === false && (
           <div className="app-panel p-3 text-sm text-amber-200 border border-amber-400/40 bg-amber-400/10">
@@ -764,6 +796,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             {openPoseResult && (
               <div className="app-card p-2">
                 <img src={openPoseResult.url} alt="OpenPose result" className="w-full rounded-lg" />
+                {onAddToTimeline && (
+                  <button type="button" className="edit-text-btn edit-text-btn--primary mt-2" onClick={() => onAddToTimeline(openPoseResult)}>Add to timeline at playhead</button>
+                )}
               </div>
             )}
           </section>
@@ -866,6 +901,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
             {animateResult && (
               <div className="app-card p-2">
                 <video src={animateResult.url} controls className="w-full rounded-lg bg-black" />
+                {onAddToTimeline && (
+                  <button type="button" className="edit-text-btn edit-text-btn--primary mt-2" onClick={() => onAddToTimeline(animateResult)}>Add to timeline at playhead</button>
+                )}
               </div>
             )}
           </section>
@@ -1355,6 +1393,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           {reframeResult && (
             <div className="app-card p-2">
               <video src={reframeResult.url} controls className="w-full rounded-lg bg-black" />
+              {onAddToTimeline && (
+                <button type="button" className="edit-text-btn edit-text-btn--primary mt-2" onClick={() => onAddToTimeline(reframeResult)}>Add to timeline at playhead</button>
+              )}
             </div>
           )}
         </section>
@@ -1471,6 +1512,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           {compositeResult && (
             <div className="app-card p-2">
               <img src={compositeResult.url} alt="Composite result" className="w-full rounded-lg" />
+              {onAddToTimeline && (
+                <button type="button" className="edit-text-btn edit-text-btn--primary mt-2" onClick={() => onAddToTimeline(compositeResult)}>Add to timeline at playhead</button>
+              )}
             </div>
           )}
         </section>
@@ -1530,6 +1574,9 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
           {klingBridgeResult && (
             <div className="app-card p-2">
               <video src={klingBridgeResult.url} controls className="w-full rounded-lg bg-black" />
+              {onAddToTimeline && (
+                <button type="button" className="edit-text-btn edit-text-btn--primary mt-2" onClick={() => onAddToTimeline(klingBridgeResult)}>Add to timeline at playhead</button>
+              )}
             </div>
           )}
         </section>
@@ -1538,6 +1585,26 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = ({
         )}
       </div>
     </div>
+  );
+
+  const toolbar = (
+    <div className="edit-toolbar__group">
+      <span style={{ color: 'var(--app-accent-strong)' }}><LayersIcon className="w-4 h-4" /></span>
+      <span className="text-sm font-semibold">Fusion</span>
+      <span className="edit-toolbar__hint">Layer, key, relight, reframe and node comps on the shared timeline</span>
+    </div>
+  );
+
+  return (
+    <EditorPageShell
+      {...props}
+      page="fusion"
+      toolbar={toolbar}
+      main={main}
+      transportPlacement="bar"
+      followPlayhead
+      onSwitchToEdit={props.onSwitchToEdit}
+    />
   );
 };
 

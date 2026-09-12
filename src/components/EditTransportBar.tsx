@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, StepBackIcon, StepForwardIcon, MarkInIcon, MarkOutIcon } from './icons';
-import { formatTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
+import { formatTimecode, parseTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
 
 export interface EditTransportBarProps {
     isPlaying: boolean;
@@ -54,6 +54,18 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
         else onSeek(clampedPosition + direction / fps);
     };
 
+    // Click the timecode to type a position ("1:05", "00:00:12:08", "+2", "-1:00").
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+    const inputRef = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (editing) { inputRef.current?.focus(); inputRef.current?.select(); } }, [editing]);
+    const beginEdit = () => { if (disabled) return; setDraft(formatTimecode(clampedPosition, fps)); setEditing(true); };
+    const commitEdit = () => {
+        const parsed = parseTimecode(draft, fps, clampedPosition);
+        if (parsed !== null) onSeek(Math.min(safeDuration, parsed));
+        setEditing(false);
+    };
+
     const scrubberStyle: React.CSSProperties = {
         ['--edit-scrub-progress' as string]: `${progress}%`,
         ['--edit-scrub-in' as string]: `${hasMarks ? markStart : 0}%`,
@@ -101,8 +113,20 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                     </button>
                 </div>
 
-                <div className="edit-timecode" title="Current position / duration">
-                    <span className="edit-timecode__now">{formatTimecode(clampedPosition, fps)}</span>
+                <div className="edit-timecode" title="Click to type a position">
+                    {editing ? (
+                        <input
+                            ref={inputRef}
+                            className="edit-timecode__input"
+                            value={draft}
+                            onChange={(event) => setDraft(event.target.value)}
+                            onBlur={commitEdit}
+                            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitEdit(); } else if (event.key === 'Escape') { event.preventDefault(); setEditing(false); } event.stopPropagation(); }}
+                            aria-label="Go to timecode"
+                        />
+                    ) : (
+                        <button type="button" className="edit-timecode__now edit-timecode__now--button" onClick={beginEdit} disabled={disabled}>{formatTimecode(clampedPosition, fps)}</button>
+                    )}
                     <span className="edit-timecode__sep">/</span>
                     <span className="edit-timecode__total">{formatTimecode(duration > 0 ? duration : 0, fps)}</span>
                 </div>
