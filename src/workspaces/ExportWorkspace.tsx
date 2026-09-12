@@ -624,51 +624,24 @@ const ExportWorkspace: React.FC<ExportWorkspaceProps> = ({ mediaItems, timelineC
                         {renderDetail && (
                             <p className="text-xs text-gray-400 mb-3">{renderDetail}</p>
                         )}
-                        <div className="flex flex-wrap justify-center gap-3">
-                            <button onClick={startRender} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-8 rounded-lg transition-all hover:shadow-lg hover:shadow-indigo-500/25">
+                        <div className="flex flex-col items-center gap-3">
+                            <button onClick={startRender} className="app-button app-primary px-8 py-3 text-base">
                                 {settings.useFfmpeg ? 'Start HQ Render' : 'Start Render'}
                             </button>
-                            <button
-                                onClick={handleExportTimelineXml}
-                                disabled={timelineClips.length === 0}
-                                className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Export FCPXML
-                            </button>
-                            <button
-                                onClick={handleExportTimelineOtio}
-                                disabled={timelineClips.length === 0}
-                                className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Export OTIO
-                            </button>
-                            <button
-                                onClick={handleExportOcioManifest}
-                                className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg border border-gray-700 transition-all"
-                            >
-                                Export OCIO Manifest
-                            </button>
-                            <button
-                                onClick={handleExportVfxHandoffManifest}
-                                disabled={timelineClips.length === 0}
-                                className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg border border-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Export VFX Handoff
-                            </button>
-                            <button
-                                onClick={handleExportNukeScript}
-                                disabled={timelineClips.length === 0}
-                                className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg border border-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Export Nuke Script
-                            </button>
-                            <button
-                                onClick={handleExportNatronScript}
-                                disabled={timelineClips.length === 0}
-                                className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg border border-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Export Natron Script
-                            </button>
+                            <details className="pk-details w-full max-w-xl">
+                                <summary>More export formats<small>timeline &amp; VFX handoff</small></summary>
+                                <div className="pk-details__body">
+                                    <div className="pk-actions">
+                                        <button type="button" onClick={handleExportTimelineXml} disabled={timelineClips.length === 0} className="app-button app-secondary">FCPXML</button>
+                                        <button type="button" onClick={handleExportTimelineOtio} disabled={timelineClips.length === 0} className="app-button app-secondary">OTIO</button>
+                                        <button type="button" onClick={handleExportOcioManifest} className="app-button app-secondary">OCIO manifest</button>
+                                        <button type="button" onClick={handleExportVfxHandoffManifest} disabled={timelineClips.length === 0} className="app-button app-secondary">VFX handoff</button>
+                                        <button type="button" onClick={handleExportNukeScript} disabled={timelineClips.length === 0} className="app-button app-secondary">Nuke script</button>
+                                        <button type="button" onClick={handleExportNatronScript} disabled={timelineClips.length === 0} className="app-button app-secondary">Natron script</button>
+                                    </div>
+                                    <p className="pk-hint">FCPXML and OTIO carry the cut into other editors; OCIO, VFX handoff, Nuke and Natron package colour and shot data for compositing.</p>
+                                </div>
+                            </details>
                         </div>
                     </>
                 );

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { MagicWandIcon, LockIcon, CheckCircleIcon } from './icons';
+import { LockIcon, CheckCircleIcon, KeyboardIcon, SettingsIcon, FolderIcon, SparklesIcon, InfoIcon } from './icons';
 import { ShortcutAction, ShortcutMap, StudioAgentApprovalMode, StudioAgentControlMode, Workspace } from '../types';
 import { DEFAULT_SHORTCUTS, SHORTCUT_DEFINITIONS } from '../utils/shortcuts';
 import { clearCloudAuth, getCloudAuth, getCloudClientId, setCloudClientId, startCloudOAuth } from '../services/cloudAuthService';
@@ -333,689 +333,276 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         onKeySelected();
     };
 
-    return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50">
-            <div className="app-modal p-6 sm:p-8 max-w-3xl w-full text-center transform transition-all duration-300 scale-100 relative max-h-[85vh] overflow-y-auto">
-                {onClose && (
-                    <button
-                        onClick={onClose}
-                        className="absolute top-4 right-4 app-muted hover:text-white"
-                    >
-                        &times;
-                    </button>
+    type SettingsSection = 'providers' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
+    const [section, setSection] = useState<SettingsSection>('providers');
+    const [showAllProviders, setShowAllProviders] = useState(false);
+
+    type ProviderRow = {
+        id: string;
+        label: string;
+        value: string;
+        setValue: (value: string) => void;
+        saved: boolean;
+        setSaved: (value: boolean) => void;
+        placeholder: string;
+        usedFor: string;
+        href: string;
+        hrefLabel: string;
+        essential?: boolean;
+    };
+    const providers: ProviderRow[] = [
+        { id: 'google', label: 'Google Gemini', value: googleKey, setValue: setGoogleKey, saved: googleSaved, setSaved: setGoogleSaved, placeholder: 'AIzaSy…', usedFor: 'Script, Imagen, TTS and the AI Writer.', href: 'https://aistudio.google.com/app/apikey', hrefLabel: 'aistudio.google.com', essential: true },
+        { id: 'fal', label: 'fal.ai', value: falKey, setValue: setFalKey, saved: falSaved, setSaved: setFalSaved, placeholder: 'fal_…', usedFor: 'GPT Image, Seedream, Wan, Kling, Seedance and most video models.', href: 'https://fal.ai/dashboard/api-keys', hrefLabel: 'fal.ai', essential: true },
+        { id: 'replicate', label: 'Replicate', value: replicateKey, setValue: setReplicateKey, saved: replicateSaved, setSaved: setReplicateSaved, placeholder: 'r8_…', usedFor: 'Flux, upscaling, Lyria music, Demucs stems.', href: 'https://replicate.com/account/api-tokens', hrefLabel: 'replicate.com', essential: true },
+        { id: 'elevenlabs', label: 'ElevenLabs', value: elevenLabsKey, setValue: setElevenLabsKey, saved: elevenLabsSaved, setSaved: setElevenLabsSaved, placeholder: 'sk-…', usedFor: 'Voiceovers.', href: 'https://elevenlabs.io/app/settings/api-keys', hrefLabel: 'elevenlabs.io', essential: true },
+        { id: 'xai', label: 'xAI Grok', value: xaiKey, setValue: setXaiKey, saved: xaiSaved, setSaved: setXaiSaved, placeholder: 'xai_…', usedFor: 'Grok image and video generation.', href: 'https://console.x.ai/', hrefLabel: 'console.x.ai' },
+        { id: 'sonauto', label: 'Sonauto', value: sonautoKey, setValue: setSonautoKey, saved: sonautoSaved, setSaved: setSonautoSaved, placeholder: 'sa_…', usedFor: 'Full-song music generation.', href: 'https://sonauto.ai/developers', hrefLabel: 'sonauto.ai' },
+        { id: 'sonilo', label: 'Sonilo', value: soniloKey, setValue: setSoniloKey, saved: soniloSaved, setSaved: setSoniloSaved, placeholder: 'sk-…', usedFor: 'Licensed music and SFX nodes in Node Space.', href: 'https://platform.sonilo.com/dashboard/api-keys', hrefLabel: 'platform.sonilo.com' },
+        { id: 'ltx', label: 'LTX', value: ltxKey, setValue: setLtxKey, saved: ltxSaved, setSaved: setLtxSaved, placeholder: 'LTX API key', usedFor: 'Color Science upscale to ACES HDR EXR.', href: 'https://console.ltx.video', hrefLabel: 'console.ltx.video' },
+        { id: 'runway', label: 'Runway', value: runwayKey, setValue: setRunwayKey, saved: runwaySaved, setSaved: setRunwaySaved, placeholder: 'Runway API key', usedFor: 'Ruby: SDR video to true HDR.', href: 'https://dev.runwayml.com', hrefLabel: 'dev.runwayml.com' },
+        { id: 'worldlabs', label: 'World Labs', value: worldLabsKey, setValue: setWorldLabsKey, saved: worldLabsSaved, setSaved: setWorldLabsSaved, placeholder: 'WLT-…', usedFor: '3D world generation (Marble).', href: 'https://platform.worldlabs.ai/', hrefLabel: 'platform.worldlabs.ai' },
+        { id: 'brave', label: 'Brave Search', value: braveSearchKey, setValue: setBraveSearchKey, saved: braveSearchSaved, setSaved: setBraveSearchSaved, placeholder: 'BSA_…', usedFor: 'Web, news and image research for the Studio Agent.', href: 'https://api-dashboard.search.brave.com/', hrefLabel: 'api-dashboard.search.brave.com' },
+        { id: 'unsplash', label: 'Unsplash', value: unsplashKey, setValue: setUnsplashKey, saved: unsplashSaved, setSaved: setUnsplashSaved, placeholder: 'Unsplash Access Key', usedFor: 'Stock library search. Access Key only, never the Secret Key.', href: 'https://unsplash.com/developers', hrefLabel: 'unsplash.com/developers' },
+    ];
+    const connectedCount = providers.filter((row) => row.value.trim()).length;
+    const essentialMissing = providers.filter((row) => row.essential && !row.value.trim()).length;
+    const visibleProviders = showAllProviders ? providers : providers.filter((row) => row.essential || row.value.trim());
+    const hiddenCount = providers.length - visibleProviders.length;
+
+    const renderProvider = (row: ProviderRow) => {
+        const has = row.value.trim().length > 0;
+        return (
+            <div key={row.id} className={`settings-provider ${has ? 'settings-provider--on' : ''}`}>
+                <div className="settings-provider__head">
+                    <div className="settings-provider__name">
+                        <span className={`settings-provider__dot ${has ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                        <strong>{row.label}</strong>
+                        {row.essential && !has && <span className="pk-chip pk-chip--warn">recommended</span>}
+                        {has && row.saved && <span className="pk-chip pk-chip--ok"><CheckCircleIcon className="w-3 h-3" />saved</span>}
+                        {has && !row.saved && <span className="pk-chip pk-chip--accent">unsaved</span>}
+                    </div>
+                    <a className="settings-provider__link" href={row.href} target="_blank" rel="noreferrer">Get a key ↗</a>
+                </div>
+                <label className="settings-provider__field">
+                    <LockIcon className="w-3.5 h-3.5" />
+                    <input
+                        type="password"
+                        value={row.value}
+                        onChange={(e) => { row.setValue(e.target.value); row.setSaved(false); }}
+                        placeholder={row.placeholder}
+                        aria-label={`${row.label} API key`}
+                        autoComplete="off"
+                        spellCheck={false}
+                    />
+                </label>
+                <p className="pk-hint">{row.usedFor}</p>
+                {row.id === 'google' && (
+                    <label className="pk-field settings-provider__extra">
+                        <span>Run Google models via</span>
+                        <select value={googleProvider} onChange={(e) => setGoogleProvider(e.target.value as GoogleModelProvider)}>
+                            <option value="gemini">Gemini (AI Studio)</option>
+                            <option value="replicate">Replicate</option>
+                        </select>
+                        <span className="pk-hint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>Replicate makes Gemini 3 Pro + Veo work without a Gemini key.</span>
+                    </label>
                 )}
+            </div>
+        );
+    };
 
-                <div className="flex justify-center mb-6">
-                    <div className="p-4 bg-sky-500/10 rounded-full border border-sky-400/30">
-                        <MagicWandIcon className="w-12 h-12 text-sky-300" />
-                    </div>
+    const renderCloud = (kind: 'dropbox' | 'google-drive', label: string, value: string, setValue: (v: string) => void, saved: boolean, setSaved: (v: boolean) => void, connected: boolean) => (
+        <div className={`settings-provider ${connected ? 'settings-provider--on' : ''}`}>
+            <div className="settings-provider__head">
+                <div className="settings-provider__name">
+                    <span className={`settings-provider__dot ${connected ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                    <strong>{label}</strong>
+                    <span className={`pk-chip ${connected ? 'pk-chip--ok' : ''}`}>{connected ? 'connected' : 'not connected'}</span>
+                    {saved && !connected && <span className="pk-chip"><CheckCircleIcon className="w-3 h-3" />client id saved</span>}
                 </div>
-                <h2 className="text-3xl font-bold mb-2">Studio Settings</h2>
-                <p className="app-muted mb-8 text-sm">
-                    Connect your AI providers to start creating.
-                </p>
-
-                <div className="text-left mb-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Google Gemini API</label>
-                            {googleSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={googleKey}
-                                onChange={(e) => { setGoogleKey(e.target.value); setGoogleSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="AIzaSy..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Required for Script, Imagen, and TTS. Gemini/Veo image + video and AI Writer can use Replicate if selected below.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://aistudio.google.com/app/apikey"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                aistudio.google.com
-                            </a>
-                            . Create an API key, then paste it here.
-                        </p>
-                        <div className="mt-3">
-                            <label className="block text-[10px] font-semibold app-muted uppercase mb-1">Google models via</label>
-                            <select
-                                className="app-select text-xs w-full"
-                                value={googleProvider}
-                                onChange={(e) => setGoogleProvider(e.target.value as GoogleModelProvider)}
-                            >
-                                <option value="gemini">Gemini (AI Studio)</option>
-                                <option value="replicate">Replicate</option>
-                            </select>
-                            <p className="text-[10px] app-muted mt-2">Replicate makes Gemini 3 Pro + Veo optional without a Gemini key.</p>
-                        </div>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Replicate API</label>
-                            {replicateSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={replicateKey}
-                                onChange={(e) => { setReplicateKey(e.target.value); setReplicateSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="r8_..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Required for Flux Pro, Schnell (Turbo), and Upscaling.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a token at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://replicate.com/account/api-tokens"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                replicate.com
-                            </a>
-                            . Create a token and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">xAI Grok API</label>
-                            {xaiSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={xaiKey}
-                                onChange={(e) => { setXaiKey(e.target.value); setXaiSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="xai_..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Required for Grok image + video generation.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://console.x.ai/"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                console.x.ai
-                            </a>
-                            . Create an API key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">ElevenLabs API</label>
-                            {elevenLabsSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={elevenLabsKey}
-                                onChange={(e) => { setElevenLabsKey(e.target.value); setElevenLabsSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="sk-..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Required for ElevenLabs voice generation.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://elevenlabs.io/app/settings/api-keys"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                elevenlabs.io
-                            </a>
-                            . Generate an API key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Sonauto API</label>
-                            {sonautoSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={sonautoKey}
-                                onChange={(e) => { setSonautoKey(e.target.value); setSonautoSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="sa_..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for full-song music generation in Sound Design.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://sonauto.ai/developers"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                sonauto.ai/developers
-                            </a>
-                            . Sonauto notes that user-facing API integrations may require attribution.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Sonilo API</label>
-                            {soniloSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={soniloKey}
-                                onChange={(e) => { setSoniloKey(e.target.value); setSoniloSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="sk-..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for the Music and SFX nodes in Node Space: a licensed track, or royalty-free sound effects, generated from a rendered video.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://platform.sonilo.com/dashboard/api-keys"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                platform.sonilo.com
-                            </a>
-                            . Create an API key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">FAL AI API</label>
-                            {falSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={falKey}
-                                onChange={(e) => { setFalKey(e.target.value); setFalSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="fal_..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for FAL Qwen multi-angle editing plus Kling O3/v3, Grok I2V, and Aurora video.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://fal.ai/dashboard/api-keys"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                fal.ai
-                            </a>
-                            . Create a key, then paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">LTX API</label>
-                            {ltxSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={ltxKey}
-                                onChange={(e) => { setLtxKey(e.target.value); setLtxSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="LTX API key"
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for Color Science Upscale: SDR video to ACES HDR EXR frame archives.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://console.ltx.video"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                console.ltx.video
-                            </a>
-                            . Create a key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Runway API</label>
-                            {runwaySaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={runwayKey}
-                                onChange={(e) => { setRunwayKey(e.target.value); setRunwaySaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="Runway API key"
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for Runway Ruby: SDR video to true HDR (HDR10, HLG, ProRes, or EXR sequences) in Upscale › Color Science.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://dev.runwayml.com"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                dev.runwayml.com
-                            </a>
-                            . Create a key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">World Labs API</label>
-                            {worldLabsSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={worldLabsKey}
-                                onChange={(e) => { setWorldLabsKey(e.target.value); setWorldLabsSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="WLT-..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">For 3D World Generation (Marble).</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://platform.worldlabs.ai/"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                platform.worldlabs.ai
-                            </a>
-                            . Create a key and paste it here.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Brave Search API</label>
-                            {braveSearchSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={braveSearchKey}
-                                onChange={(e) => { setBraveSearchKey(e.target.value); setBraveSearchSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="BSA_..."
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Optional but recommended for read-only web, news, and image research inside the Studio Agent.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Get a key at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://api-dashboard.search.brave.com/"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                api-dashboard.search.brave.com
-                            </a>
-                            . The agent uses this only for search and citation retrieval.
-                        </p>
-                    </div>
-
-                    <div className="app-card p-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-xs font-bold app-muted uppercase">Unsplash API</label>
-                            {unsplashSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="password"
-                                value={unsplashKey}
-                                onChange={(e) => { setUnsplashKey(e.target.value); setUnsplashSaved(false); }}
-                                className="app-input pl-10"
-                                placeholder="Unsplash Access Key"
-                            />
-                            <div className="absolute left-3 top-3.5 app-muted">
-                                <LockIcon className="w-4 h-4" />
-                            </div>
-                        </div>
-                        <p className="text-[10px] app-muted mt-2">Used for the Stock Library search. Paste the Access Key only, not the Secret Key.</p>
-                        <p className="text-[10px] app-muted mt-1">
-                            Register an app at{' '}
-                            <a
-                                className="text-indigo-300 hover:text-indigo-200"
-                                href="https://unsplash.com/developers"
-                                target="_blank"
-                                rel="noreferrer"
-                            >
-                                unsplash.com/developers
-                            </a>
-                            .
-                        </p>
-                    </div>
-                </div>
-
-                <div className="text-left mb-8">
-                    <div className="flex items-center justify-between mb-3">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Cloud Providers</h3>
-                            <p className="text-[10px] app-muted mt-1">Set OAuth client IDs, then connect to Dropbox or Google Drive.</p>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="app-card p-4">
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="block text-xs font-bold app-muted uppercase">Dropbox Client ID</label>
-                                {dropboxSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                            </div>
-                            <input
-                                type="text"
-                                value={dropboxClientId}
-                                onChange={(e) => { setDropboxClientId(e.target.value); setDropboxSaved(false); }}
-                                className="app-input text-xs"
-                                placeholder="Dropbox OAuth client ID"
-                            />
-                            <div className="flex items-center justify-between mt-3">
-                                <span className={`text-[10px] ${dropboxConnected ? 'text-emerald-300' : 'text-gray-500'}`}>
-                                    {dropboxConnected ? 'Connected' : 'Not connected'}
-                                </span>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => handleConnect('dropbox')}
-                                        className="app-button app-secondary text-xs"
-                                        type="button"
-                                    >
-                                        Connect
-                                    </button>
-                                    <button
-                                        onClick={() => handleDisconnect('dropbox')}
-                                        className="app-button app-tertiary text-xs"
-                                        type="button"
-                                    >
-                                        Disconnect
-                                    </button>
-                                </div>
-                            </div>
-                            <p className="text-[10px] app-muted mt-2">Redirect URI: {typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : 'app://local'}</p>
-                        </div>
-
-                        <div className="app-card p-4">
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="block text-xs font-bold app-muted uppercase">Google Drive Client ID</label>
-                                {googleDriveSaved && <span className="text-[10px] text-emerald-300 flex items-center gap-1"><CheckCircleIcon className="w-3 h-3" /> Saved</span>}
-                            </div>
-                            <input
-                                type="text"
-                                value={googleDriveClientId}
-                                onChange={(e) => { setGoogleDriveClientId(e.target.value); setGoogleDriveSaved(false); }}
-                                className="app-input text-xs"
-                                placeholder="Google OAuth client ID"
-                            />
-                            <div className="flex items-center justify-between mt-3">
-                                <span className={`text-[10px] ${googleDriveConnected ? 'text-emerald-300' : 'text-gray-500'}`}>
-                                    {googleDriveConnected ? 'Connected' : 'Not connected'}
-                                </span>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => handleConnect('google-drive')}
-                                        className="app-button app-secondary text-xs"
-                                        type="button"
-                                    >
-                                        Connect
-                                    </button>
-                                    <button
-                                        onClick={() => handleDisconnect('google-drive')}
-                                        className="app-button app-tertiary text-xs"
-                                        type="button"
-                                    >
-                                        Disconnect
-                                    </button>
-                                </div>
-                            </div>
-                            <p className="text-[10px] app-muted mt-2">Redirect URI: {typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : 'app://local'}</p>
-                        </div>
-                    </div>
-                    {cloudError && (
-                        <div className="text-red-400 text-xs mt-3 bg-red-500/10 border border-red-500/30 p-2 rounded">
-                            {cloudError}
-                        </div>
+                <span className="pk-actions">
+                    {connected ? (
+                        <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => handleDisconnect(kind)}>Disconnect</button>
+                    ) : (
+                        <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={() => handleConnect(kind)} disabled={!value.trim()}>Connect</button>
                     )}
-                </div>
+                </span>
+            </div>
+            <label className="settings-provider__field">
+                <FolderIcon className="w-3.5 h-3.5" />
+                <input type="text" value={value} onChange={(e) => { setValue(e.target.value); setSaved(false); }} placeholder={`${label} OAuth client ID`} aria-label={`${label} client ID`} spellCheck={false} />
+            </label>
+            <p className="pk-hint">Redirect URI: <code className="pk-mono">{typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : 'app://local'}</code></p>
+        </div>
+    );
 
-                <div className="text-left mb-8">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Keyboard Shortcuts</h3>
-                            <p className="text-[10px] app-muted mt-1">Format: mod+shift+p, ctrl+k, cmd+1. Leave empty to disable.</p>
-                        </div>
-                        <button
-                            onClick={handleResetShortcuts}
-                            className="app-button app-secondary text-xs"
-                            type="button"
-                        >
-                            Reset Defaults
-                        </button>
+    const nav: Array<{ id: SettingsSection; label: string; hint: string; icon: React.FC<{ className?: string }> }> = [
+        { id: 'providers', label: 'AI providers', hint: `${connectedCount} of ${providers.length} connected`, icon: SparklesIcon },
+        { id: 'cloud', label: 'Cloud', hint: dropboxConnected || googleDriveConnected ? 'connected' : 'Dropbox, Google Drive', icon: FolderIcon },
+        { id: 'shortcuts', label: 'Shortcuts', hint: 'keyboard', icon: KeyboardIcon },
+        { id: 'startup', label: 'Startup', hint: 'workspace, assistant', icon: SettingsIcon },
+        { id: 'autosave', label: 'Autosave', hint: autosaveValues.enabled ? 'on' : 'off', icon: InfoIcon },
+    ];
+
+    return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div className="settings">
+                <aside className="settings__nav">
+                    <div className="settings__brand">
+                        <h2 id="settings-title">Settings</h2>
+                        <p className="pk-hint">{onClose ? 'Keys stay on this machine.' : 'Add one key to start creating.'}</p>
                     </div>
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {SHORTCUT_DEFINITIONS.map((shortcut) => (
-                            <div key={shortcut.id} className="app-card p-3">
-                                <div className="text-xs font-semibold text-white">{shortcut.label}</div>
-                                <div className="text-[10px] app-muted">{shortcut.description}</div>
-                                <input
-                                    className="app-input text-xs mt-2"
-                                    value={shortcutValues[shortcut.id] || ''}
-                                    onChange={(e) => handleShortcutChange(shortcut.id, e.target.value)}
-                                    placeholder="disabled"
-                                    aria-label={`${shortcut.label} shortcut`}
-                                />
-                            </div>
+                    <nav className="settings__list" aria-label="Settings sections">
+                        {nav.map((item) => (
+                            <button key={item.id} type="button" className={`settings__item ${section === item.id ? 'settings__item--active' : ''}`} onClick={() => setSection(item.id)} aria-current={section === item.id ? 'page' : undefined}>
+                                <item.icon className="w-4 h-4" />
+                                <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+                            </button>
                         ))}
-                    </div>
-                </div>
+                    </nav>
+                    {onClose && <button type="button" className="edit-text-btn settings__close" onClick={onClose}>Close</button>}
+                </aside>
 
-                <div className="text-left mb-8">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Startup Behavior</h3>
-                            <p className="text-[10px] app-muted mt-1">Customize default opening workspace and assistant launch behavior.</p>
-                        </div>
-                    </div>
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Default Workspace</div>
-                            <div className="text-[10px] app-muted">Workspace shown after app launch.</div>
-                            <select
-                                className="app-select text-xs mt-2 w-full"
-                                value={startupValues.startupWorkspace}
-                                onChange={(e) => updateStartupPreferences({ startupWorkspace: e.target.value as Workspace })}
-                            >
-                                <option value="PROJECT">Project Hub</option>
-                                <option value="IMAGE_GEN">Image Gen</option>
-                                <option value="VIDEO_GEN">Video Gen</option>
-                                <option value="MOODBOARD">Moodboard</option>
-                                <option value="EDIT">Edit Timeline</option>
-                            </select>
-                        </div>
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Assistant</div>
-                            <div className="text-[10px] app-muted">Open assistant automatically on startup.</div>
-                            <label className="text-xs text-gray-200 flex items-center gap-2 mt-3">
-                                <input
-                                    type="checkbox"
-                                    checked={startupValues.autoOpenAssistant}
-                                    onChange={(e) => updateStartupPreferences({ autoOpenAssistant: e.target.checked })}
-                                />
-                                Auto-open assistant
-                            </label>
-                        </div>
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Agent Mode</div>
-                            <div className="text-[10px] app-muted">Choose between assistant-driven workflows and manual-only control.</div>
-                            <select
-                                className="app-select text-xs mt-2 w-full"
-                                value={startupValues.studioAgentMode}
-                                onChange={(e) => updateStartupPreferences({ studioAgentMode: e.target.value as StudioAgentControlMode })}
-                            >
-                                <option value="agent">Agent Mode</option>
-                                <option value="manual">Manual Mode</option>
-                            </select>
-                        </div>
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Approval Policy</div>
-                            <div className="text-[10px] app-muted">Decide whether approvals happen only on important actions or on every action.</div>
-                            <select
-                                className="app-select text-xs mt-2 w-full"
-                                value={startupValues.studioAgentApprovalMode}
-                                onChange={(e) => updateStartupPreferences({ studioAgentApprovalMode: e.target.value as StudioAgentApprovalMode })}
-                            >
-                                <option value="important_only">Important decisions only</option>
-                                <option value="every_action">Ask on every action</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
+                <div className="settings__main">
+                    <div className="settings__scroll">
+                        {section === 'providers' && (
+                            <div className="pk-stack">
+                                <div className="settings__head">
+                                    <h3>AI providers</h3>
+                                    <p className="pk-hint">
+                                        {essentialMissing === 0
+                                            ? 'Everything essential is connected. Add more providers as you need their models.'
+                                            : `Add ${essentialMissing === 4 ? 'a Gemini or fal.ai key' : 'the remaining recommended keys'} to unlock generation. Keys are stored locally and never sent anywhere but the provider.`}
+                                    </p>
+                                </div>
+                                <div className="settings__providers">{visibleProviders.map(renderProvider)}</div>
+                                {hiddenCount > 0 && (
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline self-start" onClick={() => setShowAllProviders(true)}>Show {hiddenCount} more provider{hiddenCount === 1 ? '' : 's'}</button>
+                                )}
+                                {showAllProviders && hiddenCount === 0 && providers.some((row) => !row.essential && !row.value.trim()) && (
+                                    <button type="button" className="edit-text-btn self-start" onClick={() => setShowAllProviders(false)}>Show fewer</button>
+                                )}
+                            </div>
+                        )}
 
-                <div className="text-left mb-8">
-                    <div className="app-card p-4 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Onboarding</h3>
-                            <p className="text-[10px] app-muted mt-1">Re-open the welcome walkthrough anytime.</p>
-                        </div>
-                        <button
-                            type="button"
-                            className="app-button app-secondary text-xs"
-                            onClick={() => onRestartOnboarding?.()}
-                        >
-                            Walkthrough erneut starten
+                        {section === 'cloud' && (
+                            <div className="pk-stack">
+                                <div className="settings__head">
+                                    <h3>Cloud storage</h3>
+                                    <p className="pk-hint">Paste an OAuth client ID, save, then connect. Files stay in your own account.</p>
+                                </div>
+                                <div className="settings__providers">
+                                    {renderCloud('dropbox', 'Dropbox', dropboxClientId, setDropboxClientId, dropboxSaved, setDropboxSaved, dropboxConnected)}
+                                    {renderCloud('google-drive', 'Google Drive', googleDriveClientId, setGoogleDriveClientId, googleDriveSaved, setGoogleDriveSaved, googleDriveConnected)}
+                                </div>
+                                {cloudError && <div className="pk-alert pk-alert--danger">{cloudError}</div>}
+                            </div>
+                        )}
+
+                        {section === 'shortcuts' && (
+                            <div className="pk-stack">
+                                <div className="settings__head settings__head--row">
+                                    <div>
+                                        <h3>Keyboard shortcuts</h3>
+                                        <p className="pk-hint">Format: mod+shift+p, ctrl+k, cmd+1. Leave a field empty to disable it.</p>
+                                    </div>
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={handleResetShortcuts}>Reset to defaults</button>
+                                </div>
+                                <div className="pk-list">
+                                    {SHORTCUT_DEFINITIONS.map((shortcut) => (
+                                        <label key={shortcut.id} className="pk-row settings__shortcut">
+                                            <span className="pk-row__body">
+                                                <span className="pk-row__title">{shortcut.label}</span>
+                                                <span className="pk-row__meta">{shortcut.description}</span>
+                                            </span>
+                                            <input className="pk-mono" value={shortcutValues[shortcut.id] || ''} onChange={(e) => handleShortcutChange(shortcut.id, e.target.value)} placeholder="disabled" aria-label={`${shortcut.label} shortcut`} spellCheck={false} />
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {section === 'startup' && (
+                            <div className="pk-stack">
+                                <div className="settings__head">
+                                    <h3>Startup &amp; assistant</h3>
+                                    <p className="pk-hint">What you see first, and how much the assistant does on its own.</p>
+                                </div>
+                                <div className="pk-card">
+                                    <label className="pk-field">
+                                        <span>Open on launch</span>
+                                        <select value={startupValues.startupWorkspace} onChange={(e) => updateStartupPreferences({ startupWorkspace: e.target.value as Workspace })}>
+                                            <option value="PROJECT">Project Hub</option>
+                                            <option value="IMAGE_GEN">Images</option>
+                                            <option value="VIDEO_GEN">Video</option>
+                                            <option value="MOODBOARD">Moodboard</option>
+                                            <option value="EDIT">Edit timeline</option>
+                                        </select>
+                                    </label>
+                                    <label className="pk-switch">
+                                        <span><span className="pk-card__title" style={{ display: 'block' }}>Open the assistant automatically</span><span className="pk-hint">Shows the assistant panel when the app starts.</span></span>
+                                        <input type="checkbox" checked={startupValues.autoOpenAssistant} onChange={(e) => updateStartupPreferences({ autoOpenAssistant: e.target.checked })} />
+                                    </label>
+                                </div>
+                                <div className="pk-card">
+                                    <div className="pk-field">
+                                        <span>Studio agent</span>
+                                        <div className="pk-seg" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                                            <button type="button" aria-pressed={startupValues.studioAgentMode === 'agent'} onClick={() => updateStartupPreferences({ studioAgentMode: 'agent' })}>Agent mode</button>
+                                            <button type="button" aria-pressed={startupValues.studioAgentMode === 'manual'} onClick={() => updateStartupPreferences({ studioAgentMode: 'manual' })}>Manual only</button>
+                                        </div>
+                                    </div>
+                                    <div className="pk-field">
+                                        <span>Ask before acting</span>
+                                        <div className="pk-seg" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                                            <button type="button" aria-pressed={startupValues.studioAgentApprovalMode === 'important_only'} onClick={() => updateStartupPreferences({ studioAgentApprovalMode: 'important_only' })}>Important decisions</button>
+                                            <button type="button" aria-pressed={startupValues.studioAgentApprovalMode === 'every_action'} onClick={() => updateStartupPreferences({ studioAgentApprovalMode: 'every_action' })}>Every action</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="pk-card pk-card--quiet">
+                                    <div className="pk-card__head">
+                                        <span><span className="pk-card__title" style={{ display: 'block' }}>Welcome walkthrough</span><span className="pk-hint">Replay the first-run tour any time.</span></span>
+                                        <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => onRestartOnboarding?.()}>Start again</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {section === 'autosave' && (
+                            <div className="pk-stack">
+                                <div className="settings__head">
+                                    <h3>Autosave</h3>
+                                    <p className="pk-hint">Saves the project folder in the background after you stop editing.</p>
+                                </div>
+                                <div className="pk-card">
+                                    <label className="pk-switch">
+                                        <span><span className="pk-card__title" style={{ display: 'block' }}>Autosave</span><span className="pk-hint">Write changes to the project folder automatically.</span></span>
+                                        <input type="checkbox" checked={autosaveValues.enabled} onChange={(e) => updateAutosaveSettings({ enabled: e.target.checked })} />
+                                    </label>
+                                    <label className="pk-switch">
+                                        <span><span className="pk-card__title" style={{ display: 'block' }}>Offer recovery after a crash</span><span className="pk-hint">Restores the last autosave after an unclean shutdown.</span></span>
+                                        <input type="checkbox" checked={autosaveValues.recoverOnCrash} onChange={(e) => updateAutosaveSettings({ recoverOnCrash: e.target.checked })} />
+                                    </label>
+                                </div>
+                                <div className="pk-card">
+                                    <label className="pk-inline">Wait after the last edit
+                                        <input type="number" min={3} max={180} value={Math.round(autosaveValues.debounceMs / 1000)} onChange={(e) => { const seconds = Math.max(3, Math.min(180, Number(e.target.value) || 20)); updateAutosaveSettings({ debounceMs: seconds * 1000 }); }} disabled={!autosaveValues.enabled} />s
+                                    </label>
+                                    <label className="pk-inline">At most one save every
+                                        <input type="number" min={15} max={900} value={Math.round(autosaveValues.minIntervalMs / 1000)} onChange={(e) => { const seconds = Math.max(15, Math.min(900, Number(e.target.value) || 60)); updateAutosaveSettings({ minIntervalMs: seconds * 1000 }); }} disabled={!autosaveValues.enabled} />s
+                                    </label>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <footer className="settings__footer">
+                        {error ? <span className="settings__error">{error}</span> : <span className="pk-hint">{connectedCount} provider{connectedCount === 1 ? '' : 's'} connected</span>}
+                        <button type="button" onClick={handleSaveKey} className="app-button app-primary">
+                            {onClose ? 'Save' : 'Save & start'}
                         </button>
-                    </div>
+                    </footer>
                 </div>
-
-                <div className="text-left mb-8">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Autosave</h3>
-                            <p className="text-[10px] app-muted mt-1">Control debounce, minimum interval, and crash recovery behavior.</p>
-                        </div>
-                    </div>
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="app-card p-3 space-y-3 md:col-span-2">
-                            <label className="text-xs text-gray-200 flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    checked={autosaveValues.enabled}
-                                    onChange={(e) => updateAutosaveSettings({ enabled: e.target.checked })}
-                                />
-                                Enable autosave
-                            </label>
-                            <label className="text-xs text-gray-200 flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    checked={autosaveValues.recoverOnCrash}
-                                    onChange={(e) => updateAutosaveSettings({ recoverOnCrash: e.target.checked })}
-                                />
-                                Offer recovery after unclean shutdown
-                            </label>
-                        </div>
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Debounce (seconds)</div>
-                            <div className="text-[10px] app-muted">Wait after edits before autosave starts.</div>
-                            <input
-                                type="number"
-                                min={3}
-                                max={180}
-                                className="app-input text-xs mt-2"
-                                value={Math.round(autosaveValues.debounceMs / 1000)}
-                                onChange={(e) => {
-                                    const seconds = Math.max(3, Math.min(180, Number(e.target.value) || 20));
-                                    updateAutosaveSettings({ debounceMs: seconds * 1000 });
-                                }}
-                            />
-                        </div>
-                        <div className="app-card p-3">
-                            <div className="text-xs font-semibold text-white">Min Interval (seconds)</div>
-                            <div className="text-[10px] app-muted">Absolute minimum time between two autosaves.</div>
-                            <input
-                                type="number"
-                                min={15}
-                                max={900}
-                                className="app-input text-xs mt-2"
-                                value={Math.round(autosaveValues.minIntervalMs / 1000)}
-                                onChange={(e) => {
-                                    const seconds = Math.max(15, Math.min(900, Number(e.target.value) || 60));
-                                    updateAutosaveSettings({ minIntervalMs: seconds * 1000 });
-                                }}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {error && <p className="text-red-500 text-sm mb-4 bg-red-500/10 p-2 rounded border border-red-500/20">{error}</p>}
-
-                <button
-                    onClick={handleSaveKey}
-                    className="w-full app-button app-primary py-3 text-base"
-                >
-                    {onClose ? 'Save Changes' : 'Connect & Start Studio'}
-                </button>
             </div>
         </div>
     );
