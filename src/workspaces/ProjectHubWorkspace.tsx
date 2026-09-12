@@ -504,6 +504,20 @@ const DEFAULT_RELIGHT_SETTINGS: RelightSettings = {
 
 const isPhotorealisticStyle = (style: string) => /photo\s*real|photoreal/i.test(style);
 const isCinemascopeRatio = (ratio: AspectRatioOption) => ratio in CINEMASCOPE_RATIOS;
+/** CSS aspect-ratio value for a project aspect option — frames and tiles follow the chosen format instead of a fixed 16:9. */
+const aspectRatioToCss = (ratio: AspectRatioOption | undefined): string => {
+    switch (ratio) {
+        case '9:16': return '9 / 16';
+        case '4:3': return '4 / 3';
+        case '3:4': return '3 / 4';
+        case '1:1': return '1 / 1';
+        case '2.39:1': return '2.39 / 1';
+        case '235:100': return '2.35 / 1';
+        case '239:100': return '2.39 / 1';
+        default: return '16 / 9';
+    }
+};
+const isPortraitAspect = (ratio: AspectRatioOption | undefined) => ratio === '9:16' || ratio === '3:4';
 const getCinemascopeRatio = (ratio: AspectRatioOption) => CINEMASCOPE_RATIOS[ratio];
 const formatCinemascopeLabel = (ratio: AspectRatioOption) => {
     if (ratio === '235:100') return '2.35:1';
@@ -1558,11 +1572,15 @@ const ReferenceCard: React.FC<{
     extraContent?: React.ReactNode;
     showCameraControls?: boolean;
     detailsContent?: React.ReactNode;
+    /** CSS aspect-ratio for the media box; defaults to the classic 3:4 portrait card. */
+    aspect?: string;
     detailsLabel?: string;
     defaultExpanded?: boolean;
     showAngleStrip?: boolean;
     onOpenSheet?: (id: string) => void;
-}> = ({ reference, onUpdate, onGenerateDetails, onRegenerateImage, onUpload, onImportFromLibrary, onRemove, onViewFull, onRelight, extraContent, showCameraControls, detailsContent, detailsLabel, defaultExpanded, showAngleStrip, onOpenSheet }) => {
+}> = ({ reference, onUpdate, onGenerateDetails, onRegenerateImage, onUpload, onImportFromLibrary, onRemove, onViewFull, onRelight, extraContent, showCameraControls, detailsContent, detailsLabel, defaultExpanded, showAngleStrip, onOpenSheet ,
+    aspect,
+}) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const angleMeta = getReferenceAngleMeta(reference);
     const multiAngleUrls = angleMeta.map((meta) => meta.url).filter(Boolean);
@@ -1597,7 +1615,7 @@ const ReferenceCard: React.FC<{
         <div className="relative group bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-lg transition-all hover:border-indigo-500/50 hover:shadow-indigo-500/10 flex flex-col h-full">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
 
-            <div className="aspect-[3/4] relative bg-gray-900 flex-shrink-0">
+            <div className="relative bg-gray-900 flex-shrink-0" style={{ aspectRatio: aspect || '3 / 4' }}>
                 {hasMultiAngle ? (
                     <div className="grid grid-cols-2 grid-rows-2 w-full h-full">
                         {visibleAngles.map((url, index) => {
@@ -3609,7 +3627,9 @@ const ShotTile: React.FC<{
     active: boolean;
     mode: 'storyboard' | 'filming';
     onSelect: () => void;
-}> = ({ shot, label, active, mode, onSelect }) => {
+    /** CSS aspect-ratio of the frame, e.g. "9 / 16". */
+    aspect?: string;
+}> = ({ shot, label, active, mode, onSelect, aspect = '16 / 9' }) => {
     const image = shot.imageUrl || shot.startFrameUrl || shot.sketchUrl || null;
     const busy = mode === 'filming'
         ? Boolean(shot.isFilming)
@@ -3619,7 +3639,7 @@ const ShotTile: React.FC<{
     const score = critique ? Math.round(((critique.lightingScore + critique.compositionScore) / 2) * 10) : null;
     return (
         <button type="button" className={`shot-tile ${active ? 'shot-tile--active' : ''}`} onClick={onSelect} aria-pressed={active} title={shot.description || shot.prompt}>
-            <span className="shot-tile__thumb">
+            <span className="shot-tile__thumb" style={{ aspectRatio: aspect }}>
                 {mode === 'filming' && hasVideo ? (
                     <video src={shot.videoUrl} muted playsInline preload="metadata" />
                 ) : image ? (
@@ -14864,6 +14884,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                                 {references.filter(r => r.type === 'product').map(ref => (
                                                     <ReferenceCard
+                                                        aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                         key={ref.id}
                                                         reference={ref}
                                                         onUpdate={(id, u) => setReferences(prev => prev.map(r => r.id === id ? { ...r, ...u } : r))}
@@ -15009,6 +15030,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 ${conceptCharacterSubtab === 'outfits' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'character').map(ref => (
                                                 <ReferenceCard
+                                                    aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                     key={ref.id}
                                                     reference={ref}
                                                     onUpdate={(id, u) => setReferences(prev => prev.map(r => r.id === id ? { ...r, ...u } : r))}
@@ -15621,6 +15643,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptEnvironmentSubtab === 'time_of_day' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'environment').map(ref => (
                                                 <ReferenceCard
+                                                    aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                     key={ref.id}
                                                     reference={ref}
                                                     onUpdate={(id, u) => setReferences(prev => prev.map(r => r.id === id ? { ...r, ...u } : r))}
@@ -15837,6 +15860,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptPropSubtab === 'state' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'prop').map(ref => (
                                                 <ReferenceCard
+                                                    aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                     key={ref.id}
                                                     reference={ref}
                                                     onUpdate={(id, u) => setReferences(prev => prev.map(r => r.id === id ? { ...r, ...u } : r))}
@@ -16358,9 +16382,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                 {shotPrompts.length > 0 ? (
                                     storyboardVisibleShots.length > 0 ? (
                                         <div className="shot-page">
-                                            <div className="shot-page__grid">
+                                            <div className={`shot-page__grid ${isPortraitAspect(referenceAspectRatio) ? "shot-page__grid--portrait" : ""}`}>
                                                 {storyboardVisibleShots.map((shot) => (
-                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedStoryboardShot?.shot === shot.shot} mode="storyboard" onSelect={() => setStoryboardFocusShot(shot.shot)} />
+                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedStoryboardShot?.shot === shot.shot} mode="storyboard" aspect={aspectRatioToCss(resolveShotEffectiveAspectRatio(shot))} onSelect={() => setStoryboardFocusShot(shot.shot)} />
                                                 ))}
                                             </div>
                                             <aside className="shot-page__inspector">
@@ -16404,7 +16428,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                                                 return (
                                                     <div key={shot.shot} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-lg flex flex-col transition-all hover:border-indigo-500/30">
-                                                        <div className="relative aspect-video bg-black group">
+                                                        <div className={`relative bg-black group shot-frame ${isPortraitAspect(resolveShotEffectiveAspectRatio(shot)) ? 'shot-frame--portrait' : ''}`} style={{ aspectRatio: aspectRatioToCss(resolveShotEffectiveAspectRatio(shot)) }}>
                                                             <input
                                                                 id={shotUploadId}
                                                                 type="file"
@@ -16447,7 +16471,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                     {shot.imageUrl ? (
                                                                         <img
                                                                             src={shot.imageUrl}
-                                                                            className="w-full h-full object-cover"
+                                                                            className="w-full h-full object-contain"
                                                                             onDoubleClick={() => setFullResView({ url: shot.imageUrl!, title: `Shot ${formatShotLabel(shot)}` })}
                                                                         />
                                                                     ) : shot.sketchUrl ? (
@@ -17866,9 +17890,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     {shotPrompts.length > 0 ? (
                                         filteredPersonaShots.length > 0 ? (
                                             <>
-                                            <div className="shot-page__grid">
+                                            <div className={`shot-page__grid ${isPortraitAspect(referenceAspectRatio) ? "shot-page__grid--portrait" : ""}`}>
                                                 {filteredPersonaShots.map((shot) => (
-                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedFilmingShot?.shot === shot.shot} mode="filming" onSelect={() => setFilmingFocusShot(shot.shot)} />
+                                                    <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedFilmingShot?.shot === shot.shot} mode="filming" aspect={aspectRatioToCss(resolveShotEffectiveAspectRatio(shot))} onSelect={() => setFilmingFocusShot(shot.shot)} />
                                                 ))}
                                             </div>
                                             <aside className="shot-page__inspector">

@@ -7236,6 +7236,14 @@ body[data-theme="light"] .shot-tile__thumb { box-shadow: inset 0 0 0 1px rgb(15 
 .shot-tile:focus-visible { outline: none; }
 .shot-tile:focus-visible .shot-tile__thumb { box-shadow: 0 0 0 2px var(--app-accent), 0 0 0 5px var(--app-glow); }
 
+/* Portrait formats: narrower tile columns, height-capped letterboxed frames so the controls stay reachable */
+.shot-page__grid--portrait { grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); }
+.shot-page__inspector .shot-frame--portrait { aspect-ratio: auto !important; height: 24rem; }
+.shot-page__inspector .shot-frame img, .shot-page__inspector .shot-frame video { object-fit: contain; }
+.shot-page__inspector > .bg-gray-800.rounded-xl.md\:flex-row > .md\:w-1\/3 { max-height: 22rem; }
+.shot-page__inspector > .bg-gray-800.rounded-xl.md\:flex-row > .md\:w-1\/3 img { object-fit: contain; max-height: 22rem; }
+.shot-page__inspector > .bg-gray-800.rounded-xl.md\:flex-row > .md\:w-1\/3 video { object-fit: contain; max-height: 22rem; }
+
 /* Transition tiles: two plates + overlays, animated only while hovered. */
 .tr-tile { background: #000; }
 .tr-tile__plate { position: absolute; inset: 0; will-change: transform, opacity; }
