@@ -39,6 +39,13 @@ job complete before the DOM shows it.
 - **Cancel** from the Activity drawer releases the slot and the task (Midjourney itself
   keeps rendering).
 
+## What the failure screenshots taught
+
+- Enter dispatched from JavaScript is untrusted and does nothing; Jeff now sends a real key event through Electron, then clicks the send control, and only proceeds once the prompt box emptied.
+- Every image of a job sits in its own small container; prompt text and the "70% Complete" badge live in siblings. `jobCards` climbs to the highest ancestor that belongs to that job only.
+- Uploads no longer expose a CDN url: the image becomes a chip in the prompt bar with role options. Jeff keeps the chip and clicks the matching role (Style reference, Image Prompts, Omni/Character); urls are only put into the prompt text when the page still exposes them.
+- The params field is sanitised against Midjourney's real flag list; free text such as "imax anamorphic" is dropped instead of becoming `--imax`.
+
 ## Flow of one job
 
 1. `status()` — load `/imagine`, check for the prompt box and the absence of a login page.

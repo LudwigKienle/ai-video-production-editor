@@ -108,6 +108,14 @@ const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
   promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
 });
 // A page call that never resolves (renderer hung, navigation mid-call) must not freeze every job behind it.
+const pressEnter = async () => {
+  const wc = ensureWindow().webContents;
+  await run(`(() => { const box = document.querySelector('#desktop_input_bar') || document.querySelector('form textarea') || document.querySelector('textarea'); if (box) box.focus(); return !!box; })()`).catch(() => false);
+  wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  wc.sendInputEvent({ type: 'char', keyCode: 'Enter' });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+};
+
 const run = (script, timeoutMs = RUN_TIMEOUT_MS) => withTimeout(ensureWindow().webContents.executeJavaScript(script, true), timeoutMs, 'Midjourney page call');
 
 const screenshot = async (label) => {
@@ -152,27 +160,38 @@ const PAGE_SCRIPTS = {
     return Array.from(ids);
   })()`,
 
-  // Every job card on the page: its text (prompt, "42%"), progress and which of the 4 images are there.
+  // Every job on the page: prompt text, "70% Complete" progress and which of the 4 images are there.
+  // Each image sits in its own small container; the prompt and the badge live in siblings, so climb
+  // to the highest ancestor that still belongs to this job only.
   jobCards: `(() => {
-    const cards = {};
     const rx = /(?:\\/jobs\\/|cdn.midjourney.com\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
-    const nodes = document.querySelectorAll('a[href*="/jobs/"], [style*="cdn.midjourney.com"], img[src*="cdn.midjourney.com"]');
-    for (const node of nodes) {
+    const anyRx = /(?:\\/jobs\\/|cdn\\.midjourney\\.com\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+    const firstNode = new Map();
+    for (const node of document.querySelectorAll('a[href*="/jobs/"], [style*="cdn.midjourney.com"], img[src*="cdn.midjourney.com"]')) {
       const m = (node.getAttribute('href') || node.getAttribute('style') || node.getAttribute('src') || '').match(rx);
-      if (!m) continue;
-      const id = m[1].toLowerCase();
-      const card = node.closest('[class*="jobCard" i], article, li, [data-job-id]') || node.parentElement;
-      if (!card) continue;
-      const entry = cards[id] || (cards[id] = { text: '', percent: null, images: [] });
-      const html = card.outerHTML || '';
+      if (m && !firstNode.has(m[1].toLowerCase())) firstNode.set(m[1].toLowerCase(), node);
+    }
+    const cards = {};
+    for (const [id, node] of firstNode) {
+      let el = node;
+      let best = node;
+      for (let depth = 0; depth < 8 && el && el !== document.body; depth += 1) {
+        const html = el.outerHTML || '';
+        const ids = html.match(anyRx) || [];
+        if (ids.some((hit) => !hit.toLowerCase().includes(id))) break;
+        best = el;
+        el = el.parentElement;
+      }
+      const html = best.outerHTML || '';
+      const images = [];
       const parts = html.split('cdn.midjourney.com/' + id + '/0_');
       for (let i = 1; i < parts.length; i += 1) {
         const digit = parts[i].charCodeAt(0) - 48;
-        if (digit >= 0 && digit <= 9 && !entry.images.includes(digit)) entry.images.push(digit);
+        if (digit >= 0 && digit <= 9 && !images.includes(digit)) images.push(digit);
       }
-      if (!entry.text) entry.text = (card.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 300);
-      const pm = entry.text.match(/(\\d{1,3})\\s*%/);
-      if (pm) entry.percent = Number(pm[1]);
+      const text = (best.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 400);
+      const pm = text.match(/(\\d{1,3})\\s*%/);
+      cards[id] = { text, percent: pm ? Number(pm[1]) : null, images };
     }
     return cards;
   })()`,
@@ -246,7 +265,51 @@ const PAGE_SCRIPTS = {
       if (button) button.click();
       else if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
     }
-    return { ok: true };
+    await new Promise((r) => setTimeout(r, 700));
+    const after = box.isContentEditable ? (box.textContent || '').trim() : (box.value || '').trim();
+    return { ok: true, cleared: !after };
+  })()`,
+
+  // Is the prompt box empty? (Midjourney clears it once it accepted the prompt.)
+  promptBoxEmpty: `(() => {
+    const box = document.querySelector('#desktop_input_bar') || document.querySelector('form textarea') || document.querySelector('textarea');
+    if (!box) return true;
+    const value = box.isContentEditable ? (box.textContent || '') : (box.value || '');
+    return !value.trim();
+  })()`,
+
+  // Click the send control next to the prompt box (paper-plane icon).
+  clickSend: `(() => {
+    const box = document.querySelector('#desktop_input_bar') || document.querySelector('form textarea') || document.querySelector('textarea');
+    if (!box) return { ok: false, error: 'no box' };
+    let scope = box.parentElement;
+    for (let i = 0; i < 5 && scope && scope.querySelectorAll('button').length === 0; i += 1) scope = scope.parentElement;
+    if (!scope) return { ok: false, error: 'no buttons' };
+    const buttons = Array.from(scope.querySelectorAll('button')).filter((b) => b.getBoundingClientRect().width > 0);
+    const labelled = buttons.find((b) => /send|submit|imagine|create|generate/i.test(b.getAttribute('aria-label') || b.getAttribute('title') || b.innerText || ''));
+    const after = buttons.find((b) => (box.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+    const target = labelled || after || buttons[buttons.length - 1];
+    if (!target) return { ok: false, error: 'no send button' };
+    target.click();
+    return { ok: true, label: (target.getAttribute('aria-label') || target.innerText || 'button').trim().slice(0, 40) };
+  })()`,
+
+  // Pick what an attached image is for: style reference, image prompt or omni/character reference.
+  chooseReferenceRole: (role) => `(() => {
+    const wanted = ${JSON.stringify(role)};
+    const patterns = wanted === 'style' ? [/^style reference/i, /style/i]
+      : wanted === 'character' ? [/omni/i, /character/i, /^image prompt/i]
+        : [/^image prompt/i, /attach to prompt/i];
+    const nodes = Array.from(document.querySelectorAll('button, [role="button"], [role="option"], [role="radio"], label, div, span'))
+      .filter((el) => el.getBoundingClientRect().height > 0 && (el.innerText || '').trim().length > 0 && (el.innerText || '').trim().length < 80);
+    for (const rx of patterns) {
+      const hits = nodes.filter((el) => rx.test((el.innerText || '').trim()));
+      if (!hits.length) continue;
+      hits.sort((a, b) => { const ra = a.getBoundingClientRect(); const rb = b.getBoundingClientRect(); return (ra.width * ra.height) - (rb.width * rb.height); });
+      hits[0].click();
+      return { ok: true, label: (hits[0].innerText || '').trim().slice(0, 40) };
+    }
+    return { ok: false };
   })()`,
 
   // Upload a reference image through the page's own uploader and return its CDN url.
@@ -272,6 +335,8 @@ const PAGE_SCRIPTS = {
     } else {
       return { ok: false, error: 'No uploader found' };
     }
+    const barBefore = box ? ((box.closest('form') || box.parentElement.parentElement || box.parentElement).innerText || '') : '';
+    const imgsBefore = document.querySelectorAll('img').length;
     const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 700));
@@ -279,8 +344,13 @@ const PAGE_SCRIPTS = {
       const imgs = Array.from((form || document).querySelectorAll('img[src*="${CDN_HOST}"]'));
       const fresh = imgs.map((i) => i.src).find((src) => !before.has(src) && /\\/u\\/|upload|\\/[0-9a-f-]{36}\\//i.test(src));
       if (fresh) return { ok: true, url: fresh.replace(/_\\d+_N\\.webp$/i, '.png').replace(/\\?.*$/, '') };
+      // Newer UI: the image becomes a chip in the prompt bar with role options, no url exposed.
+      const bar = box ? ((box.closest('form') || box.parentElement.parentElement || box.parentElement).innerText || '') : '';
+      const roleUi = /style reference|image prompt|omni reference|attach to prompt/i.test(bar) && bar !== barBefore;
+      const newImg = document.querySelectorAll('img').length > imgsBefore;
+      if (roleUi || (newImg && /style reference|image prompt/i.test(document.body.innerText))) return { ok: true, attached: true };
     }
-    return { ok: false, error: 'Upload did not produce a CDN url within 60s' };
+    return { ok: false, error: 'Upload did not produce a CDN url or an attachment chip within 60s' };
   })()`,
 
   // Remove reference chips from the prompt bar (we put their urls into the text instead).
@@ -362,6 +432,20 @@ const disconnect = async () => {
 // Defaults every prompt gets unless the caller (or the prompt itself) already sets them.
 const DEFAULT_PARAMS = '--v 8.2 --style raw';
 
+// Everything Midjourney accepts after "--". Anything else typed into the params field is dropped, not sent.
+const KNOWN_FLAGS = new Set(['ar', 'aspect', 'v', 'version', 'style', 's', 'stylize', 'c', 'chaos', 'w', 'weird', 'q', 'quality', 'seed', 'stop', 'tile', 'no', 'niji', 'sref', 'sw', 'sv', 'cref', 'cw', 'oref', 'ow', 'iw', 'p', 'personalize', 'raw', 'exp', 'draft', 'fast', 'relax', 'turbo', 'video', 'motion', 'r', 'repeat', 'hd']);
+const sanitizeParams = (text) => {
+  const tokens = String(text || '').trim().split(/\s+(?=--)/).filter(Boolean);
+  const kept = [];
+  for (const token of tokens) {
+    if (!token.startsWith('--')) { console.warn('[jeff] ignoring non-flag text in Midjourney params:', token); continue; }
+    const flag = token.slice(2).split(/\s+/)[0].toLowerCase();
+    if (!KNOWN_FLAGS.has(flag)) { console.warn('[jeff] ignoring unknown Midjourney flag:', token); continue; }
+    kept.push(token.trim());
+  }
+  return kept;
+};
+
 const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight, extraParams, defaultParams }) => {
   const parts = [];
   if (imageRefUrls && imageRefUrls.length) parts.push(imageRefUrls.join(' '));
@@ -373,11 +457,11 @@ const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imag
     params.push(`--sref ${styleRefUrls.slice(0, 5).join(' ')}`);
     if (Number.isFinite(styleWeight)) params.push(`--sw ${Math.max(0, Math.min(1000, Math.round(styleWeight)))}`);
   }
-  if (extraParams) params.push(extraParams.trim());
+  if (extraParams) params.push(...sanitizeParams(extraParams));
   const everything = `${prompt} ${params.join(' ')}`;
-  for (const token of String(defaultParams ?? DEFAULT_PARAMS).trim().split(/\s+--/).filter(Boolean)) {
-    const flag = token.replace(/^--/, '').split(/\s+/)[0];
-    if (flag && !new RegExp(`--${flag}(\\s|$)`).test(everything)) params.push(`--${token.replace(/^--/, '')}`);
+  for (const token of sanitizeParams(defaultParams ?? DEFAULT_PARAMS)) {
+    const flag = token.slice(2).split(/\s+/)[0];
+    if (flag && !new RegExp(`--${flag}(\\s|$)`).test(everything)) params.push(token);
   }
   return `${parts.join(' ')} ${params.join(' ')}`.replace(/\s+/g, ' ').trim();
 };
@@ -614,6 +698,8 @@ const submitJob = async (job) => {
     const characterRefUrls = [];
     const styleRefUrls = [];
     const imageRefUrls = [];
+    let urlRefs = 0;
+    let attachedRefs = 0;
     for (const ref of job.refs.slice(0, 6)) {
       if (job.cancelled) return;
       job.status = 'uploading';
@@ -623,12 +709,21 @@ const submitJob = async (job) => {
         const shot = await screenshot('upload-failed');
         throw new Error(`Reference upload failed: ${result?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
       }
-      if (ref.role === 'character') characterRefUrls.push(result.url);
-      else if (ref.role === 'style') styleRefUrls.push(result.url);
-      else imageRefUrls.push(result.url);
+      if (result.url) {
+        if (ref.role === 'character') characterRefUrls.push(result.url);
+        else if (ref.role === 'style') styleRefUrls.push(result.url);
+        else imageRefUrls.push(result.url);
+        urlRefs += 1;
+      } else if (result.attached) {
+        await sleep(jitter(500));
+        const picked = await run(PAGE_SCRIPTS.chooseReferenceRole(ref.role)).catch(() => null);
+        emit({ type: 'job', id: job.label, phase: 'uploading', name: ref.name, attached: true, role: picked && picked.ok ? picked.label : null });
+        attachedRefs += 1;
+      }
       await sleep(jitter(800));
     }
-    if (job.refs.length) await run(PAGE_SCRIPTS.clearReferenceChips).catch(() => 0);
+    // Chips only go when their urls moved into the prompt text; attached chips must stay.
+    if (urlRefs > 0 && attachedRefs === 0) await run(PAGE_SCRIPTS.clearReferenceChips).catch(() => 0);
 
     // 2. Submit.
     const knownIds = new Set(await run(PAGE_SCRIPTS.jobIds).catch(() => []));
@@ -640,6 +735,28 @@ const submitJob = async (job) => {
     if (!submitted || !submitted.ok) {
       const shot = await screenshot('submit-failed');
       throw new Error(`Could not submit the prompt: ${submitted?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
+    }
+    let cleared = Boolean(submitted.cleared);
+    if (!cleared) {
+      // Synthetic key events are untrusted; a real one from Electron reaches React's handlers.
+      await pressEnter();
+      await sleep(1200);
+      cleared = await run(PAGE_SCRIPTS.promptBoxEmpty).catch(() => false);
+    }
+    if (!cleared) {
+      const clicked = await run(PAGE_SCRIPTS.clickSend).catch(() => null);
+      await sleep(1200);
+      cleared = await run(PAGE_SCRIPTS.promptBoxEmpty).catch(() => false);
+      if (!cleared) {
+        const problem = await run(PAGE_SCRIPTS.promptError).catch(() => null);
+        if (problem && problem.blocked) {
+          await screenshot('moderated');
+          await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+          throw moderationError(problem.text);
+        }
+        const shot = await screenshot('submit-not-accepted');
+        throw new Error(`Midjourney kept the prompt in the box (Enter and the send button ${clicked && clicked.ok ? `"${clicked.label}"` : 'were tried'} did not submit)${shot ? ` (screenshot: ${shot})` : ''}`);
+      }
     }
 
     // 3. Learn the job id, then hand over to the tracker.

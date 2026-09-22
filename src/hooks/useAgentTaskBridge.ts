@@ -27,7 +27,7 @@ export const useAgentTaskBridge = () => {
           case 'waiting': task.update({ message: `Waiting for a free Midjourney slot (${event.running ?? '?'}/${event.limit ?? '?'} rendering)…`, progress: 0.02 }); break;
           case 'moderated': task.update({ message: 'Prompt blocked by Midjourney moderation. Softening and retrying…', progress: 0.05 }); break;
           case 'failed': task.fail(event.error || 'Midjourney job failed'); jobs.delete(event.id); break;
-          case 'uploading': task.update({ message: `Uploading ${event.name || 'reference'}…`, progress: 0.1 }); break;
+          case 'uploading': task.update({ message: (event as any).attached ? `Attached ${event.name || 'reference'}${(event as any).role ? ` as ${(event as any).role}` : ''}` : `Uploading ${event.name || 'reference'}…`, progress: 0.1 }); break;
           case 'submitting': task.update({ message: 'Submitting prompt…', progress: 0.2 }); break;
           case 'queued': task.update({ message: 'Queued at Midjourney…', progress: 0.3 }); break;
           case 'rendering': task.update({ message: typeof event.percent === 'number' ? `Rendering ${event.percent}%` : 'Rendering…', progress: typeof event.percent === 'number' ? 0.3 + (event.percent / 100) * 0.6 : null }); break;
