@@ -9990,9 +9990,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 ? normalized.map((p, index) => ({ ...p, shot: index + 1 }))
                 : normalized;
             const nextShotPrompts: ShotPrompt[] = finalized.map((p): ShotPrompt => {
-                const mappedSceneNumber = mapDirectorScopedSceneNumber(
+                const mappedFromModel = mapDirectorScopedSceneNumber(
                     Number.isFinite(p.sceneNumber) ? Number(p.sceneNumber) : undefined,
                 );
+                const mappedSceneNumber = Number.isFinite(mappedFromModel)
+                    ? mappedFromModel
+                    : (scopedForFeature ? directorSceneScope.selectedSceneNumbers[0] : undefined);
                 const mappedSceneShotNumber = Number.isFinite(p.sceneShotNumber)
                     ? Number(p.sceneShotNumber)
                     : undefined;
@@ -12241,13 +12244,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const remappedTreatment = scopedForFeature
                 ? {
                     ...treatment,
-                    shots: (treatment.shots || []).map((shot, index) => {
-                        const mappedSceneNumber = mapDirectorScopedSceneNumber(
+                    shots: (() => {
+                        // The single-pass director returns no scene numbers; scoped shots still belong to the scoped scene(s).
+                        const fallbackScene = directorSceneScope.selectedSceneNumbers[0];
+                        const perScene = new Map<number, number>();
+                        return (treatment.shots || []).map((shot, index) => {
+                        const mapped = mapDirectorScopedSceneNumber(
                             Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : undefined,
                         );
+                        const mappedSceneNumber = Number.isFinite(mapped) ? mapped : fallbackScene;
+                        const nextInScene = (perScene.get(Number(mappedSceneNumber)) || 0) + 1;
+                        perScene.set(Number(mappedSceneNumber), nextInScene);
                         const sceneShotNumber = Number.isFinite(shot.sceneShotNumber)
                             ? Number(shot.sceneShotNumber)
-                            : undefined;
+                            : nextInScene;
                         return {
                             ...shot,
                             shotNumber: Number.isFinite(shot.shotNumber) ? Number(shot.shotNumber) : index + 1,
@@ -12257,7 +12267,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                 ? `${Number(mappedSceneNumber)}.${Number(sceneShotNumber)}`
                                 : shot.shotLabel,
                         };
-                    }),
+                        });
+                    })(),
                 }
                 : treatment;
             setDirectorTreatment(remappedTreatment);

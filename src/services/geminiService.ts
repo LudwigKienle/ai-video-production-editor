@@ -4269,6 +4269,14 @@ const generateDirectorChunkJson = async <T>(
 
 const DIRECTOR_SCENE_HEADER_REGEX = /^\s*(?:\[SCENE\]\s*)?(?:\d{1,4}[A-Z]?(?:[.)-])?\s+)?(?:INT\.?|EXT\.?|INT\/EXT\.?|EXT\/INT\.?|EST\.?|I\/E\.?|E\/I\.?)/i;
 
+// Same heading rules as the Project Hub: "Scene 3", "Szene 3:", "## Chapter 2", "SC. 4" start a scene too.
+const DIRECTOR_ALT_SCENE_HEADER_REGEX = /^\s*(?:#{1,4}\s*)?\[?(?:scene|szene|chapter|kapitel|sequence|sequenz|sc\.?)\s*\d{1,4}[A-Z]?\]?\b/i;
+const isDirectorSceneHeading = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length > 90) return false;
+    return DIRECTOR_SCENE_HEADER_REGEX.test(trimmed) || DIRECTOR_ALT_SCENE_HEADER_REGEX.test(trimmed);
+};
+
 const splitScriptIntoDirectorSceneBlocks = (scriptText: string, maxChunkChars = 2600): DirectorSceneBlock[] => {
     const text = (scriptText || '').trim();
     if (!text) return [];
@@ -4290,7 +4298,7 @@ const splitScriptIntoDirectorSceneBlocks = (scriptText: string, maxChunkChars = 
 
     lines.forEach((line) => {
         const trimmed = line.trim();
-        if (DIRECTOR_SCENE_HEADER_REGEX.test(trimmed)) {
+        if (isDirectorSceneHeading(trimmed)) {
             detectedHeadings = true;
             pushCurrent();
             currentSlugline = trimmed.replace(/\s+/g, ' ').trim();
@@ -4609,6 +4617,7 @@ export const generateViMaxStoryboard = async (
     - Explain your rationale (Why this angle? Why this light?).
     - Include every meaningful action beat, dialogue turn, location change, or character entrance/exit from this chunk.
     - If this chunk contains multiple scene headings, output at least one shot per scene heading.
+    - A scene normally needs 4 to 10 shots (establishing, coverage of each beat, reactions, inserts). Never return fewer than 3 shots for a chunk with action or dialogue.
     - Prefer more shots over fewer shots when uncertain.
 
     **AUTHORIZED PRESETS (Strict Enforce):**
