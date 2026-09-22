@@ -1770,7 +1770,7 @@ export type ShotAnnotation = {
   updatedAt?: string;
 };
 
-export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local' | 'runway';
+export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'higgsfield' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local' | 'runway';
 export type UsageKind = 'image' | 'video' | 'audio' | 'edit' | 'analysis' | '3d-world' | 'other';
 export type UsageUnit = 'image' | 'second' | 'minute' | 'request' | 'clip' | 'stem';
 

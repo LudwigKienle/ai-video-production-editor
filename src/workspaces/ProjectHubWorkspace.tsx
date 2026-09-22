@@ -46,7 +46,8 @@ import { generateImagesWithMidjourney, type MidjourneyReference } from '../servi
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
-import { generateVideoWithFalCatalog } from '../services/falAiService';
+import { generateCatalogVideo } from '../services/videoCatalogRouter';
+import { DOP_ENTRY, HIGGSFIELD_IMAGE_MODELS, generateImageWithHiggsfield, higgsfieldHostsVideoModel, isHiggsfieldImageModel } from '../services/higgsfieldService';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -239,7 +240,10 @@ type ReferenceImageModel =
     | 'qwen-max-fal'
     | 'qwen-multiangle'
     | 'qwen-multiangle-fal'
-    | 'midjourney';
+    | 'midjourney'
+    | 'soul-standard-hf'
+    | 'soul-2-hf'
+    | 'soul-cinema-hf';
 type MarketingImageModel = ReferenceImageModel | 'nano-banana-pro';
 type FilmingVideoModel =
     | 'auto'
@@ -275,7 +279,8 @@ type FilmingVideoModel =
     | 'pixverse-v6-fal'
     | 'ltx-2.5-pro-fal'
     | 'wan-3.0-fal'
-    | 'wan-3.0-prime-fal';
+    | 'wan-3.0-prime-fal'
+    | 'higgsfield-dop-lite';
 type LibraryAsset = {
     id: string;
     name: string;
@@ -624,6 +629,9 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'krea-2-turbo-fal': 'Krea 2 Turbo (FAL)',
     'ideogram-v4-fal': 'Ideogram 4 (FAL)',
     midjourney: 'Midjourney · Jeff',
+    'soul-standard-hf': 'Higgsfield Soul (Higgsfield)',
+    'soul-2-hf': 'Higgsfield Soul 2 (Higgsfield)',
+    'soul-cinema-hf': 'Higgsfield Soul Cinema (Higgsfield)',
     qwen: 'Qwen 2511',
     'qwen-2512': 'Qwen 2512',
     'qwen-max-fal': 'Qwen Image Max (FAL)',
@@ -662,6 +670,7 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick concept passes', badge: '⚡ Fast' },
     { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters and title cards with clean text' },
     { id: 'midjourney', label: 'Midjourney · Jeff', provider: 'Midjourney', goodFor: 'Your own Midjourney account, driven by a background browser agent. Returns the 4-grid as versions; storyboard shots get concept refs as --oref / --sref', badge: '🧭 Agent' },
+    ...HIGGSFIELD_IMAGE_MODELS.map((model) => ({ id: model.id as ReferenceImageModel, label: model.label, provider: 'Higgsfield', goodFor: model.goodFor, badge: model.badge })),
     { id: 'qwen', label: 'Qwen 2511', provider: 'Qwen', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
     { id: 'qwen-2512', label: 'Qwen 2512', provider: 'Qwen', icon: logoQwen, goodFor: 'Improved aesthetic logic and detailed composition' },
     { id: 'qwen-max-fal', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation' },
@@ -725,6 +734,7 @@ const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
     'aurora-fal',
     'grok-imagine-video',
     ...(FAL_VIDEO_CATALOG.map((entry) => entry.id) as FilmingVideoModel[]),
+    'higgsfield-dop-lite',
 ];
 
 const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string; provider: string; icon?: string; goodFor?: string; badge?: string }> = [
@@ -755,6 +765,7 @@ const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string;
     { id: 'ltx-audio-to-video', label: 'LTX Audio-to-Video', provider: 'Replicate', goodFor: 'Drive shots from audio and optional key art' },
     { id: 'p-video', label: 'P-Video', provider: 'Replicate', goodFor: 'Flexible text/image/audio video generation with draft mode' },
     ...FAL_VIDEO_CATALOG.map((entry) => ({ id: entry.id as FilmingVideoModel, label: entry.label, provider: 'FAL', goodFor: entry.goodFor, badge: entry.badge })),
+    { id: 'higgsfield-dop-lite' as FilmingVideoModel, label: DOP_ENTRY.label, provider: 'Higgsfield', goodFor: DOP_ENTRY.goodFor },
 ];
 
 const PROJECT_HUB_UI_PREFS_KEY = 'project_hub_ui_prefs_v1';
@@ -6565,6 +6576,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const images = await generateImagesWithMidjourney(prompt, { aspectRatio, references: mjRefs, folderPath: projectPath, styleWeight: storyBible.styleWeight, defaultParams: storyBible.midjourneyParams });
             if (!images.length) throw new Error('Midjourney returned no images.');
             image = images[0];
+        } else if (isHiggsfieldImageModel(selectedReferenceModel)) {
+            image = await generateImageWithHiggsfield(selectedReferenceModel, prompt, { aspectRatio });
         } else if (selectedReferenceModel === 'imagen') {
             image = await generateImageWithImagen(prompt, modelAspectRatio);
         } else if (selectedReferenceModel === 'gemini-pro') {
@@ -10605,6 +10618,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         }
                         imageMedia = edited[0];
                     }
+                } else if (isHiggsfieldImageModel(activeReferenceModel)) {
+                    imageMedia = await generateImageWithHiggsfield(activeReferenceModel, fullPrompt, { aspectRatio: effectiveAspectRatio });
                 } else if (activeReferenceModel === 'krea-2-large-fal' || activeReferenceModel === 'krea-2-turbo-fal') {
                     const kreaAspect = modelAspectRatio === '3:4' ? '4:5' : modelAspectRatio;
                     imageMedia = await generateImageWithFalKrea2(fullPrompt, {
@@ -11290,7 +11305,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     };
 
     const getVideoDurationConfig = (model: typeof videoModel) => {
-        const catalogEntry = getFalVideoCatalogEntry(model);
+        const catalogEntry = getFalVideoCatalogEntry(model) || (model === 'higgsfield-dop-lite' ? DOP_ENTRY : null);
         if (catalogEntry) return { supported: !catalogEntry.noDuration, options: catalogEntry.durations, fallback: catalogEntry.defaultDuration };
         switch (model) {
             case 'grok-imagine-video':
@@ -11831,12 +11846,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         referenceImages: resolvedKlingBindings.referenceImages,
                     });
                 }
-                if (isFalCatalogVideoModel(activeVideoModel)) {
-                    const catalogEntry = getFalVideoCatalogEntry(activeVideoModel)!;
-                    if (!referencePayload && !catalogEntry.paths.text) {
+                if (isFalCatalogVideoModel(activeVideoModel) || higgsfieldHostsVideoModel(activeVideoModel)) {
+                    const catalogEntry = getFalVideoCatalogEntry(activeVideoModel) || DOP_ENTRY;
+                    if (!referencePayload && !catalogEntry.paths.text && activeVideoModel !== 'higgsfield-dop-lite') {
                         throw new Error(`${catalogEntry.label} requires a storyboard or start frame.`);
                     }
-                    return generateVideoWithFalCatalog(activeVideoModel, candidateMotionPrompt, {
+                    if (!referencePayload && activeVideoModel === 'higgsfield-dop-lite') {
+                        throw new Error('Higgsfield DoP needs a storyboard or start frame.');
+                    }
+                    return generateCatalogVideo(activeVideoModel, candidateMotionPrompt, {
                         image: referencePayload,
                         endImage: endFramePayload,
                         duration: normalizedDurationSeconds,

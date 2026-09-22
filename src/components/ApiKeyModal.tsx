@@ -8,6 +8,7 @@ import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } f
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
 import { connectMidjourney, disconnectMidjourney, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
+import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
 type AutosaveSettings = {
     enabled: boolean;
@@ -59,6 +60,9 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [worldLabsKey, setWorldLabsKey] = useState('');
     const [braveSearchKey, setBraveSearchKey] = useState('');
     const [unsplashKey, setUnsplashKey] = useState('');
+    const [higgsfieldKey, setHiggsfieldKey] = useState('');
+    const [higgsfieldSaved, setHiggsfieldSaved] = useState(false);
+    const [videoProvider, setVideoProvider] = useState<VideoProviderPreference>(() => getVideoProviderPreference());
     const [dropboxClientId, setDropboxClientId] = useState('');
     const [googleDriveClientId, setGoogleDriveClientId] = useState('');
     const [error, setError] = useState('');
@@ -144,6 +148,11 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (storedUnsplash) {
             setUnsplashKey(storedUnsplash);
             setUnsplashSaved(true);
+        }
+        const storedHiggsfield = localStorage.getItem(HIGGSFIELD_API_KEY_STORAGE_KEY);
+        if (storedHiggsfield) {
+            setHiggsfieldKey(storedHiggsfield);
+            setHiggsfieldSaved(true);
         }
         if (storedDropboxClient) {
             setDropboxClientId(storedDropboxClient);
@@ -308,6 +317,15 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             setBraveSearchSaved(false);
         }
 
+        if (higgsfieldKey.trim()) {
+            localStorage.setItem(HIGGSFIELD_API_KEY_STORAGE_KEY, higgsfieldKey.trim());
+            setHiggsfieldSaved(true);
+        } else {
+            localStorage.removeItem(HIGGSFIELD_API_KEY_STORAGE_KEY);
+            setHiggsfieldSaved(false);
+        }
+        setVideoProviderPreference(videoProvider);
+
         if (unsplashKey.trim()) {
             localStorage.setItem(UNSPLASH_ACCESS_KEY_STORAGE_KEY, unsplashKey.trim());
             setUnsplashSaved(true);
@@ -388,6 +406,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         { id: 'runway', label: 'Runway', value: runwayKey, setValue: setRunwayKey, saved: runwaySaved, setSaved: setRunwaySaved, placeholder: 'Runway API key', usedFor: 'Ruby: SDR video to true HDR.', href: 'https://dev.runwayml.com', hrefLabel: 'dev.runwayml.com' },
         { id: 'worldlabs', label: 'World Labs', value: worldLabsKey, setValue: setWorldLabsKey, saved: worldLabsSaved, setSaved: setWorldLabsSaved, placeholder: 'WLT-…', usedFor: '3D world generation (Marble).', href: 'https://platform.worldlabs.ai/', hrefLabel: 'platform.worldlabs.ai' },
         { id: 'brave', label: 'Brave Search', value: braveSearchKey, setValue: setBraveSearchKey, saved: braveSearchSaved, setSaved: setBraveSearchSaved, placeholder: 'BSA_…', usedFor: 'Web, news and image research for the Studio Agent.', href: 'https://api-dashboard.search.brave.com/', hrefLabel: 'api-dashboard.search.brave.com' },
+        { id: 'higgsfield', label: 'Higgsfield', value: higgsfieldKey, setValue: setHiggsfieldKey, saved: higgsfieldSaved, setSaved: setHiggsfieldSaved, placeholder: 'KEY_ID:KEY_SECRET', usedFor: 'Soul / Soul Cinema / DoP, and a second host for Kling 3, MiniMax, Wan 3, LTX 2.5, PixVerse.', href: 'https://console.higgsfield.ai', hrefLabel: 'console.higgsfield.ai' },
         { id: 'unsplash', label: 'Unsplash', value: unsplashKey, setValue: setUnsplashKey, saved: unsplashSaved, setSaved: setUnsplashSaved, placeholder: 'Unsplash Access Key', usedFor: 'Stock library search. Access Key only, never the Secret Key.', href: 'https://unsplash.com/developers', hrefLabel: 'unsplash.com/developers' },
     ];
     const connectedCount = providers.filter((row) => row.value.trim()).length;
@@ -422,6 +441,17 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                     />
                 </label>
                 <p className="pk-hint">{row.usedFor}</p>
+                {row.id === 'higgsfield' && (
+                    <div className="pk-field settings-provider__extra">
+                        <span>Video host for shared models</span>
+                        <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                            {(['auto', 'fal', 'higgsfield'] as VideoProviderPreference[]).map((option) => (
+                                <button key={option} type="button" aria-pressed={videoProvider === option} onClick={() => setVideoProvider(option)}>{option === 'auto' ? 'Auto' : option === 'fal' ? 'fal.ai' : 'Higgsfield'}</button>
+                            ))}
+                        </div>
+                        <span className="pk-hint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>Auto uses fal when a fal key is set, otherwise Higgsfield. Applies to Kling 3, MiniMax, Wan 3, LTX 2.5 and PixVerse.</span>
+                    </div>
+                )}
                 {row.id === 'google' && (
                     <label className="pk-field settings-provider__extra">
                         <span>Run Google models via</span>
