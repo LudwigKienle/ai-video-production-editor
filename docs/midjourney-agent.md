@@ -19,6 +19,26 @@ Midjourney like any other image model — prompt in, four images back, nothing t
 | `src/components/ApiKeyModal.tsx` | Settings → AI providers → "Midjourney · Jeff": Sign in / Sign out / Show window. |
 | `src/workspaces/ProjectHubWorkspace.tsx` | Model `midjourney` in `REFERENCE_MODEL_OPTIONS`; branches in `generateReferenceImage` (Concept) and the storyboard renderer. Extra grid images are merged as reference versions via `finalizeReferenceImage.extraVersions`. |
 
+## Two lanes
+
+The page renders job cards as `<a href="/jobs/<uuid>">` with a CSS `background-image`
+on the CDN, no `<img>`; `jobIds` / `jobCards` read hrefs and styles. On top of the DOM,
+a Chrome DevTools Protocol tap (`attachNetworkTap`) records the page's own `/api/…`
+responses and socket frames: the first submit response after Enter carries the job id
+(the submit lane is serialized, so attribution is by time), and status updates mark a
+job complete before the DOM shows it.
+
+- **Submit lane** (serialized, ≤ 75 s per job): wait for a free slot, upload references,
+  type, Enter, learn the job id. Then the next prompt is typed while the first renders.
+- **Tracker** (one loop for all running jobs, every 3 s): progress from cards or API,
+  completion when the API says so or the card shows the grid, then the four images
+  through the page session (a plain fetch gets 403 from the CDN). Per-job limits: 8 min
+  render, 4 min without any progress change; every failure takes a screenshot.
+- **Parallel jobs**: Settings → Midjourney → parallel jobs (1–6, default 3). Storyboard
+  "Generate all" runs that many shots at once; API models get two lanes.
+- **Cancel** from the Activity drawer releases the slot and the task (Midjourney itself
+  keeps rendering).
+
 ## Flow of one job
 
 1. `status()` — load `/imagine`, check for the prompt box and the absence of a login page.

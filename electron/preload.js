@@ -74,6 +74,9 @@ contextBridge.exposeInMainWorld('electron', {
     disconnect: () => ipcRenderer.invoke('midjourney:disconnect'),
     toggleWindow: (payload) => ipcRenderer.invoke('midjourney:toggleWindow', payload),
     generate: (payload) => ipcRenderer.invoke('midjourney:generate', payload),
+    cancel: (payload) => ipcRenderer.invoke('midjourney:cancel', payload),
+    setOptions: (payload) => ipcRenderer.invoke('midjourney:setOptions', payload),
+    listJobs: () => ipcRenderer.invoke('midjourney:listJobs'),
     onEvent: (callback) => {
       const handler = (_event, value) => callback(value);
       ipcRenderer.on('midjourney:event', handler);

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { startTask, type TaskHandle } from '../services/taskCenter';
-import { isMidjourneyAgentAvailable, onMidjourneyEvent } from '../services/midjourneyAgentService';
+import { cancelMidjourneyJob, isMidjourneyAgentAvailable, onMidjourneyEvent } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, onLocalAgentEvent, cancelLocalAgent, type LocalAgentId } from '../services/localAgentsService';
 
 /**
@@ -18,11 +18,13 @@ export const useAgentTaskBridge = () => {
         if (event.type !== 'job' || !event.id) return;
         let task = jobs.get(event.id);
         if (!task) {
-          task = startTask({ label: `Midjourney · ${(event.prompt || 'job').slice(0, 48)}`, kind: 'image', provider: 'midjourney', estimatedMs: 3 * 60 * 1000, message: 'Starting…' });
+          const label = event.id;
+          task = startTask({ label: `Midjourney · ${(event.prompt || 'job').slice(0, 48)}`, kind: 'image', provider: 'midjourney', estimatedMs: 3 * 60 * 1000, message: 'Starting…', cancel: () => { void cancelMidjourneyJob(label); } });
           jobs.set(event.id, task);
         }
         switch (event.phase) {
           case 'starting': if ((event.attempt || 1) > 1) task.update({ message: `Retrying with a softened prompt (attempt ${event.attempt})…`, progress: 0.05 }); break;
+          case 'waiting': task.update({ message: `Waiting for a free Midjourney slot (${event.running ?? '?'}/${event.limit ?? '?'} rendering)…`, progress: 0.02 }); break;
           case 'moderated': task.update({ message: 'Prompt blocked by Midjourney moderation. Softening and retrying…', progress: 0.05 }); break;
           case 'failed': task.fail(event.error || 'Midjourney job failed'); jobs.delete(event.id); break;
           case 'uploading': task.update({ message: `Uploading ${event.name || 'reference'}…`, progress: 0.1 }); break;

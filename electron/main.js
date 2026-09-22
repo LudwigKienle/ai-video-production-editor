@@ -577,6 +577,9 @@ ipcMain.handle('midjourney:connect', async () => midjourneyAgent.connect());
 ipcMain.handle('midjourney:disconnect', async () => midjourneyAgent.disconnect());
 ipcMain.handle('midjourney:toggleWindow', async (_event, payload) => midjourneyAgent.toggleWindow(Boolean(payload && payload.show)));
 ipcMain.handle('midjourney:generate', async (_event, payload) => midjourneyAgent.generate(payload));
+ipcMain.handle('midjourney:cancel', async (_event, payload) => midjourneyAgent.cancel(payload || {}));
+ipcMain.handle('midjourney:setOptions', async (_event, payload) => midjourneyAgent.setOptions(payload || {}));
+ipcMain.handle('midjourney:listJobs', async () => midjourneyAgent.listJobs());
 midjourneyAgent.onEvent((event) => {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send('midjourney:event', event);

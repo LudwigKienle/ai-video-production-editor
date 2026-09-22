@@ -24,14 +24,39 @@ export type MidjourneyStatus = {
   busy?: boolean;
   visible?: boolean;
   error?: string | null;
+  /** Jobs rendering right now / waiting in the submit lane / the parallel limit. */
+  running?: number;
+  waiting?: number;
+  concurrency?: number;
+};
+
+export const MIDJOURNEY_CONCURRENCY_KEY = 'midjourney_concurrency';
+export const MIDJOURNEY_CONCURRENCY_DEFAULT = 3;
+
+/** How many Midjourney jobs Jeff keeps rendering at once (1–6; Basic plans allow 3 fast jobs). */
+export const getMidjourneyConcurrency = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(MIDJOURNEY_CONCURRENCY_KEY));
+    if (Number.isFinite(stored) && stored >= 1 && stored <= 6) return Math.round(stored);
+  } catch { /* storage unavailable */ }
+  return MIDJOURNEY_CONCURRENCY_DEFAULT;
+};
+
+export const setMidjourneyConcurrency = (value: number) => {
+  const next = Math.max(1, Math.min(6, Math.round(value)));
+  try { localStorage.setItem(MIDJOURNEY_CONCURRENCY_KEY, String(next)); } catch { /* storage unavailable */ }
+  void api()?.setOptions?.({ concurrency: next });
+  return next;
 };
 
 export type MidjourneyJobEvent = {
   type: 'job' | 'status' | 'window';
   id?: string;
-  phase?: 'starting' | 'uploading' | 'submitting' | 'queued' | 'rendering' | 'downloading' | 'done' | 'moderated' | 'failed';
+  phase?: 'starting' | 'waiting' | 'uploading' | 'submitting' | 'queued' | 'rendering' | 'downloading' | 'done' | 'moderated' | 'failed';
   attempt?: number;
   error?: string;
+  running?: number;
+  limit?: number;
   jobId?: string;
   percent?: number | null;
   count?: number;
@@ -57,7 +82,11 @@ type MidjourneyBridge = {
     defaultParams?: string;
     jobLabel?: string;
     attempt?: number;
+    concurrency?: number;
   }) => Promise<{ ok: true; jobId: string; prompt: string; images: Array<{ index: number; url: string; cdnUrl: string; relativePath: string | null }> }>;
+  cancel?: (payload: { jobLabel: string }) => Promise<{ ok: boolean; status?: string; error?: string }>;
+  setOptions?: (payload: { concurrency?: number }) => Promise<{ concurrency: number }>;
+  listJobs?: () => Promise<Array<{ label: string; status: string; percent: number | null; jobId: string | null; prompt: string; error: string | null; createdAt: number }>>;
   onEvent: (callback: (event: MidjourneyJobEvent) => void) => () => void;
 };
 
@@ -70,8 +99,8 @@ export const getMidjourneyStatus = async (refresh = false): Promise<MidjourneySt
   const bridge = api();
   if (!bridge) return { available: false, connected: false, error: 'Jeff runs only in the desktop app.' };
   try {
-    const result = await bridge.status({ refresh });
-    return { available: true, connected: result.connected, busy: result.busy, visible: result.visible, error: result.error || null };
+    const result = await bridge.status({ refresh }) as MidjourneyStatus & { connected: boolean };
+    return { available: true, connected: result.connected, busy: result.busy, visible: result.visible, error: result.error || null, running: result.running, waiting: result.waiting, concurrency: result.concurrency };
   } catch (error) {
     return { available: true, connected: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -95,6 +124,13 @@ export const toggleMidjourneyWindow = async (show: boolean) => {
   const bridge = api();
   if (!bridge) return { visible: false };
   return bridge.toggleWindow({ show });
+};
+
+/** Stop waiting for a job (Jeff cannot abort a render Midjourney already accepted, but the slot and the task are released). */
+export const cancelMidjourneyJob = async (jobLabel: string) => {
+  const bridge = api();
+  if (!bridge || !bridge.cancel) return { ok: false, error: 'Cancel is not available.' };
+  return bridge.cancel({ jobLabel });
 };
 
 export const onMidjourneyEvent = (callback: (event: MidjourneyJobEvent) => void): (() => void) => {
@@ -173,6 +209,7 @@ export const generateImagesWithMidjourney = async (
         defaultParams: options.defaultParams,
         jobLabel,
         attempt,
+        concurrency: getMidjourneyConcurrency(),
       });
       break;
     } catch (error) {

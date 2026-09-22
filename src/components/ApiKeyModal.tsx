@@ -6,7 +6,7 @@ import { DEFAULT_SHORTCUTS, SHORTCUT_DEFINITIONS } from '../utils/shortcuts';
 import { clearCloudAuth, getCloudAuth, getCloudClientId, setCloudClientId, startCloudOAuth } from '../services/cloudAuthService';
 import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } from '../services/googleModelProvider';
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
-import { connectMidjourney, disconnectMidjourney, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
+import { connectMidjourney, disconnectMidjourney, getMidjourneyConcurrency, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, setMidjourneyConcurrency, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
 import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
@@ -357,6 +357,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [section, setSection] = useState<SettingsSection>('providers');
     const [showAllProviders, setShowAllProviders] = useState(false);
     const [mjStatus, setMjStatus] = useState<MidjourneyStatus>({ available: isMidjourneyAgentAvailable(), connected: false });
+    const [mjConcurrency, setMjConcurrency] = useState<number>(() => getMidjourneyConcurrency());
     const [mjBusy, setMjBusy] = useState<'connect' | 'disconnect' | null>(null);
     const [mjWindowOpen, setMjWindowOpen] = useState(false);
     const [localAgents, setLocalAgents] = useState<LocalAgentInfo[]>([]);
@@ -538,7 +539,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                                 <span className={`settings-provider__dot ${mjStatus.connected ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
                                                 <strong>Midjourney · Jeff</strong>
                                                 <span className={`pk-chip ${mjStatus.connected ? 'pk-chip--ok' : ''}`}>{!mjStatus.available ? 'desktop app only' : mjStatus.connected ? 'signed in' : 'not signed in'}</span>
-                                                {mjStatus.busy && <span className="pk-chip pk-chip--accent">working</span>}
+                                                {mjStatus.busy && <span className="pk-chip pk-chip--accent">{mjStatus.running ? `${mjStatus.running} rendering` : 'working'}{mjStatus.waiting ? ` · ${mjStatus.waiting} waiting` : ''}</span>}
                                             </div>
                                             <span className="pk-actions">
                                                 {mjStatus.available && mjStatus.connected && (
@@ -555,6 +556,17 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                             No API key — Jeff is a background browser that uses your own Midjourney account. Sign in once (Google or Discord) in the window that opens; after that Concept and Storyboard can pick “Midjourney · Jeff” as the image model and everything runs unattended. Automation is against Midjourney’s terms; use at your own risk.
                                         </p>
                                         {mjStatus.error && <p className="pk-hint" style={{ color: 'var(--app-danger)' }}>{mjStatus.error}</p>}
+                                        {mjStatus.available && (
+                                            <div className="pk-field settings-provider__extra">
+                                                <span>Parallel jobs</span>
+                                                <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+                                                    {[1, 2, 3, 4, 5, 6].map((count) => (
+                                                        <button key={count} type="button" aria-pressed={mjConcurrency === count} onClick={() => setMjConcurrency(setMidjourneyConcurrency(count))}>{count}</button>
+                                                    ))}
+                                                </div>
+                                                <span className="pk-hint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>How many jobs Jeff keeps rendering at once. Basic and Standard plans allow 3 fast jobs, Pro 12; more than your plan allows just queues at Midjourney.</span>
+                                            </div>
+                                        )}
                                     </div>
                                     {visibleProviders.map(renderProvider)}
                                 </div>

@@ -42,11 +42,12 @@ import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } 
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
 import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
-import { generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
+import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
 import { generateCatalogVideo } from '../services/videoCatalogRouter';
+import { startTask } from '../services/taskCenter';
 import { DOP_ENTRY, HIGGSFIELD_IMAGE_MODELS, generateImageWithHiggsfield, higgsfieldHostsVideoModel, isHiggsfieldImageModel } from '../services/higgsfieldService';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
@@ -387,6 +388,14 @@ const normalizeCustomPersonas = (value: any): DirectorPersona[] => {
 
 const DIRECTOR_SCENE_HEADER_REGEX = /^\s*(?:\[SCENE\]\s*)?(?:SCENE\s*[:\-]\s*)?(?:\d{1,4}[A-Z]?(?:[.)-])?\s+)?(?:INT\.?|EXT\.?|INT\/EXT\.?|EXT\/INT\.?|I\/E\.?|E\/I\.?)/i;
 
+// Headings that are not sluglines but still start a scene: "Scene 3", "Szene 3:", "## Scene 3 — Harbour", "Chapter 2", "SC. 4". Short lines only.
+const ALT_SCENE_HEADER_REGEX = /^\s*(?:#{1,4}\s*)?\[?(?:scene|szene|chapter|kapitel|sequence|sequenz|sc\.?)\s*\d{1,4}[A-Z]?\]?\b/i;
+const isSceneHeading = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length > 90) return false;
+    return DIRECTOR_SCENE_HEADER_REGEX.test(trimmed) || ALT_SCENE_HEADER_REGEX.test(trimmed);
+};
+
 const splitScriptIntoSceneBlocks = (scriptText: string): ScriptSceneBlock[] => {
     if (!scriptText || !scriptText.trim()) return [];
     const lines = scriptText.replace(/\r/g, '\n').split('\n');
@@ -415,7 +424,7 @@ const splitScriptIntoSceneBlocks = (scriptText: string): ScriptSceneBlock[] => {
 
     lines.forEach((line) => {
         const trimmed = line.trim();
-        if (DIRECTOR_SCENE_HEADER_REGEX.test(trimmed)) {
+        if (isSceneHeading(trimmed)) {
             flush();
             currentSlugline = trimmed.replace(/\s+/g, ' ').toUpperCase();
             currentLines = [line];
@@ -11053,18 +11062,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return { generatedCount: 0, error: message };
         }
 
-        setIsLoading("Batch Generating Storyboard Images...");
-
+        // Cards show their own spinners; no hub-wide overlay, so the rest of the app stays usable.
+        // Midjourney renders several jobs at once (Settings → Midjourney → parallel jobs); API models get two lanes.
+        const parallel = referenceImageModel === 'midjourney' ? getMidjourneyConcurrency() : 2;
         let generatedCount = 0;
-        for (const shot of shotsToGenerate) {
-            try {
-                await handleGenerateShotImage(shot.shot);
-                generatedCount += 1;
-            } catch (e) {
-                console.error(`Failed to generate shot ${shot.shot}`, e);
+        const pending = [...shotsToGenerate];
+        const worker = async () => {
+            while (pending.length > 0) {
+                const shot = pending.shift();
+                if (!shot) return;
+                try {
+                    await handleGenerateShotImage(shot.shot);
+                    generatedCount += 1;
+                } catch (e) {
+                    console.error(`Failed to generate shot ${shot.shot}`, e);
+                }
             }
-        }
-        setIsLoading(false);
+        };
+        await Promise.all(Array.from({ length: Math.min(parallel, pending.length) }, () => worker()));
         return { generatedCount };
     };
 
@@ -12137,7 +12152,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     };
 
     // Director Mode Handlers
-    const handleRunDirector = async () => {
+    const handleRunDirector = async (runOptions?: { background?: boolean; onProgress?: (message: string) => void }) => {
+        const background = Boolean(runOptions && typeof runOptions === 'object' && 'background' in runOptions && runOptions.background);
+        const report = (message: string | false) => {
+            if (background) { if (message && runOptions?.onProgress) runOptions.onProgress(message); return; }
+            setIsLoading(message);
+        };
         if (!storyBible.script) {
             const message = "Please write or generate a script first.";
             setError(message);
@@ -12158,7 +12178,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return null;
         }
 
-        setIsLoading(scopedForFeature
+        report(scopedForFeature
             ? `Director Agent is analyzing ${directorSceneScope.summary}... (This may take a moment)`
             : "Director Agent is analyzing script... (This may take a moment)");
         setIsDirecting(true);
@@ -12180,7 +12200,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const treatment = await generateViMaxStoryboardSceneByScene(
                 scriptForDirector,
                 context,
-                (msg) => setIsLoading(msg),
+                (msg) => report(msg),
             );
             const remappedTreatment = scopedForFeature
                 ? {
@@ -12214,16 +12234,19 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             handleError(e);
             return null;
         } finally {
-            setIsLoading(false);
+            report(false);
             setIsDirecting(false);
         }
     };
 
-    const handleApplyDirectorToStoryboard = () => {
+    const handleApplyDirectorToStoryboard = (explicitTreatment?: DirectorTreatment | unknown) => {
+        const explicit = explicitTreatment && typeof explicitTreatment === 'object' && Array.isArray((explicitTreatment as DirectorTreatment).shots)
+            ? (explicitTreatment as DirectorTreatment)
+            : null;
         const fallbackSnapshot = activeDirectorSnapshotId
             ? directorStoryboardSnapshots.find((entry) => entry.id === activeDirectorSnapshotId) || directorStoryboardSnapshots[0]
             : directorStoryboardSnapshots[0];
-        const treatmentToApply = directorTreatment || fallbackSnapshot?.treatment || null;
+        const treatmentToApply = explicit || directorTreatment || fallbackSnapshot?.treatment || null;
 
         if (!treatmentToApply) {
             setError('Run the Director Pass first to create a treatment.');
@@ -12285,6 +12308,28 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return { shotCount: alignedShots.length };
     };
 
+
+    const [directingScene, setDirectingScene] = useState<number | null>(null);
+    /** Storyboard bar: direct only the selected scene, in the background, then merge the shots. Without a matching scene block the Director page opens instead. */
+    const handleDirectScene = async () => {
+        if (effectiveSceneNumber === null || !directorSceneScope.isScoped || !directorSceneScope.selectedSceneNumbers.includes(effectiveSceneNumber)) {
+            setActivePhase('director');
+            return;
+        }
+        if (directingScene !== null) return;
+        setDirectingScene(effectiveSceneNumber);
+        const task = startTask({ label: `Director · scene ${effectiveSceneNumber}`, kind: 'agent', provider: 'gemini', estimatedMs: 90_000, message: 'Reading the scene…' });
+        try {
+            const treatment = await handleRunDirector({ background: true, onProgress: (message) => task.update({ message }) });
+            if (!treatment) { task.fail('The Director returned no treatment.'); return; }
+            const applied = handleApplyDirectorToStoryboard(treatment);
+            task.complete(`${applied.shotCount} shots in the storyboard`);
+        } catch (error) {
+            task.fail(error instanceof Error ? error.message : String(error));
+        } finally {
+            setDirectingScene(null);
+        }
+    };
 
     const handleGenerateAllVideos = async (shots?: ShotPrompt[]) => {
         const requiresStoryboardFrame = !(isTextOnlyVideoModel || videoModel === 'ltx-audio-to-video');
@@ -14597,7 +14642,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 </button>
                                                 {!directorTreatment ? (
                                                     <button
-                                                        onClick={handleRunDirector}
+                                                        onClick={() => { void handleRunDirector(); }}
                                                         disabled={isDirecting}
                                                         className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
@@ -16529,11 +16574,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 <MagicWandIcon className="w-5 h-5" /> {effectiveSceneNumber !== null ? `Generate scene ${effectiveSceneNumber}` : 'Generate All Shots'}
                                             </button>
                                         )}
-                                        {canRunDirector && allowedPhaseIds.includes('director') && (
-                                            <button onClick={() => setActivePhase('director')} className="app-button app-secondary" title="Let the Director propose a shot list with camera, lighting and pacing notes">
-                                                <ClapperboardIcon className="w-4 h-4" /> {effectiveSceneNumber !== null ? `Direct scene ${effectiveSceneNumber}` : 'Director'}
-                                            </button>
-                                        )}
+                                        {canRunDirector && allowedPhaseIds.includes('director') && (() => {
+                                            const sceneScoped = effectiveSceneNumber !== null && directorSceneScope.isScoped && directorSceneScope.selectedSceneNumbers.includes(effectiveSceneNumber);
+                                            const running = directingScene !== null;
+                                            return (
+                                                <button
+                                                    onClick={handleDirectScene}
+                                                    disabled={running}
+                                                    className="app-button app-secondary"
+                                                    title={sceneScoped
+                                                        ? `The Director reads only scene ${effectiveSceneNumber}, proposes its shots and merges them into the storyboard`
+                                                        : effectiveSceneNumber !== null
+                                                            ? `Scene ${effectiveSceneNumber} has no matching heading in the script, so the Director page opens for the whole script`
+                                                            : 'Let the Director propose a shot list with camera, lighting and pacing notes'}
+                                                >
+                                                    <ClapperboardIcon className="w-4 h-4" /> {running ? `Directing scene ${directingScene}…` : sceneScoped ? `Direct scene ${effectiveSceneNumber}` : 'Director'}
+                                                </button>
+                                            );
+                                        })()}
                                         {canUseSceneWall && allowedPhaseIds.includes('scene_wall') && (
                                             <button onClick={() => setActivePhase('scene_wall')} className="app-button app-tertiary" title="Reels, scene cards, parking and ordering for long scripts">
                                                 Scene Wall

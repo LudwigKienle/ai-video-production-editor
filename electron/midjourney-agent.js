@@ -1,8 +1,8 @@
 // Midjourney has no public API. "Jeff" drives the midjourney.com web app in a
 // dedicated, persistent Electron session on the user's behalf: the user signs in
 // once in a visible window, after that jobs are submitted, watched and downloaded
-// from a hidden window. One job at a time, human-like pacing, screenshots on
-// failure so problems can be diagnosed without guessing.
+// from a hidden window. Several jobs render in parallel, human-like pacing,
+// screenshots on failure so problems can be diagnosed without guessing.
 //
 // The page is third-party and changes without notice, so everything that touches
 // the DOM lives in PAGE_SCRIPTS below with several candidate selectors each.
@@ -15,7 +15,10 @@ const PARTITION = 'persist:midjourney';
 const IMAGINE_URL = 'https://www.midjourney.com/imagine';
 const LOGIN_URL = 'https://www.midjourney.com/login';
 const CDN_HOST = 'cdn.midjourney.com';
-const JOB_TIMEOUT_MS = 10 * 60 * 1000;
+const SUBMIT_TIMEOUT_MS = 75 * 1000;      // Enter → job id known
+const RENDER_TIMEOUT_MS = 8 * 60 * 1000;  // job id known → images on the CDN
+const STALL_TIMEOUT_MS = 4 * 60 * 1000;   // no progress change at all
+const RUN_TIMEOUT_MS = 20 * 1000;         // one page call
 const POLL_MS = 3000;
 // Prefix on the error message so the renderer can tell a moderation block from a page failure (IPC only carries the message).
 const MODERATION_PREFIX = '[moderated]';
@@ -24,7 +27,6 @@ const USER_AGENT =
 
 let win = null;
 let visible = false;
-let queue = Promise.resolve();
 let lastStatus = { connected: false, checkedAt: 0, error: null };
 const listeners = new Set();
 
@@ -66,6 +68,7 @@ const ensureWindow = () => {
   });
   win.webContents.setUserAgent(USER_AGENT);
   win.setMenuBarVisibility(false);
+  attachNetworkTap(win);
   // Closing the window must not end the session — just hide it.
   win.on('close', (event) => {
     if (!app.isQuittingForReal) {
@@ -100,7 +103,12 @@ const navigate = async (url) => {
   await sleep(1500);
 };
 
-const run = (script) => ensureWindow().webContents.executeJavaScript(script, true);
+const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`${label || 'Page call'} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+});
+// A page call that never resolves (renderer hung, navigation mid-call) must not freeze every job behind it.
+const run = (script, timeoutMs = RUN_TIMEOUT_MS) => withTimeout(ensureWindow().webContents.executeJavaScript(script, true), timeoutMs, 'Midjourney page call');
 
 const screenshot = async (label) => {
   try {
@@ -132,28 +140,54 @@ const PAGE_SCRIPTS = {
     return { url, hasPromptBox: !!box, loginish, title: document.title };
   })()`,
 
-  // Job ids currently visible in the feed (cdn image urls carry the job uuid).
+  // Job ids visible in the feed. Cards are <a href="/jobs/<uuid>"> with a CSS
+  // background-image on the CDN — there are no <img> tags, so read hrefs and styles.
   jobIds: `(() => {
     const ids = new Set();
-    for (const img of document.querySelectorAll('img[src*="${CDN_HOST}"]')) {
-      const m = img.getAttribute('src').match(/${CDN_HOST}\\/([0-9a-f-]{36})\\//i);
-      if (m) ids.add(m[1]);
-    }
+    const rx = /(?:\\/jobs\\/|cdn.midjourney.com\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+    const add = (value) => { const m = String(value || '').match(rx); if (m) ids.add(m[1].toLowerCase()); };
+    for (const a of document.querySelectorAll('a[href*="/jobs/"]')) add(a.getAttribute('href'));
+    for (const el of document.querySelectorAll('[style*="cdn.midjourney.com"]')) add(el.getAttribute('style'));
+    for (const img of document.querySelectorAll('img[src*="cdn.midjourney.com"]')) add(img.getAttribute('src'));
     return Array.from(ids);
   })()`,
 
-  // For a job id: how many of the 4 grid images are present, and any text near them.
-  jobState: (jobId) => `(() => {
-    const imgs = Array.from(document.querySelectorAll('img[src*="${CDN_HOST}/${jobId}/"]'));
-    const indexes = new Set();
-    for (const img of imgs) {
-      const m = img.getAttribute('src').match(/\\/${jobId}\\/0_(\\d)/);
-      if (m) indexes.add(Number(m[1]));
+  // Every job card on the page: its text (prompt, "42%"), progress and which of the 4 images are there.
+  jobCards: `(() => {
+    const cards = {};
+    const rx = /(?:\\/jobs\\/|cdn.midjourney.com\\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+    const nodes = document.querySelectorAll('a[href*="/jobs/"], [style*="cdn.midjourney.com"], img[src*="cdn.midjourney.com"]');
+    for (const node of nodes) {
+      const m = (node.getAttribute('href') || node.getAttribute('style') || node.getAttribute('src') || '').match(rx);
+      if (!m) continue;
+      const id = m[1].toLowerCase();
+      const card = node.closest('[class*="jobCard" i], article, li, [data-job-id]') || node.parentElement;
+      if (!card) continue;
+      const entry = cards[id] || (cards[id] = { text: '', percent: null, images: [] });
+      const html = card.outerHTML || '';
+      const parts = html.split('cdn.midjourney.com/' + id + '/0_');
+      for (let i = 1; i < parts.length; i += 1) {
+        const digit = parts[i].charCodeAt(0) - 48;
+        if (digit >= 0 && digit <= 9 && !entry.images.includes(digit)) entry.images.push(digit);
+      }
+      if (!entry.text) entry.text = (card.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 300);
+      const pm = entry.text.match(/(\\d{1,3})\\s*%/);
+      if (pm) entry.percent = Number(pm[1]);
     }
-    const container = imgs[0] ? imgs[0].closest('article, li, [data-job-id], [class*="job" i], div') : null;
-    const text = container ? (container.innerText || '').slice(0, 400) : '';
-    const percent = (text.match(/(\\d{1,3})\\s*%/) || [])[1] || null;
-    return { count: indexes.size, indexes: Array.from(indexes).sort(), text, percent: percent ? Number(percent) : null };
+    return cards;
+  })()`,
+
+  // Fetch a CDN image from inside the page (cookies, referer, no bot check) as base64.
+  fetchImage: (url) => `(async () => {
+    try {
+      const response = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
+      if (!response.ok) return { ok: false, status: response.status };
+      const blob = await response.blob();
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return { ok: true, mimeType: blob.type || 'image/png', base64: btoa(binary) };
+    } catch (error) { return { ok: false, error: String(error) }; }
   })()`,
 
   // Did Midjourney refuse the prompt? Looks for the moderation dialog / toast / inline warning.
@@ -267,8 +301,14 @@ const PAGE_SCRIPTS = {
 // ---------------------------------------------------------------------------
 // Status / connect
 
+const activity = () => {
+  const running = typeof inflightJobs === 'function' ? inflightJobs().length : 0;
+  return { busy: running > 0 || laneDepth > 0, running, waiting: laneDepth, concurrency: options.concurrency };
+};
+
 const probe = async () => {
-  await navigate(IMAGINE_URL);
+  const onImagine = /midjourney\.com\/imagine/i.test(ensureWindow().webContents.getURL());
+  if (!onImagine || (typeof inflightJobs !== 'function' || inflightJobs().length === 0)) await navigate(IMAGINE_URL);
   const info = await run(PAGE_SCRIPTS.probe);
   const connected = Boolean(info.hasPromptBox && !info.loginish);
   lastStatus = { connected, checkedAt: Date.now(), error: null, url: info.url };
@@ -278,14 +318,14 @@ const probe = async () => {
 
 const status = async ({ refresh = false } = {}) => {
   if (!refresh && lastStatus.checkedAt && Date.now() - lastStatus.checkedAt < 60000) {
-    return { ...lastStatus, visible, busy: queueDepth > 0 };
+    return { ...lastStatus, visible, ...activity() };
   }
   try {
     const result = await probe();
-    return { ...result, visible, busy: queueDepth > 0 };
+    return { ...result, visible, ...activity() };
   } catch (error) {
     lastStatus = { connected: false, checkedAt: Date.now(), error: formatError(error) };
-    return { ...lastStatus, visible, busy: queueDepth > 0 };
+    return { ...lastStatus, visible, ...activity() };
   }
 };
 
@@ -319,18 +359,6 @@ const disconnect = async () => {
   return lastStatus;
 };
 
-// ---------------------------------------------------------------------------
-// Jobs
-
-let queueDepth = 0;
-
-const enqueue = (task) => {
-  queueDepth += 1;
-  const result = queue.then(task, task).finally(() => { queueDepth -= 1; });
-  queue = result.catch(() => undefined);
-  return result;
-};
-
 // Defaults every prompt gets unless the caller (or the prompt itself) already sets them.
 const DEFAULT_PARAMS = '--v 8.2 --style raw';
 
@@ -354,14 +382,6 @@ const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imag
   return `${parts.join(' ')} ${params.join(' ')}`.replace(/\s+/g, ' ').trim();
 };
 
-const downloadImage = async (url) => {
-  const response = await getSession().fetch(url, { headers: { Referer: 'https://www.midjourney.com/' } });
-  if (!response.ok) throw new Error(`Download failed (${response.status}) for ${url}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const type = response.headers.get('content-type') || 'image/png';
-  return { buffer, mimeType: type.split(';')[0] };
-};
-
 const persist = async (folderPath, jobId, index, buffer, mimeType) => {
   if (!folderPath) return null;
   const ext = mimeType.includes('webp') ? 'webp' : mimeType.includes('jpeg') ? 'jpg' : 'png';
@@ -372,122 +392,403 @@ const persist = async (folderPath, jobId, index, buffer, mimeType) => {
   return relativePath;
 };
 
-/**
- * Generate one Midjourney job and return its four images.
- * refs: [{ base64, mimeType, name, role: 'character' | 'style' | 'image' }]
- */
-const generate = (payload) => enqueue(async () => {
-  const jobLabel = (payload && typeof payload.jobLabel === 'string' && payload.jobLabel) || `mj-${Date.now().toString(36)}`;
-  try {
-    return await generateInner(payload || {}, jobLabel);
-  } catch (error) {
-    const message = formatError(error);
-    emit({ type: 'job', id: jobLabel, phase: message.startsWith(MODERATION_PREFIX) ? 'moderated' : 'failed', error: message });
-    throw error;
-  }
-});
+// ---------------------------------------------------------------------------
+// Jobs
+//
+// Two lanes. The *submit lane* is serialized and short: wait for a free slot,
+// upload references, type the prompt, press Enter, learn the job id. The
+// *tracker* is one loop that watches every running job at once. Midjourney
+// renders several jobs in parallel, so N jobs render while the lane already
+// types the next prompt. Nothing waits on a single 10-minute timeout anymore:
+// every step has its own limit and a stalled job fails with a screenshot.
+
+const options = { concurrency: 3 };
+const jobs = new Map(); // label -> job
+let submitLane = Promise.resolve();
+let laneDepth = 0;
+let trackerTimer = null;
+let ticking = false;
+
+const UUID_RX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const MODERATION_RX = /(banned prompt|blocked|moderat|flagged|violat|community guidelines|not allowed|inappropriate)/i;
 
 const moderationError = (text) => new Error(`${MODERATION_PREFIX} Midjourney blocked the prompt: ${text || 'content moderation'}`);
 
-const generateInner = async (payload, jobLabel) => {
-  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '', styleWeight, defaultParams, attempt = 1 } = payload;
-  if (!prompt || !prompt.trim()) throw new Error('Prompt is empty.');
-  emit({ type: 'job', id: jobLabel, phase: 'starting', prompt, attempt });
+const inflightJobs = () => Array.from(jobs.values()).filter((job) => job.status === 'queued' || job.status === 'rendering' || job.status === 'downloading');
+const claimedJobIds = () => new Set(Array.from(jobs.values()).map((job) => job.jobId).filter(Boolean));
 
-  const current = await status();
-  if (!current.connected) throw new Error('Jeff is not signed in to Midjourney. Open Settings → AI providers → Midjourney and connect.');
+const setOptions = (next = {}) => {
+  if (Number.isFinite(next.concurrency)) options.concurrency = Math.max(1, Math.min(6, Math.round(next.concurrency)));
+  return { ...options };
+};
 
-  await navigate(IMAGINE_URL);
-
-  // 1. Upload references through the page so they get CDN urls.
-  const characterRefUrls = [];
-  const styleRefUrls = [];
-  const imageRefUrls = [];
-  for (const ref of refs.slice(0, 6)) {
-    emit({ type: 'job', id: jobLabel, phase: 'uploading', name: ref.name });
-    const result = await run(PAGE_SCRIPTS.uploadReference(ref.base64, ref.mimeType || 'image/png', ref.name || 'reference.png'));
-    if (!result || !result.ok) {
-      const shot = await screenshot('upload-failed');
-      throw new Error(`Reference upload failed: ${result?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
-    }
-    if (ref.role === 'character') characterRefUrls.push(result.url);
-    else if (ref.role === 'style') styleRefUrls.push(result.url);
-    else imageRefUrls.push(result.url);
-    await sleep(jitter(800));
+const pruneJobs = () => {
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  for (const [label, job] of jobs) {
+    if ((job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') && job.finishedAt && job.finishedAt < cutoff) jobs.delete(label);
   }
-  if (refs.length) await run(PAGE_SCRIPTS.clearReferenceChips).catch(() => 0);
+};
 
-  // 2. Submit.
-  const before = new Set(await run(PAGE_SCRIPTS.jobIds));
-  const fullPrompt = buildPrompt({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight, extraParams, defaultParams });
-  emit({ type: 'job', id: jobLabel, phase: 'submitting', fullPrompt });
-  const submitted = await run(PAGE_SCRIPTS.submitPrompt(fullPrompt));
-  if (!submitted || !submitted.ok) {
-    const shot = await screenshot('submit-failed');
-    throw new Error(`Could not submit the prompt: ${submitted?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
+const settle = (job, phase, extra = {}) => {
+  job.finishedAt = Date.now();
+  emit({ type: 'job', id: job.label, phase, jobId: job.jobId, ...extra });
+};
+
+const failJob = (job, error) => {
+  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') return;
+  const message = formatError(error);
+  job.status = 'failed';
+  job.error = message;
+  settle(job, message.startsWith(MODERATION_PREFIX) ? 'moderated' : 'failed', { error: message });
+  job.reject(error instanceof Error ? error : new Error(message));
+};
+
+const finishJob = (job, images) => {
+  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') return;
+  job.status = 'done';
+  settle(job, 'done', { count: images.length });
+  job.resolve({ ok: true, jobId: job.jobId, prompt: job.fullPrompt, images });
+};
+
+const cancel = ({ jobLabel } = {}) => {
+  const job = jobs.get(jobLabel);
+  if (!job) return { ok: false, error: 'Unknown job' };
+  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') return { ok: true, status: job.status };
+  job.cancelled = true;
+  job.status = 'cancelled';
+  settle(job, 'failed', { error: 'Cancelled' });
+  job.reject(new Error('Cancelled'));
+  return { ok: true, status: 'cancelled' };
+};
+
+// --- what the page's own API traffic tells us (see attachNetworkTap) ---------
+
+const apiLog = [];
+
+const walkJson = (value, visit, depth = 0) => {
+  if (!value || typeof value !== 'object' || depth > 8) return;
+  if (Array.isArray(value)) { for (const item of value) walkJson(item, visit, depth + 1); return; }
+  visit(value);
+  for (const key of Object.keys(value)) walkJson(value[key], visit, depth + 1);
+};
+
+const objectJobId = (obj) => {
+  for (const key of ['job_id', 'jobId', 'id']) {
+    const value = obj[key];
+    if (typeof value === 'string' && UUID_RX.test(value) && value.length === 36) return value.toLowerCase();
   }
+  return null;
+};
 
-  // 3. Wait for a new job to appear and finish.
-  const deadline = Date.now() + JOB_TIMEOUT_MS;
-  let jobId = null;
-  let done = null;
-  while (Date.now() < deadline) {
-    await sleep(POLL_MS);
-    if (!jobId) {
-      const ids = await run(PAGE_SCRIPTS.jobIds).catch(() => []);
-      const fresh = ids.filter((id) => !before.has(id));
-      if (!fresh.length) {
-        const problem = await run(PAGE_SCRIPTS.promptError).catch(() => null);
-        if (problem && problem.blocked) {
-          await screenshot('moderated');
-          await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
-          throw moderationError(problem.text);
+// Progress / completion for jobs we track, from any response or socket frame.
+const noteJobUpdates = (data) => {
+  const byJobId = new Map(inflightJobs().filter((job) => job.jobId).map((job) => [job.jobId, job]));
+  if (byJobId.size === 0) return;
+  walkJson(data, (obj) => {
+    const id = objectJobId(obj);
+    const job = id && byJobId.get(id);
+    if (!job) return;
+    const status = String(obj.current_status || obj.status || '').toLowerCase();
+    const percent = Number.isFinite(obj.percentage_complete) ? Number(obj.percentage_complete) : Number.isFinite(obj.progress) ? Number(obj.progress) : null;
+    if (percent !== null) updateProgress(job, percent);
+    const paths = obj.image_paths || obj.imagePaths;
+    if (/complet|finish|done|success/.test(status) || percent >= 100 || (Array.isArray(paths) && paths.length >= 4)) job.apiDone = true;
+    if (/fail|error|reject|moderat|block/.test(status)) job.apiFailed = obj.message || obj.error || obj.reason || status;
+  });
+};
+
+const recordApi = (url, text) => {
+  let data = null;
+  try { data = JSON.parse(text); } catch { return; }
+  apiLog.push({ at: Date.now(), url, data });
+  if (apiLog.length > 80) apiLog.splice(0, apiLog.length - 80);
+  try { noteJobUpdates(data); } catch { /* ignore */ }
+};
+
+const attachNetworkTap = (w) => {
+  try {
+    const dbg = w.webContents.debugger;
+    if (dbg.isAttached()) return;
+    dbg.attach('1.3');
+    const pending = new Map(); // requestId -> url
+    dbg.on('message', async (_event, method, params) => {
+      try {
+        if (method === 'Network.responseReceived') {
+          const url = (params.response && params.response.url) || '';
+          const mime = (params.response && params.response.mimeType) || '';
+          if (/midjourney\.com\/api\//i.test(url) && /json|text/i.test(mime)) pending.set(params.requestId, url);
+        } else if (method === 'Network.loadingFinished') {
+          const url = pending.get(params.requestId);
+          if (!url) return;
+          pending.delete(params.requestId);
+          const { body, base64Encoded } = await dbg.sendCommand('Network.getResponseBody', { requestId: params.requestId });
+          recordApi(url, base64Encoded ? Buffer.from(body, 'base64').toString('utf8') : body);
+        } else if (method === 'Network.loadingFailed') {
+          pending.delete(params.requestId);
+        } else if (method === 'Network.webSocketFrameReceived') {
+          const payload = params.response && params.response.payloadData;
+          if (typeof payload === 'string' && payload.length < 300000 && payload.trim().startsWith('{')) recordApi('ws', payload);
         }
-        continue;
-      }
-      jobId = fresh[0];
-      emit({ type: 'job', id: jobLabel, phase: 'queued', jobId });
-    }
-    const state = await run(PAGE_SCRIPTS.jobState(jobId)).catch(() => null);
-    if (state && state.count === 0 && /(blocked|moderat|banned|flagged|violat)/i.test(state.text || '')) {
-      await screenshot('moderated-job');
-      await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
-      throw moderationError(state.text);
-    }
-    if (state) emit({ type: 'job', id: jobLabel, phase: 'rendering', jobId, percent: state.percent, count: state.count });
-    if (state && state.count >= 4 && state.percent === null) { done = state; break; }
-    if (state && state.count >= 4 && state.percent !== null && state.percent >= 100) { done = state; break; }
+      } catch { /* body already gone or not json */ }
+    });
+    dbg.sendCommand('Network.enable').catch(() => undefined);
+  } catch (error) {
+    console.warn('[jeff] network tap unavailable, falling back to the DOM only:', formatError(error));
   }
-  if (!jobId || !done) {
-    const shot = await screenshot('job-timeout');
-    throw new Error(`Midjourney did not finish within ${Math.round(JOB_TIMEOUT_MS / 60000)} minutes${shot ? ` (screenshot: ${shot})` : ''}`);
-  }
-  // Let the final renders replace the progress previews.
-  await sleep(jitter(2500));
+};
 
-  // 4. Download the four full-resolution images.
-  emit({ type: 'job', id: jobLabel, phase: 'downloading', jobId });
+// The first submit response after our Enter belongs to us: the lane is serialized.
+const jobIdFromApi = (job, knownIds) => {
+  const claimed = claimedJobIds();
+  for (const entry of apiLog) {
+    if (entry.at < job.submittedAt - 1000) continue;
+    if (!/submit|imagine|jobs?\b|create/i.test(entry.url)) continue;
+    let moderation = null;
+    let found = null;
+    walkJson(entry.data, (obj) => {
+      const text = [obj.message, obj.error, obj.reason, obj.detail].filter((v) => typeof v === 'string').join(' ');
+      if (text && MODERATION_RX.test(text)) moderation = moderation || text;
+      const id = objectJobId(obj);
+      if (id && !knownIds.has(id) && !claimed.has(id) && !found) found = id;
+    });
+    if (moderation) throw moderationError(moderation.slice(0, 300));
+    if (found) return found;
+  }
+  return null;
+};
+
+// --- lane -----------------------------------------------------------------
+
+const ensureImaginePage = async () => {
+  const w = ensureWindow();
+  const url = w.webContents.getURL();
+  if (/\/(login|auth|signin)/i.test(url)) throw new Error('Jeff is not signed in to Midjourney. Open Settings → AI providers → Midjourney and connect.');
+  // Do not reload while other jobs render: their cards live on this page.
+  if (!/midjourney\.com\/imagine/i.test(url) || inflightJobs().length === 0) await navigate(IMAGINE_URL);
+};
+
+const promptSnippet = (prompt) => String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ');
+
+const resolveJobId = async (job, knownIds) => {
+  const deadline = Date.now() + SUBMIT_TIMEOUT_MS;
+  const snippet = promptSnippet(job.prompt);
+  while (Date.now() < deadline) {
+    if (job.cancelled) throw new Error('Cancelled');
+    const fromApi = jobIdFromApi(job, knownIds);
+    if (fromApi) return fromApi;
+    const problem = await run(PAGE_SCRIPTS.promptError).catch(() => null);
+    if (problem && problem.blocked) {
+      await screenshot('moderated');
+      await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+      throw moderationError(problem.text);
+    }
+    const cards = await run(PAGE_SCRIPTS.jobCards).catch(() => ({}));
+    const claimed = claimedJobIds();
+    const fresh = Object.keys(cards).filter((id) => !knownIds.has(id) && !claimed.has(id));
+    if (fresh.length) {
+      const matching = fresh.find((id) => snippet && (cards[id].text || '').toLowerCase().includes(snippet));
+      return matching || fresh[0];
+    }
+    await sleep(1500);
+  }
+  const shot = await screenshot('submit-timeout');
+  throw new Error(`Midjourney did not pick up the prompt within ${Math.round(SUBMIT_TIMEOUT_MS / 1000)}s${shot ? ` (screenshot: ${shot})` : ''}`);
+};
+
+const submitJob = async (job) => {
+  if (job.cancelled) return;
+  try {
+    while (inflightJobs().length >= options.concurrency) {
+      if (job.cancelled) return;
+      if (job.status !== 'waiting-slot') {
+        job.status = 'waiting-slot';
+        emit({ type: 'job', id: job.label, phase: 'waiting', running: inflightJobs().length, limit: options.concurrency });
+      }
+      await sleep(2000);
+    }
+    const current = await status();
+    if (!current.connected) throw new Error('Jeff is not signed in to Midjourney. Open Settings → AI providers → Midjourney and connect.');
+    await ensureImaginePage();
+
+    // 1. Upload references through the page so they get CDN urls.
+    const characterRefUrls = [];
+    const styleRefUrls = [];
+    const imageRefUrls = [];
+    for (const ref of job.refs.slice(0, 6)) {
+      if (job.cancelled) return;
+      job.status = 'uploading';
+      emit({ type: 'job', id: job.label, phase: 'uploading', name: ref.name });
+      const result = await run(PAGE_SCRIPTS.uploadReference(ref.base64, ref.mimeType || 'image/png', ref.name || 'reference.png'), 75000);
+      if (!result || !result.ok) {
+        const shot = await screenshot('upload-failed');
+        throw new Error(`Reference upload failed: ${result?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
+      }
+      if (ref.role === 'character') characterRefUrls.push(result.url);
+      else if (ref.role === 'style') styleRefUrls.push(result.url);
+      else imageRefUrls.push(result.url);
+      await sleep(jitter(800));
+    }
+    if (job.refs.length) await run(PAGE_SCRIPTS.clearReferenceChips).catch(() => 0);
+
+    // 2. Submit.
+    const knownIds = new Set(await run(PAGE_SCRIPTS.jobIds).catch(() => []));
+    job.fullPrompt = buildPrompt({ prompt: job.prompt, aspectRatio: job.aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight: job.styleWeight, extraParams: job.extraParams, defaultParams: job.defaultParams });
+    job.status = 'submitting';
+    job.submittedAt = Date.now();
+    emit({ type: 'job', id: job.label, phase: 'submitting', fullPrompt: job.fullPrompt });
+    const submitted = await run(PAGE_SCRIPTS.submitPrompt(job.fullPrompt));
+    if (!submitted || !submitted.ok) {
+      const shot = await screenshot('submit-failed');
+      throw new Error(`Could not submit the prompt: ${submitted?.error || 'unknown'}${shot ? ` (screenshot: ${shot})` : ''}`);
+    }
+
+    // 3. Learn the job id, then hand over to the tracker.
+    job.jobId = await resolveJobId(job, knownIds);
+    job.status = 'queued';
+    job.percent = null;
+    job.lastChangeAt = Date.now();
+    emit({ type: 'job', id: job.label, phase: 'queued', jobId: job.jobId });
+    startTracker();
+  } catch (error) {
+    failJob(job, error);
+  }
+};
+
+const generate = (payload = {}) => {
+  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '', styleWeight, defaultParams, attempt = 1, concurrency } = payload;
+  if (Number.isFinite(concurrency)) setOptions({ concurrency });
+  const label = (typeof payload.jobLabel === 'string' && payload.jobLabel) || `mj-${Date.now().toString(36)}`;
+  if (!prompt || !prompt.trim()) return Promise.reject(new Error('Prompt is empty.'));
+  pruneJobs();
+  return new Promise((resolve, reject) => {
+    const job = {
+      label, prompt, aspectRatio, refs, folderPath, extraParams, styleWeight, defaultParams, attempt,
+      status: 'waiting', createdAt: Date.now(), percent: null, cancelled: false, resolve, reject,
+      jobId: null, fullPrompt: null, apiDone: false, apiFailed: null, downloadTries: 0,
+    };
+    jobs.set(label, job);
+    emit({ type: 'job', id: label, phase: 'starting', prompt, attempt, queued: laneDepth });
+    laneDepth += 1;
+    submitLane = submitLane.then(() => submitJob(job)).catch(() => undefined).finally(() => { laneDepth -= 1; });
+  });
+};
+
+// --- tracker --------------------------------------------------------------
+
+const updateProgress = (job, percent) => {
+  if (!Number.isFinite(percent)) return;
+  if (job.percent !== percent) {
+    job.percent = percent;
+    job.lastChangeAt = Date.now();
+    if (job.status === 'queued') job.status = 'rendering';
+    emit({ type: 'job', id: job.label, phase: 'rendering', jobId: job.jobId, percent, count: job.imageCount || 0 });
+  }
+};
+
+const fetchCdnImage = async (url) => {
+  // The page session carries the cookies; a plain fetch gets 403 from the CDN.
+  try {
+    const response = await getSession().fetch(url, { headers: { Referer: 'https://www.midjourney.com/' } });
+    if (response.ok) {
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const type = (response.headers.get('content-type') || 'image/png').split(';')[0];
+      if (buffer.length > 1000 && /image\//.test(type)) return { buffer, mimeType: type };
+    }
+  } catch { /* fall through */ }
+  const viaPage = await run(PAGE_SCRIPTS.fetchImage(url), 60000).catch(() => null);
+  if (viaPage && viaPage.ok) return { buffer: Buffer.from(viaPage.base64, 'base64'), mimeType: viaPage.mimeType || 'image/png' };
+  throw new Error(`Download failed for ${url}`);
+};
+
+const downloadJob = async (job) => {
   const images = [];
   for (const index of [0, 1, 2, 3]) {
-    const url = `https://${CDN_HOST}/${jobId}/0_${index}.png`;
+    if (job.cancelled) throw new Error('Cancelled');
+    const url = `https://${CDN_HOST}/${job.jobId}/0_${index}.png`;
     let file;
     try {
-      file = await downloadImage(url);
+      file = await fetchCdnImage(url);
     } catch {
-      file = await downloadImage(`https://${CDN_HOST}/${jobId}/0_${index}_640_N.webp`);
+      file = await fetchCdnImage(`https://${CDN_HOST}/${job.jobId}/0_${index}_640_N.webp`);
     }
-    const relativePath = await persist(folderPath, jobId, index, file.buffer, file.mimeType);
-    images.push({
-      index,
-      url: `data:${file.mimeType};base64,${file.buffer.toString('base64')}`,
-      cdnUrl: url,
-      relativePath,
-    });
-    await sleep(jitter(300));
+    const relativePath = await persist(job.folderPath, job.jobId, index, file.buffer, file.mimeType);
+    images.push({ index, url: `data:${file.mimeType};base64,${file.buffer.toString('base64')}`, cdnUrl: url, relativePath });
+    await sleep(jitter(250));
   }
-  emit({ type: 'job', id: jobLabel, phase: 'done', jobId, count: images.length });
-  return { ok: true, jobId, prompt: fullPrompt, images };
+  return images;
 };
+
+const trackTick = async () => {
+  if (ticking) return;
+  ticking = true;
+  try {
+    const running = inflightJobs();
+    if (running.length === 0) { stopTracker(); return; }
+    const w = ensureWindow();
+    const url = w.webContents.getURL();
+    if (/\/(login|auth|signin)/i.test(url)) {
+      for (const job of running) failJob(job, new Error('Midjourney signed Jeff out while jobs were running. Connect again in Settings.'));
+      return;
+    }
+    const cards = await run(PAGE_SCRIPTS.jobCards).catch(() => null);
+    for (const job of running) {
+      if (job.status === 'downloading') continue;
+      const card = cards ? cards[job.jobId] : null;
+      if (card) {
+        job.imageCount = (card.images || []).length;
+        if (card.percent !== null) updateProgress(job, card.percent);
+        if (card.text && MODERATION_RX.test(card.text) && job.imageCount === 0) { failJob(job, moderationError(card.text)); continue; }
+      }
+      if (job.apiFailed) { failJob(job, new Error(`Midjourney reported: ${job.apiFailed}`)); continue; }
+      const now = Date.now();
+      const looksDone = job.apiDone
+        || (card && card.percent === null && job.imageCount >= 4)
+        || (card && card.percent === null && job.imageCount >= 1 && now - job.lastChangeAt > 10000)
+        || (job.percent !== null && job.percent >= 100 && now - job.lastChangeAt > 4000);
+      if (looksDone) {
+        job.status = 'downloading';
+        emit({ type: 'job', id: job.label, phase: 'downloading', jobId: job.jobId });
+        downloadJob(job).then((images) => finishJob(job, images)).catch((error) => {
+          job.downloadTries += 1;
+          if (job.cancelled) return;
+          if (job.downloadTries >= 8) { failJob(job, new Error(`Midjourney finished but the images could not be downloaded: ${formatError(error)}`)); return; }
+          // Not ready on the CDN yet: back to rendering, try again on a later tick.
+          job.status = 'rendering';
+          job.lastChangeAt = Date.now();
+        });
+        continue;
+      }
+      if (now - job.submittedAt > RENDER_TIMEOUT_MS) {
+        const shot = await screenshot('job-timeout');
+        failJob(job, new Error(`Midjourney did not finish within ${Math.round(RENDER_TIMEOUT_MS / 60000)} minutes${shot ? ` (screenshot: ${shot})` : ''}`));
+        continue;
+      }
+      if (now - job.lastChangeAt > STALL_TIMEOUT_MS) {
+        const shot = await screenshot('job-stalled');
+        failJob(job, new Error(`Midjourney job stalled at ${job.percent ?? 0}% for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes${shot ? ` (screenshot: ${shot})` : ''}`));
+      }
+    }
+  } catch (error) {
+    console.warn('[jeff] tracker tick failed:', formatError(error));
+  } finally {
+    ticking = false;
+  }
+};
+
+const startTracker = () => {
+  if (trackerTimer) return;
+  trackerTimer = setInterval(() => { trackTick(); }, POLL_MS);
+  trackTick();
+};
+
+const stopTracker = () => {
+  if (trackerTimer) clearInterval(trackerTimer);
+  trackerTimer = null;
+};
+
+const listJobs = () => Array.from(jobs.values()).map((job) => ({
+  label: job.label, status: job.status, percent: job.percent, jobId: job.jobId, prompt: job.prompt, error: job.error || null, createdAt: job.createdAt,
+}));
 
 const toggleWindow = (show) => {
   if (show) showWindow(); else hideWindow();
@@ -495,6 +796,10 @@ const toggleWindow = (show) => {
 };
 
 const dispose = () => {
+  stopTracker();
+  for (const job of jobs.values()) {
+    if (job.status !== 'done' && job.status !== 'failed' && job.status !== 'cancelled') { job.status = 'cancelled'; job.reject(new Error('App is closing')); }
+  }
   if (win && !win.isDestroyed()) {
     win.removeAllListeners('close');
     win.destroy();
@@ -502,4 +807,4 @@ const dispose = () => {
   win = null;
 };
 
-module.exports = { status, connect, disconnect, generate, toggleWindow, onEvent, dispose };
+module.exports = { status, connect, disconnect, generate, cancel, setOptions, listJobs, toggleWindow, onEvent, dispose };
