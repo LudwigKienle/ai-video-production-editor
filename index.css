@@ -5544,6 +5544,11 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .project-hub__switch { justify-self: start; padding: 0; border: 0; background: none; color: var(--app-accent-strong); font-size: 0.72rem; font-weight: 600; cursor: pointer; }
 .project-hub__switch:hover { text-decoration: underline; }
 .prompt-preview { margin-top: 0.4rem; }
+.prompt-preview > summary { flex-wrap: wrap; row-gap: 0.1rem; }
+.prompt-preview > summary > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-preview > summary small { flex: 1 1 5rem; min-width: 0; }
+.prompt-preview__foot { flex-wrap: wrap; }
+.prompt-preview__foot .pk-hint { flex: 1 1 12rem; min-width: 0; }
 .prompt-preview__body { display: grid; gap: 0.45rem; }
 .prompt-preview__text { margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; padding: 0.5rem 0.6rem; border-radius: var(--radius-md); background: rgb(var(--app-muted-rgb) / 0.08); color: var(--app-text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: var(--fs-2xs); line-height: 1.5; }
 .prompt-preview__foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }

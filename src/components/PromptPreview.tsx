@@ -44,7 +44,7 @@ const PromptPreview: React.FC<{
   return (
     <details className="phase-settings prompt-preview">
       <summary>
-        Prompt for {modelLabel || modelId || 'model'}
+        <span>Prompt for {modelLabel || modelId || 'model'}</span>
         <small>{family}{changed ? ' · reshaped' : ' · as written'}</small>
       </summary>
       <div className="phase-settings__body prompt-preview__body">
