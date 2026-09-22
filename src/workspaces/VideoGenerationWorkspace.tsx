@@ -40,6 +40,8 @@ import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/g
 import { structurePromptForModel } from '../utils/modelPromptGuides';
 import { pickVideoModel } from '../utils/modelAutoSelect';
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
+import { adaptPromptForModel } from '../services/promptStyle';
+import PromptPreview from '../components/PromptPreview';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -1030,11 +1032,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedance-25-i2v-fal')
         : null;
       const resolvedModelId: VideoModelId = autoPick ? autoPick.model : modelId;
+      // Per-model shaping happens last, once the model is known (see PromptPreview under the prompt box).
+      const shapedPrompt = adaptPromptForModel(resolvedModelId, finalPrompt, { kind: 'video', aspectRatio, hasReferences: Boolean(reference || seedanceStoryboardReference), durationSeconds: normalizedDurationSeconds });
       if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
       switch (resolvedModelId) {
         case 'veo-fast':
           item = await generateVideoWithVeo(
-            finalPrompt,
+            shapedPrompt,
             (message) => setStatus(message),
             availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16') : '16:9',
             veoStartReference,
@@ -1043,7 +1047,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'veo':
           item = await generateVideoWithVeo(
-            finalPrompt,
+            shapedPrompt,
             (message) => setStatus(message),
             availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16') : '16:9',
             veoStartReference,
@@ -1053,7 +1057,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         case 'grok-video': {
           const publicReferenceUrl = referenceUrl && /^https?:\/\//.test(referenceUrl) ? referenceUrl : undefined;
           item = await generateVideoWithGrok({
-            prompt: finalPrompt,
+            prompt: shapedPrompt,
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1') : '16:9',
             resolution: '720p',
@@ -1063,11 +1067,11 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         }
         case 'seedance':
-          item = await generateVideoWithSeedance(finalPrompt, seedanceStoryboardReference);
+          item = await generateVideoWithSeedance(shapedPrompt, seedanceStoryboardReference);
           break;
         case 'seedance-2-fal':
           if (!seedanceStoryboardReference) throw new Error('Seedance 2.0 requires a start frame or storyboard reference.');
-          item = await generateVideoWithFalSeedanceImage(finalPrompt, seedanceStoryboardReference, {
+          item = await generateVideoWithFalSeedanceImage(shapedPrompt, seedanceStoryboardReference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as 'auto' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16') : 'auto',
@@ -1076,7 +1080,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'seedance-2-omni-fal':
-          item = await generateVideoWithFalSeedanceReference(finalPrompt, {
+          item = await generateVideoWithFalSeedanceReference(shapedPrompt, {
             images: storyboardReferencePayloads.length > 0 ? storyboardReferencePayloads.slice(0, 9) : undefined,
             videos: motionReference ? [motionReference] : undefined,
             audios: optionalAudioReference ? [optionalAudioReference] : undefined,
@@ -1087,7 +1091,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'seedance-25-t2v-fal':
-          item = await generateVideoWithFalSeedance25Text(finalPrompt, {
+          item = await generateVideoWithFalSeedance25Text(shapedPrompt, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as 'auto' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16') : 'auto',
             resolution: seedanceResolution,
@@ -1096,7 +1100,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'seedance-25-i2v-fal':
           if (!seedanceStoryboardReference) throw new Error('Seedance 2.5 I2V requires a start frame or storyboard reference.');
-          item = await generateVideoWithFalSeedance25Image(finalPrompt, seedanceStoryboardReference, {
+          item = await generateVideoWithFalSeedance25Image(shapedPrompt, seedanceStoryboardReference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             resolution: seedanceResolution,
@@ -1104,7 +1108,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'seedance-25-ref-fal':
-          item = await generateVideoWithFalSeedance25Reference(finalPrompt, {
+          item = await generateVideoWithFalSeedance25Reference(shapedPrompt, {
             images: storyboardReferencePayloads.length > 0 ? storyboardReferencePayloads.slice(0, 30) : undefined,
             videos: motionReference ? [motionReference] : undefined,
             audios: optionalAudioReference ? [optionalAudioReference] : undefined,
@@ -1116,13 +1120,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'wan-i2v':
           if (!reference) throw new Error('Wan I2V requires a reference image.');
-          item = await generateVideoWithWanI2V(finalPrompt, reference, {
+          item = await generateVideoWithWanI2V(shapedPrompt, reference, {
             fps: 16,
             numFrames: Math.max(33, Math.round(normalizedDurationSeconds * 16) + 1),
           });
           break;
         case 'wan-v27-t2v-fal':
-          item = await generateVideoWithFalWanV27Text(finalPrompt, {
+          item = await generateVideoWithFalWanV27Text(shapedPrompt, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
             resolution: '1080p',
@@ -1131,7 +1135,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'wan-v27-i2v-fal':
           if (!reference) throw new Error('WAN 2.7 I2V requires a reference image.');
-          item = await generateVideoWithFalWanV27Image(finalPrompt, reference, {
+          item = await generateVideoWithFalWanV27Image(shapedPrompt, reference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
@@ -1140,7 +1144,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'wan-30-t2v-fal':
-          item = await generateVideoWithFalWan30Text(finalPrompt, {
+          item = await generateVideoWithFalWan30Text(shapedPrompt, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
             resolution: '1080p',
@@ -1149,7 +1153,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'wan-30-i2v-fal':
           if (!reference) throw new Error('Wan 3.0 I2V requires a start frame.');
-          item = await generateVideoWithFalWan30Image(finalPrompt, reference, {
+          item = await generateVideoWithFalWan30Image(shapedPrompt, reference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
@@ -1158,7 +1162,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'happy-horse-t2v-fal':
-          item = await generateVideoWithFalHappyHorseText(finalPrompt, {
+          item = await generateVideoWithFalHappyHorseText(shapedPrompt, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
             resolution: '1080p',
@@ -1166,13 +1170,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'happy-horse-i2v-fal':
           if (!reference) throw new Error('Happy Horse I2V requires a reference image.');
-          item = await generateVideoWithFalHappyHorseImage(finalPrompt, reference, {
+          item = await generateVideoWithFalHappyHorseImage(shapedPrompt, reference, {
             duration: normalizedDurationSeconds,
             resolution: '1080p',
           });
           break;
         case 'kling-26':
-          item = await generateVideoWithKling26(finalPrompt, {
+          item = await generateVideoWithKling26(shapedPrompt, {
             startImage: reference,
             aspectRatio: aspectRatio as any,
             duration: normalizedDurationSeconds >= 8 ? 10 : 5,
@@ -1181,14 +1185,14 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'kling-25':
           if (!reference) throw new Error('Kling 2.5 requires a reference image.');
-          item = await generateVideoWithKling(finalPrompt, reference);
+          item = await generateVideoWithKling(shapedPrompt, reference);
           break;
         case 'kling-o3-pro-fal':
           if (!reference) throw new Error('Kling O3 Pro requires a reference image.');
           if (klingUseReferenceVideoForO3 && !motionReference) {
             throw new Error('Kling O3 reference mode requires a reference video.');
           }
-          item = await generateVideoWithFalKlingO3(finalPrompt, reference, {
+          item = await generateVideoWithFalKlingO3(shapedPrompt, reference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             generateAudio: klingGenerateAudio,
@@ -1201,7 +1205,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'kling-v3-pro-i2v-fal':
           if (!reference) throw new Error('Kling v3 Pro (Image-to-Video) requires a reference image.');
-          item = await generateVideoWithFalKlingV3Image(finalPrompt, reference, {
+          item = await generateVideoWithFalKlingV3Image(shapedPrompt, reference, {
             endImage: endFrameReference,
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1') : '16:9',
@@ -1215,7 +1219,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'kling-v3-pro-t2v-fal':
-          item = await generateVideoWithFalKlingV3Text(finalPrompt, {
+          item = await generateVideoWithFalKlingV3Text(shapedPrompt, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1') : '16:9',
             generateAudio: klingGenerateAudio,
@@ -1232,7 +1236,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             throw new Error('PixVerse C1 Reference requires a start frame or storyboard references.');
           }
           item = await generateVideoWithFalPixverseC1Reference(
-            finalPrompt,
+            shapedPrompt,
             await Promise.all(pixverseImageReferences.map(async (entry, index) => ({
               refName: index === 0 ? 'subject' : `background_${index}`,
               type: index === 0 ? 'subject' as const : 'background' as const,
@@ -1250,7 +1254,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           break;
         case 'grok-imagine-i2v-fal':
           if (!reference) throw new Error('Grok Imagine I2V requires a reference image.');
-          item = await generateVideoWithFalGrokImagineI2V(finalPrompt, reference, {
+          item = await generateVideoWithFalGrokImagineI2V(shapedPrompt, reference, {
             duration: normalizedDurationSeconds,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16' | '1:1' | '4:3' | '3:4') : '16:9',
             resolution: '720p',
@@ -1260,20 +1264,20 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           if (!reference) throw new Error('Creatify Aurora requires a reference image.');
           if (!audioReference) throw new Error('Creatify Aurora requires an audio track.');
           item = await generateVideoWithFalCreatifyAurora(reference, audioReference, {
-            prompt: finalPrompt,
+            prompt: shapedPrompt,
             resolution: '720p',
           });
           break;
         case 'kling-motion':
           if (!reference || !motionReference) throw new Error('Kling Motion Control requires image + video.');
-          item = await generateVideoWithKlingMotionControl(finalPrompt, reference, motionReference, {
+          item = await generateVideoWithKlingMotionControl(shapedPrompt, reference, motionReference, {
             mode: 'std',
             characterOrientation: 'image',
             keepOriginalSound: false,
           });
           break;
         case 'ltx':
-          item = await generateVideoWithLtx(finalPrompt, {
+          item = await generateVideoWithLtx(shapedPrompt, {
             image: reference,
             duration: normalizedDurationSeconds as 6 | 8 | 10 | 12 | 14 | 16 | 18 | 20,
             resolution: '1080p',
@@ -1281,7 +1285,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'ltx-23-fast':
-          item = await generateVideoWithLtx23Fast(finalPrompt, {
+          item = await generateVideoWithLtx23Fast(shapedPrompt, {
             image: reference,
             lastFrameImage: supportsEndFrame ? endFrameReference : undefined,
             aspectRatio: availableAspectRatios.includes(aspectRatio) ? (aspectRatio as '16:9' | '9:16') : '16:9',
@@ -1291,7 +1295,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           });
           break;
         case 'ltx-23-pro':
-          item = await generateVideoWithLtx23Pro(finalPrompt, {
+          item = await generateVideoWithLtx23Pro(shapedPrompt, {
             image: reference,
             lastFrameImage: supportsEndFrame ? endFrameReference : undefined,
             audio: optionalAudioReference,
@@ -1307,14 +1311,14 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         case 'ltx-audio':
           if (!audioReference) throw new Error('LTX Audio-to-Video requires an audio file.');
           item = await generateVideoWithLtxAudioToVideo(audioReference, {
-            prompt: finalPrompt,
+            prompt: shapedPrompt,
             image: reference,
             duration: normalizedDurationSeconds as 6 | 8 | 10,
             resolution: ltxAudioResolution,
           });
           break;
         case 'p-video':
-          item = await generateVideoWithPVideo(finalPrompt, {
+          item = await generateVideoWithPVideo(shapedPrompt, {
             image: reference,
             audio: optionalAudioReference,
             duration: normalizedDurationSeconds,
@@ -1429,6 +1433,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     placeholder="Describe the action, subject, mood, and camera feel..."
                     className="app-textarea mt-2 h-32"
                   />
+                  <PromptPreview modelId={modelId} modelLabel={modelOption?.label} prompt={prompt} kind="video" aspectRatio={aspectRatio} hasReferences={Boolean(referenceFile)} durationSeconds={normalizedDurationSeconds} />
                 </div>
               </div>
 

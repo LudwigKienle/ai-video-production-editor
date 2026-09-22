@@ -45,6 +45,7 @@ import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFa
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
+import PromptPreview from '../components/PromptPreview';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
 import { generateCatalogVideo } from '../services/videoCatalogRouter';
 import { startTask } from '../services/taskCenter';
@@ -1662,7 +1663,9 @@ const ReferenceCard: React.FC<{
     defaultExpanded?: boolean;
     showAngleStrip?: boolean;
     onOpenSheet?: (id: string) => void;
-}> = ({ reference, onUpdate, onGenerateDetails, onRegenerateImage, onUpload, onImportFromLibrary, onRemove, onViewFull, onRelight, extraContent, showCameraControls, detailsContent, detailsLabel, defaultExpanded, showAngleStrip, onOpenSheet ,
+    /** Image model the card will generate with; enables the "Prompt for …" preview. */
+    previewModelId?: string;
+}> = ({ reference, onUpdate, onGenerateDetails, previewModelId, onRegenerateImage, onUpload, onImportFromLibrary, onRemove, onViewFull, onRelight, extraContent, showCameraControls, detailsContent, detailsLabel, defaultExpanded, showAngleStrip, onOpenSheet ,
     aspect,
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1819,6 +1822,10 @@ const ReferenceCard: React.FC<{
                         </div>
                     </details>
                 </div>
+
+                {previewModelId && (
+                    <PromptPreview modelId={previewModelId} prompt={composeReferencePrompt(reference)} kind="image" hasReferences={Boolean(reference.imageUrl)} />
+                )}
 
                 {detailsContent && (
                     <details className="pk-details" open={detailsOpen} onToggle={(event) => setDetailsOpen((event.currentTarget as HTMLDetailsElement).open)}>
@@ -8448,7 +8455,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         ref.name,
                         ref.description,
                         storyBible.script,
-                        stylePrompt
+                        `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                     );
                     currentRef = { ...currentRef, prompt: stylePrompt ? `${stylePrompt}. ${prompt}` : prompt, tags };
                     setReferences(prev => prev.map(r => r.id === ref.id ? currentRef : r));
@@ -8561,7 +8568,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         ref.name,
                         ref.description,
                         storyBible.script,
-                        stylePrompt
+                        `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                     );
                     setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, prompt, tags } : r));
                 } catch (e) { console.error(e); }
@@ -8645,11 +8652,38 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
     };
 
+    /**
+     * "Generate" writes the prompt with AI first when the card has none — the step
+     * behind ⋯ → "Write prompt with AI", done automatically and in the voice of the
+     * selected image model. A written prompt on the card is respected as is.
+     */
+    const ensureReferencePrompt = async (referenceId: string): Promise<ReferenceItem | undefined> => {
+        const reference = references.find((ref) => ref.id === referenceId);
+        if (!reference) return undefined;
+        if (reference.prompt?.trim() || !apiKeyReady) return reference;
+        setReferences((prev) => prev.map((ref) => ref.id === referenceId ? { ...ref, isGenerating: true } : ref));
+        try {
+            const { prompt, tags } = await generateReferenceDetails(
+                reference.type,
+                reference.name,
+                reference.description,
+                storyBible.script,
+                `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`,
+            );
+            const nextTags = tags && tags.length ? tags : reference.tags;
+            setReferences((prev) => prev.map((ref) => ref.id === referenceId ? { ...ref, prompt, tags: nextTags } : ref));
+            return { ...reference, prompt, tags: nextTags };
+        } catch (error) {
+            console.warn('AI prompt pre-step failed; generating from the description instead.', error);
+            return reference;
+        }
+    };
+
     const regenerateReferenceImage = async (
         referenceId: string,
         options?: { promptSuffix?: string; includeCamera?: boolean }
     ) => {
-        const reference = references.find(ref => ref.id === referenceId);
+        const reference = await ensureReferencePrompt(referenceId);
         if (!reference) return;
         setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, isGenerating: true } : ref));
         try {
@@ -11529,6 +11563,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     buildFilmingAspectRatioGuidance(shot)
                 );
                 motionPrompt = motionPrompt.trim();
+                const autoMotionPrompt = motionPrompt;
+                setShotPrompts((prev) => prev.map((s) => s.shot === shotNumber ? { ...s, motionPrompt: autoMotionPrompt } : s));
             }
             const movementPreset = getCameraMovementPreset(shot.cameraMovementPreset);
             if (movementPreset?.prompt) {
@@ -13117,6 +13153,25 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const nextReadinessItem = readinessItems.find((item) => !item.complete);
     const currentPhaseIndex = Math.max(0, phases.findIndex((phase) => phase.id === (activeToolParent || activePhase)));
     const nextPhase = phases[currentPhaseIndex + 1] || null;
+
+    /** Same parts as the storyboard generation prompt, for the inspector preview. */
+    const previewStoryboardPrompt = (shot: ShotPrompt) => {
+        const shotTypePrompt = SHOT_TYPE_PRESETS.find((preset) => preset.id === (resolveShotTypePresetId(shot.shotTypePresetId) || shot.shotTypePresetId))?.prompt || '';
+        const lightingPrompt = LIGHTING_PRESETS.find((preset) => preset.id === (resolveLightingPresetId(shot.lightingPresetId) || shot.lightingPresetId))?.prompt || '';
+        const cameraPreset = CAMERA_PRESETS.find((preset) => preset.id === (shot.cameraPresetId || cameraPresetId));
+        const lensPreset = LENS_PRESETS.find((preset) => preset.id === (shot.lensPresetId || lensPresetId));
+        const cameraLensPrompt = [cameraPreset?.prompt, lensPreset?.prompt].filter(Boolean).join(', ');
+        return [
+            stylePrompt,
+            shot.continuityRefinedPrompt?.trim() || shot.prompt || shot.description || '',
+            shotTypePrompt,
+            lightingPrompt,
+            shot.cameraAngle ? `camera angle: ${shot.cameraAngle}` : '',
+            cameraLensPrompt,
+            buildAspectRatioPromptHint(referenceAspectRatio, lensPreset?.aspectRatioHint),
+            shot.visualTriggers && shot.visualTriggers.length > 0 ? `visual triggers: ${shot.visualTriggers.join(', ')}` : '',
+        ].filter(Boolean).join('. ');
+    };
 
     const renderSceneStrip = (mode: 'storyboard' | 'filming') => {
         if (!sceneNavigationAvailable) return null;
@@ -15324,7 +15379,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         {conceptBrandingSubtab === 'base_ref' && (
                                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                                 {references.filter(r => r.type === 'product').map(ref => (
-                                                    <ReferenceCard
+                                                    <ReferenceCard previewModelId={referenceImageModel}
                                                         aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                         key={ref.id}
                                                         reference={ref}
@@ -15336,7 +15391,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                 ref.name,
                                                                 ref.description,
                                                                 storyBible.script,
-                                                                stylePrompt
+                                                                `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                                                             );
                                                             setReferences(prev => prev.map(r => r.id === id ? { ...r, prompt, tags } : r));
                                                         }}
@@ -15470,7 +15525,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         )}
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 ${conceptCharacterSubtab === 'outfits' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'character').map(ref => (
-                                                <ReferenceCard
+                                                <ReferenceCard previewModelId={referenceImageModel}
                                                     aspect="3 / 4"
                                                     key={ref.id}
                                                     reference={ref}
@@ -15485,14 +15540,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                             ref.name,
                                                             ref.description,
                                                             storyBible.script,
-                                                            stylePrompt
+                                                            `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                                                         );
                                                         setReferences(prev => prev.map(r => r.id === id ? { ...r, prompt, tags } : r));
                                                     }}
                                                     onRegenerateImage={async (id) => {
                                                         setReferences(prev => prev.map(r => r.id === id ? { ...r, isGenerating: true } : r));
                                                         try {
-                                                            const imagePrompt = composeCharacterBaseReferencePrompt(ref, { includeCamera: isMultiAngleModel });
+                                                            const prepared = (await ensureReferencePrompt(id)) || ref;
+                                                            const imagePrompt = composeCharacterBaseReferencePrompt(prepared, { includeCamera: isMultiAngleModel });
                                                             const { image, angleUrls } = await generateReferenceImageWithAngles(
                                                                 ref,
                                                                 imagePrompt,
@@ -16144,7 +16200,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         )}
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptEnvironmentSubtab === 'time_of_day' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'environment').map(ref => (
-                                                <ReferenceCard
+                                                <ReferenceCard previewModelId={referenceImageModel}
                                                     aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                     key={ref.id}
                                                     reference={ref}
@@ -16156,7 +16212,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                             ref.name,
                                                             ref.description,
                                                             storyBible.script,
-                                                            stylePrompt
+                                                            `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                                                         );
                                                         setReferences(prev => prev.map(r => r.id === id ? { ...r, prompt, tags } : r));
                                                     }}
@@ -16361,7 +16417,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         </div>
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptPropSubtab === 'state' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'prop').map(ref => (
-                                                <ReferenceCard
+                                                <ReferenceCard previewModelId={referenceImageModel}
                                                     aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
                                                     key={ref.id}
                                                     reference={ref}
@@ -16373,7 +16429,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                             ref.name,
                                                             ref.description,
                                                             storyBible.script,
-                                                            stylePrompt
+                                                            `${stylePrompt}\n${promptStyleGuide(referenceImageModel, 'image')}`
                                                         );
                                                         setReferences(prev => prev.map(r => r.id === id ? { ...r, prompt, tags } : r));
                                                     }}
@@ -17269,6 +17325,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                         rows={3}
                                                                         placeholder="Image Prompt..."
                                                                     />
+                                                                    <PromptPreview modelId={referenceImageModel} modelLabel={REFERENCE_MODEL_LABELS[referenceImageModel as keyof typeof REFERENCE_MODEL_LABELS] || referenceImageModel} prompt={previewStoryboardPrompt(shot)} kind="image" aspectRatio={referenceAspectRatio} hasReferences={Boolean(shot.imageUrl || (shot.contextReferences || []).length)} />
                                                                     <div className="grid grid-cols-2 gap-2">
                                                                         <div>
                                                                             <label className="text-[10px] uppercase tracking-wide text-gray-500 flex items-center gap-1">
@@ -18545,6 +18602,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                                 rows={2}
                                                                                 className="w-full bg-gray-900 text-white text-xs p-2 rounded border border-gray-700 focus:border-indigo-500"
                                                                             />
+                                                                                <PromptPreview modelId={videoModel} modelLabel={FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === videoModel)?.label} prompt={shot.filmingContinuityRefinedPrompt || shot.motionPrompt || ''} kind="video" aspectRatio={referenceAspectRatio} hasReferences={Boolean(shot.imageUrl || shot.startFrameUrl)} durationSeconds={videoDurationSeconds} emptyHint="The motion prompt is written automatically when you film this shot; Generate above writes it now." />
                                                                             {shot.motionPromptIsGenerating && (
                                                                                 <div className="text-[10px] text-amber-300">Generating motion prompt...</div>
                                                                             )}

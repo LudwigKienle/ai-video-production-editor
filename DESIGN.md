@@ -160,6 +160,10 @@ The left navigation lists **steps** in production order: Script → World (optio
 
 **Scene strip.** Storyboard and Filming carry the same chapter strip: All · Sc 1 · Sc 2 … with per-scene progress (frames or videos out of shots). Selecting a scene scopes the board, the Director, "Generate from Script" and "Film"; a new shot list for a scene merges into the existing list. When a scene is complete the strip offers "Next: Sc N+1". Scene Wall (Pro) is the wall view of the same scenes for long scripts; picking a scene there selects it in the strip.
 
+### Prompt preview
+
+Wherever a prompt is typed (Concept card, Storyboard and Filming inspectors, the Image and Video generators) a "Prompt for <model>" disclosure (PromptPreview) shows the text exactly as it reaches the selected model after the per-model shaping, with presets in place and a Copy button. Generate is one click: a Concept card without a written prompt gets one from the AI first, in the voice of the selected model; a shot without a motion prompt gets one when it is filmed and keeps it.
+
 ### Phase bars (Project Hub)
 
 Every production phase opens with the same bar, in this order:

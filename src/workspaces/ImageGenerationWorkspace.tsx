@@ -59,6 +59,8 @@ import { formatSmartModelEta, routeSmartModel, type SmartModelCandidate, type Sm
 import { structurePromptForModel } from '../utils/modelPromptGuides';
 import { pickImageModel } from '../utils/modelAutoSelect';
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
+import { adaptPromptForModel } from '../services/promptStyle';
+import PromptPreview from '../components/PromptPreview';
 
 import { StyleSelection } from '../components/StyleSelection';
 import { STYLE_PRESETS } from '../data/styleData';
@@ -2307,23 +2309,25 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
         : null;
       const resolvedModelId: ImageModelId = autoPick ? autoPick.model : modelId;
       if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
+      // Per-model shaping happens last, once the model is known (see PromptPreview under the prompt box).
+      const shapedPrompt = adaptPromptForModel(resolvedModelId, finalPrompt, { kind: 'image', aspectRatio: effectiveAspectRatio, hasReferences: referenceImages.length > 0, negatives: negativePrompt.trim() ? [negativePrompt.trim()] : undefined });
       switch (resolvedModelId) {
         case 'gemini-flash':
           if (fallbackGeminiFlashToReplicate) {
             setStatus('No Gemini key found. Using Nano Banana Pro via Replicate...');
             item = await generateImageWithGemini3ProReplicate(
-              finalPrompt,
+              shapedPrompt,
               effectiveAspectRatio,
               imageSize,
               referenceImages.length ? referenceImages : undefined
             );
           } else {
             item = referenceImages.length
-              ? await generateImageWithReferences(finalPrompt, referenceImages, undefined, 'gemini-3.1-flash-image-preview', {
+              ? await generateImageWithReferences(shapedPrompt, referenceImages, undefined, 'gemini-3.1-flash-image-preview', {
                 aspectRatio: effectiveAspectRatio as any,
                 imageSize,
               })
-              : await generateImageWithNano(finalPrompt, {
+              : await generateImageWithNano(shapedPrompt, {
                 aspectRatio: effectiveAspectRatio as any,
                 imageSize,
               });
@@ -2333,56 +2337,56 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           if (fallbackGeminiProToReplicate) {
             setStatus('No Gemini key found. Using Nano Banana Pro via Replicate...');
             item = await generateImageWithGemini3ProReplicate(
-              finalPrompt,
+              shapedPrompt,
               effectiveAspectRatio,
               imageSize,
               referenceImages.length ? referenceImages : undefined
             );
           } else {
             item = referenceImages.length
-              ? await generateImageWithReferences(finalPrompt, referenceImages, undefined, 'gemini-3-pro-image-preview', {
+              ? await generateImageWithReferences(shapedPrompt, referenceImages, undefined, 'gemini-3-pro-image-preview', {
                 aspectRatio: effectiveAspectRatio as any,
                 imageSize,
               })
-              : await generateImageWithGemini3Pro(finalPrompt, effectiveAspectRatio as any, imageSize);
+              : await generateImageWithGemini3Pro(shapedPrompt, effectiveAspectRatio as any, imageSize);
           }
           break;
         case 'imagen':
-          item = await generateImageWithImagen(finalPrompt, imagenAspectRatio as any);
+          item = await generateImageWithImagen(shapedPrompt, imagenAspectRatio as any);
           break;
         case 'grok-image':
-          item = await generateImageWithGrok(finalPrompt);
+          item = await generateImageWithGrok(shapedPrompt);
           break;
         case 'gen4-turbo':
-          item = await generateImageWithRunwayGen4Turbo(finalPrompt, effectiveAspectRatio as any);
+          item = await generateImageWithRunwayGen4Turbo(shapedPrompt, effectiveAspectRatio as any);
           break;
         case 'flux-pro':
-          item = await generateImageWithFlux(finalPrompt, effectiveAspectRatio as any, loraOptions);
+          item = await generateImageWithFlux(shapedPrompt, effectiveAspectRatio as any, loraOptions);
           break;
         case 'flux-2-klein':
-          item = await generateImageWithFluxKlein(finalPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
+          item = await generateImageWithFluxKlein(shapedPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
           break;
         case 'flux-2-turbo':
-          item = await generateImageWithFlux2Turbo(finalPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
+          item = await generateImageWithFlux2Turbo(shapedPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
           break;
         case 'seedream':
           item = referenceImages.length
             ? await generateImageWithSeedreamReferences(
-              finalPrompt,
+              shapedPrompt,
               referenceImages,
               effectiveAspectRatio,
               imageSize === '4K' ? '4K' : '2K'
             )
-            : await generateImageWithSeedream(finalPrompt, effectiveAspectRatio as any, imageSize === '4K' ? '4K' : '2K');
+            : await generateImageWithSeedream(shapedPrompt, effectiveAspectRatio as any, imageSize === '4K' ? '4K' : '2K');
           break;
         case 'wan-v27-image-pro-replicate':
-          item = await generateImageWithWan27ImagePro(finalPrompt, effectiveAspectRatio, imageSize, referenceImages.length ? referenceImages : undefined);
+          item = await generateImageWithWan27ImagePro(shapedPrompt, effectiveAspectRatio, imageSize, referenceImages.length ? referenceImages : undefined);
           break;
         case 'seedream-v5-lite-fal':
-          item = await generateImageWithFalSeedreamV5Lite(finalPrompt, { aspectRatio: qwenMaxAspectRatio });
+          item = await generateImageWithFalSeedreamV5Lite(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
           break;
         case 'seedream-v5-pro-fal':
-          item = await generateImageWithFalSeedreamV5Pro(finalPrompt, {
+          item = await generateImageWithFalSeedreamV5Pro(shapedPrompt, {
             aspectRatio: qwenMaxAspectRatio,
             resolution: imageSize === '1K' ? '1K' : '2K',
             outputFormat: 'png',
@@ -2393,7 +2397,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             throw new Error('Seedream 5.0 Pro Edit (FAL) requires at least one reference image.');
           }
           {
-            const edited = await editImageWithFalSeedreamV5Pro(finalPrompt, referenceImages.slice(0, 10), {
+            const edited = await editImageWithFalSeedreamV5Pro(shapedPrompt, referenceImages.slice(0, 10), {
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
               outputFormat: 'png',
@@ -2405,7 +2409,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           break;
         case 'krea-2-large-fal':
-          item = await generateImageWithFalKrea2(finalPrompt, {
+          item = await generateImageWithFalKrea2(shapedPrompt, {
             variant: 'large',
             aspectRatio: effectiveAspectRatio === '235:100'
               ? '2.35:1'
@@ -2414,26 +2418,26 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           });
           break;
         case 'krea-2-turbo-fal':
-          item = await generateImageWithFalKrea2(finalPrompt, {
+          item = await generateImageWithFalKrea2(shapedPrompt, {
             variant: 'turbo',
             aspectRatio: qwenMaxAspectRatio === '3:4' ? '2:3' : qwenMaxAspectRatio,
           });
           break;
         case 'ideogram-v4-fal':
-          item = await generateImageWithFalIdeogramV4(finalPrompt, {
+          item = await generateImageWithFalIdeogramV4(shapedPrompt, {
             aspectRatio: qwenMaxAspectRatio,
             renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY',
           });
           break;
         case 'wan-v27-pro-fal':
-          item = await generateImageWithFalWanV27Pro(finalPrompt, { aspectRatio: qwenMaxAspectRatio });
+          item = await generateImageWithFalWanV27Pro(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
           break;
         case 'wan-v27-pro-edit-fal':
           if (referenceImages.length === 0) {
             throw new Error('WAN 2.7 Pro Edit (FAL) requires at least one reference image.');
           }
           {
-            const edited = await editImageWithFalWanV27Pro(finalPrompt, referenceImages.slice(0, 4), {
+            const edited = await editImageWithFalWanV27Pro(shapedPrompt, referenceImages.slice(0, 4), {
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
             });
@@ -2444,7 +2448,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           break;
         case 'nano-banana-2-fal':
-          item = await generateImageWithFalNanoBanana2(finalPrompt, {
+          item = await generateImageWithFalNanoBanana2(shapedPrompt, {
             aspectRatio: falNanoAspectRatio,
             resolution: imageSize,
           });
@@ -2454,7 +2458,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             throw new Error('Nano Banana 2 Edit (FAL) requires at least one reference image.');
           }
           {
-            const edited = await editImageWithFalNanoBanana2(finalPrompt, referenceImages, {
+            const edited = await editImageWithFalNanoBanana2(shapedPrompt, referenceImages, {
               aspectRatio: falNanoAspectRatio,
               resolution: imageSize,
               numOutputs: 1,
@@ -2469,20 +2473,20 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           if (referenceImages.length === 0) {
             throw new Error('FireRed Edit requires at least one reference image or moodboard image.');
           }
-          item = await editImageWithFireRed(finalPrompt, referenceImages, { aspectRatio: fireRedAspectRatio });
+          item = await editImageWithFireRed(shapedPrompt, referenceImages, { aspectRatio: fireRedAspectRatio });
           break;
         case 'qwen':
-          item = await generateImageWithQwenImage(finalPrompt, effectiveAspectRatio as any, singleReference);
+          item = await generateImageWithQwenImage(shapedPrompt, effectiveAspectRatio as any, singleReference);
           break;
         case 'qwen-max-fal-t2i':
-          item = await generateImageWithFalQwenImageMax(finalPrompt, { aspectRatio: qwenMaxAspectRatio });
+          item = await generateImageWithFalQwenImageMax(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
           break;
         case 'qwen-max-fal-edit':
           if (!singleReference) {
             throw new Error('Qwen Image Max Edit (FAL) requires one reference image.');
           }
           {
-            const edited = await editImageWithFalQwenMultiAngle(finalPrompt, singleReference, { numOutputs: 1 });
+            const edited = await editImageWithFalQwenMultiAngle(shapedPrompt, singleReference, { numOutputs: 1 });
             if (!edited.length) {
               throw new Error('Qwen Image Max Edit (FAL) returned no images.');
             }
@@ -2490,7 +2494,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           break;
         case 'gpt-image-2-fal':
-          item = await generateImageWithFalGptImage2(finalPrompt, {
+          item = await generateImageWithFalGptImage2(shapedPrompt, {
             aspectRatio: qwenMaxAspectRatio,
             numOutputs: 1,
             quality: 'high',
@@ -2502,7 +2506,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             throw new Error('GPT Image 2 Edit (FAL) requires at least one reference image.');
           }
           {
-            const edited = await editImageWithFalGptImage2(finalPrompt, referenceImages, {
+            const edited = await editImageWithFalGptImage2(shapedPrompt, referenceImages, {
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
               quality: 'high',
@@ -2516,7 +2520,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           break;
         case 'gpt-image-25-flare-fal':
         case 'gpt-image-25-sunburst-fal':
-          item = await generateImageWithFalGptImage25(finalPrompt, {
+          item = await generateImageWithFalGptImage25(shapedPrompt, {
             variant: modelId === 'gpt-image-25-sunburst-fal' ? 'sunburst' : 'flare',
             aspectRatio: qwenMaxAspectRatio,
             numOutputs: 1,
@@ -2530,7 +2534,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             throw new Error('GPT Image 2.5 Edit (FAL) requires at least one reference image.');
           }
           {
-            const edited = await editImageWithFalGptImage25(finalPrompt, referenceImages, {
+            const edited = await editImageWithFalGptImage25(shapedPrompt, referenceImages, {
               variant: modelId === 'gpt-image-25-sunburst-fal-edit' ? 'sunburst' : 'flare',
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
@@ -2544,19 +2548,19 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           break;
         case 'gpt-image-1-5':
-          item = await generateImageWithGptImage15(finalPrompt, effectiveAspectRatio as any, referenceImages);
+          item = await generateImageWithGptImage15(shapedPrompt, effectiveAspectRatio as any, referenceImages);
           break;
         case 'z-image':
-          item = await generateImageWithZImage(finalPrompt, effectiveAspectRatio as any, loraOptions);
+          item = await generateImageWithZImage(shapedPrompt, effectiveAspectRatio as any, loraOptions);
           break;
         case 'z-turbo':
-          item = await generateImageWithZTurbo(finalPrompt, effectiveAspectRatio as any, loraOptions);
+          item = await generateImageWithZTurbo(shapedPrompt, effectiveAspectRatio as any, loraOptions);
           break;
         case 'z-turbo-img2img':
           if (!singleReference) {
             throw new Error('Z-Image Turbo Img2Img requires a reference image.');
           }
-          item = await generateImageWithZTurboImg2Img(finalPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
+          item = await generateImageWithZTurboImg2Img(shapedPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
           break;
         case 'comfyui': {
           const baseUrl = normalizeComfyUrl(comfyUrl);
@@ -2586,7 +2590,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
               : Math.floor(Math.random() * 1000000000);
           const workflowOptions = {
             baseUrl,
-            prompt: finalPrompt,
+            prompt: shapedPrompt,
             negativePrompt,
             width,
             height,
@@ -2616,7 +2620,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             try {
               const parsed = JSON.parse(comfyWorkflowJson);
               workflowOverride = buildWorkflowOverrides(parsed, {
-                prompt: finalPrompt,
+                prompt: shapedPrompt,
                 negativePrompt,
                 width,
                 height,
@@ -2664,7 +2668,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
                 }
                 const parsed = JSON.parse(step.workflowJson);
                 stepOverride = buildWorkflowOverrides(parsed, {
-                  prompt: finalPrompt,
+                  prompt: shapedPrompt,
                   negativePrompt,
                   width,
                   height,
@@ -2693,7 +2697,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           throw new Error('Unsupported model selection.');
       }
       const modelLabel = MODEL_OPTIONS.find((option) => option.id === modelId)?.label;
-      const itemWithMeta = { ...item, generatedBy: modelLabel, prompt: finalPrompt };
+      const itemWithMeta = { ...item, generatedBy: modelLabel, prompt: shapedPrompt };
       onAddGeneratedMedia(itemWithMeta);
       setGenerated((prev) => [itemWithMeta, ...prev].slice(0, 12));
       setGenerationHistory((prev) => [
@@ -2701,7 +2705,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           id: itemWithMeta.id,
           createdAt: new Date().toISOString(),
           url: itemWithMeta.url,
-          prompt: finalPrompt,
+          prompt: shapedPrompt,
           negativePrompt,
           modelId,
           modelLabel,
@@ -3026,6 +3030,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
                             placeholder="Describe the scene, subject, mood, and setting..."
                             className="app-textarea mt-2 h-32"
                           />
+                          <PromptPreview modelId={modelId} modelLabel={MODEL_OPTIONS.find((option) => option.id === modelId)?.label} prompt={finalPrompt} kind="image" aspectRatio={effectiveAspectRatio} negatives={negativePrompt.trim() ? [negativePrompt.trim()] : undefined} />
                         </div>
                         <div>
                           <label className="text-xs uppercase tracking-[0.12em] text-gray-500">What Should It Avoid?</label>

@@ -5543,6 +5543,11 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .project-hub__tools .is-active { background: var(--shell-selected); }
 .project-hub__switch { justify-self: start; padding: 0; border: 0; background: none; color: var(--app-accent-strong); font-size: 0.72rem; font-weight: 600; cursor: pointer; }
 .project-hub__switch:hover { text-decoration: underline; }
+.prompt-preview { margin-top: 0.4rem; }
+.prompt-preview__body { display: grid; gap: 0.45rem; }
+.prompt-preview__text { margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; padding: 0.5rem 0.6rem; border-radius: var(--radius-md); background: rgb(var(--app-muted-rgb) / 0.08); color: var(--app-text); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: var(--fs-2xs); line-height: 1.5; }
+.prompt-preview__foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+.prompt-preview__foot .pk-hint, .prompt-preview__empty { text-transform: none; letter-spacing: 0; font-weight: 500; line-height: 1.45; }
 .scene-strip { display: flex; gap: 0.35rem; overflow-x: auto; padding: 0.1rem 0 0.35rem; scrollbar-width: thin; }
 .scene-strip__chip { flex: none; display: grid; gap: 0.05rem; min-width: 4.4rem; padding: 0.35rem 0.6rem; border: 1px solid var(--shell-hairline); border-radius: 0.6rem; background: rgb(var(--app-panel-rgb) / 0.6); color: var(--app-text); text-align: left; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; transition: background 100ms ease, border-color 100ms ease; }
 .scene-strip__chip small { color: var(--app-muted); font-size: var(--fs-2xs); font-weight: 500; }
