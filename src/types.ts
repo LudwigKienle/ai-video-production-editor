@@ -1233,6 +1233,10 @@ export type ReferenceItem = {
   scaleReferenceNote?: string;
   swimsuitBaseUrl?: string;
   outfits?: CharacterOutfit[];
+  /** Age the base reference depicts; age variants are derived from it. */
+  baseAge?: number;
+  /** The same character at other ages, generated from the base reference. */
+  ageVariants?: CharacterAgeVariant[];
   isGeneratingOutfits?: boolean;
   isGeneratingSwimsuitBase?: boolean;
 };
@@ -1307,6 +1311,16 @@ export type OutfitGarmentPiece = {
   selectedReferenceIndex?: number;
   imageUrl?: string;
   isGenerating?: boolean;
+};
+
+export type CharacterAgeVariant = {
+  id: string;
+  label: string;
+  age: number;
+  imageUrl?: string | null;
+  imageVersions?: string[];
+  isGenerating?: boolean;
+  generatedBy?: string;
 };
 
 export type CharacterOutfit = {

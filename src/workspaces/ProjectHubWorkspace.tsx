@@ -43,7 +43,8 @@ import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
 import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
 import { generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
-import type { StyleReference } from '../types';
+import type { StyleReference, CharacterAgeVariant } from '../types';
+import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -179,7 +180,7 @@ interface ProjectHubWorkspaceProps {
 
 type ProductionPhase = 'library' | 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing' | 'team';
 type ConceptEntityTab = 'characters' | 'environments' | 'props' | 'branding';
-type ConceptCharacterSubtab = 'base_ref' | 'angles' | 'outfits';
+type ConceptCharacterSubtab = 'base_ref' | 'angles' | 'outfits' | 'ages';
 type ConceptEnvironmentSubtab = 'base_ref' | 'angles' | 'time_of_day';
 type ConceptPropSubtab = 'base_ref' | 'angles' | 'state';
 type ConceptBrandingSubtab = 'base_ref' | 'variations';
@@ -775,7 +776,7 @@ const isConceptEntityTab = (value: string): value is ConceptEntityTab =>
     value === 'characters' || value === 'environments' || value === 'props' || value === 'branding';
 
 const isConceptCharacterSubtab = (value: string): value is ConceptCharacterSubtab =>
-    value === 'base_ref' || value === 'angles' || value === 'outfits';
+    value === 'base_ref' || value === 'angles' || value === 'outfits' || value === 'ages';
 
 const isConceptEnvironmentSubtab = (value: string): value is ConceptEnvironmentSubtab =>
     value === 'base_ref' || value === 'angles' || value === 'time_of_day';
@@ -6532,17 +6533,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         aspectRatio: AspectRatioOption,
         baseImageUrl?: string,
         modelOverride?: ReferenceImageModel,
+        opts?: { keepBaseAsIdentity?: boolean },
     ): Promise<MediaItem> => {
         const modelAspectRatio = resolveModelAspectRatio(aspectRatio);
         const selectedReferenceModel = modelOverride || referenceImageModel;
         const selectedIsMultiAngleModel = isReferenceModelMultiAngleMode(selectedReferenceModel);
+        // Every model reads prompts differently (Midjourney params vs. Gemini prose vs. Seedream directives…).
+        prompt = adaptPromptForModel(selectedReferenceModel, prompt, { kind: 'image', aspectRatio, hasReferences: Boolean(baseImageUrl) });
         const loraOptions = referenceLoraUrl.trim()
             ? { loraUrl: referenceLoraUrl.trim(), loraScale: Number.isFinite(referenceLoraScale) ? referenceLoraScale : 0.75 }
             : undefined;
         let image: MediaItem;
         if (selectedReferenceModel === 'midjourney') {
-            // Concept renders are fresh takes: only the style references go along, never the previous iteration.
-            const mjRefs: MidjourneyReference[] = midjourneyStyleRefs();
+            // Concept renders are fresh takes: only the style references go along — unless the caller derives from the base (ages, outfits).
+            const mjRefs: MidjourneyReference[] = [
+                ...(opts?.keepBaseAsIdentity && baseImageUrl ? [{ url: baseImageUrl, name: 'identity.png', role: 'character' as const }] : []),
+                ...midjourneyStyleRefs(),
+            ];
             const images = await generateImagesWithMidjourney(prompt, { aspectRatio, references: mjRefs, folderPath: projectPath, styleWeight: storyBible.styleWeight, defaultParams: storyBible.midjourneyParams });
             if (!images.length) throw new Error('Midjourney returned no images.');
             image = images[0];
@@ -8474,6 +8481,59 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         setReferences(prev => prev.map(ref => (
             ref.id === referenceId ? { ...ref, ...updates } : ref
         )));
+    };
+
+    const AGE_PRESETS: Array<{ label: string; age: number }> = [
+        { label: 'Child', age: 8 }, { label: 'Teen', age: 15 }, { label: 'Young adult', age: 24 }, { label: 'Adult', age: 40 }, { label: 'Middle-aged', age: 55 }, { label: 'Senior', age: 72 },
+    ];
+    const addAgeVariant = (referenceId: string, age: number, label?: string) => {
+        const safeAge = Math.max(1, Math.min(110, Math.round(age)));
+        const preset = AGE_PRESETS.find((entry) => entry.age === safeAge);
+        const variant: CharacterAgeVariant = { id: `age-${Date.now()}-${safeAge}`, label: label || preset?.label || `Age ${safeAge}`, age: safeAge, imageUrl: null };
+        setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, ageVariants: [...(ref.ageVariants || []), variant].sort((a, b) => a.age - b.age) } : ref));
+        return variant.id;
+    };
+    const removeAgeVariant = (referenceId: string, variantId: string) => {
+        setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, ageVariants: (ref.ageVariants || []).filter((v) => v.id !== variantId) } : ref));
+    };
+    const setAgeVariantState = (referenceId: string, variantId: string, updates: Partial<CharacterAgeVariant>) => {
+        setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, ageVariants: (ref.ageVariants || []).map((v) => v.id === variantId ? { ...v, ...updates } : v) } : ref));
+    };
+    /** Renders the character at another age from the base reference: same identity, same studio setup, age-appropriate everything else. */
+    const generateAgeVariant = async (referenceId: string, variantId: string) => {
+        const reference = references.find(ref => ref.id === referenceId);
+        const variant = reference?.ageVariants?.find((v) => v.id === variantId);
+        if (!reference || !variant) return;
+        if (!reference.imageUrl) { setError(`Generate a base reference for ${reference.name} first — ages are derived from it.`); return; }
+        setAgeVariantState(referenceId, variantId, { isGenerating: true });
+        try {
+            const baseAge = reference.baseAge ? ` (the reference shows them at about ${reference.baseAge})` : '';
+            const minor = variant.age < 18;
+            const wardrobe = minor
+                ? 'fully dressed in simple age-appropriate everyday clothing'
+                : resolveBaseReferenceMode(reference) === 'outfit' ? 'wearing the same outfit as the reference, adjusted to fit' : 'wearing the same plain neutral base layer as the reference';
+            const agePrompt = [
+                stylePrompt,
+                composeReferencePrompt(reference),
+                `The exact same person as in the reference image${baseAge}, now ${variant.age} years old`,
+                'Identical identity: same eye colour, bone structure, skin tone, distinctive marks and hair colour, aged naturally — face, hair, skin texture, build and posture appropriate for that age',
+                wardrobe,
+                'same neutral studio setup, same seamless backdrop, same framing and full-body T-pose as the reference',
+            ].filter(Boolean).join('. ');
+            const image = await generateReferenceImage(agePrompt, referenceAspectRatio, reference.imageUrl, undefined, { keepBaseAsIdentity: true });
+            const stableUrl = await stabilizeReferenceImageUrl(reference, image.url);
+            const extra = (image.imageVersions || []).filter((url) => url && url !== image.url);
+            setAgeVariantState(referenceId, variantId, { imageUrl: stableUrl, imageVersions: [stableUrl, ...extra], isGenerating: false, generatedBy: referenceModelLabel });
+        } catch (error) {
+            setAgeVariantState(referenceId, variantId, { isGenerating: false });
+            handleError(error);
+        }
+    };
+    const generateAllAgeVariants = async (referenceId: string) => {
+        const reference = references.find(ref => ref.id === referenceId);
+        for (const variant of reference?.ageVariants || []) {
+            if (!variant.imageUrl) await generateAgeVariant(referenceId, variant.id);
+        }
     };
 
     const regenerateReferenceImage = async (
@@ -10469,7 +10529,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             ].filter(Boolean).join('. ');
             const originalStoryboardPrompt = buildStoryboardPrompt(shot.prompt || shot.description || '');
 
-            const renderStoryboardAttempt = async (fullPrompt: string) => {
+            const renderStoryboardAttempt = async (rawPrompt: string) => {
+                const activeReferenceModel = referenceImageModel === 'auto'
+                    ? pickImageModel({ prompt: rawPrompt, hasReferences: gptInputs.length > 0 }, REFERENCE_MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedream-v5-pro-fal').model
+                    : referenceImageModel;
+                if (referenceImageModel === 'auto') console.info(`Auto model: ${activeReferenceModel}`);
+                const fullPrompt = adaptPromptForModel(activeReferenceModel, rawPrompt, { kind: 'image', aspectRatio: effectiveAspectRatio, hasReferences: supplementalReferences.length > 0 });
                 const seedreamInputs = compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences;
                 const seedreamPrompt = compositionData
                     ? `${fullPrompt}\n\nUse the first input image as a strict composition reference${poseData ? ' (OpenPose pose map)' : ''}. Use remaining images as style/character/environment references.`
@@ -10496,10 +10561,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     ? `${fullPrompt}\n\n${qwenCompositionHint}Use the input images as references for composition, identity, wardrobe, environment, and scene continuity.`
                     : fullPrompt;
 
-                const activeReferenceModel = referenceImageModel === 'auto'
-                    ? pickImageModel({ prompt: fullPrompt, hasReferences: gptInputs.length > 0 }, REFERENCE_MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedream-v5-pro-fal').model
-                    : referenceImageModel;
-                if (referenceImageModel === 'auto') console.info(`Auto model: ${activeReferenceModel}`);
                 let imageMedia: MediaItem;
                 if (activeReferenceModel === 'midjourney') {
                     // Characters become the omni reference, environments/products image prompts, the moodboard a style ref.
@@ -10939,7 +11000,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const motionPrompt = await generateMotionPromptForShot(
                 storyBible.script,
                 shot.shot,
-                buildShotMotionPromptContext(shot),
+                `${buildShotMotionPromptContext(shot)}\n\n${promptStyleGuide(videoModel, 'video')}`,
                 buildShotStylePrompt(shot),
                 buildFilmingAspectRatioGuidance(shot)
             );
@@ -11341,7 +11402,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 motionPrompt = await generateMotionPromptForShot(
                     storyBible.script,
                     shot.shot,
-                    buildShotMotionPromptContext(shot),
+                    `${buildShotMotionPromptContext(shot)}\n\n${promptStyleGuide(videoModel, 'video')}`,
                     buildShotStylePrompt(shot),
                     buildFilmingAspectRatioGuidance(shot)
                 );
@@ -11388,6 +11449,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             if (filmingContinuityAnchors.length > 0) {
                 motionPrompt = `${motionPrompt}. Continuity anchors: preserve ${filmingContinuityAnchors.join(', ')} across the shot.`;
             }
+            // Kling wants short action + separate camera sentences, Veo cinematography-first with audio, Seedance numbered shots…
+            motionPrompt = adaptPromptForModel(videoModel, motionPrompt, {
+                kind: 'video',
+                aspectRatio: resolveFilmingDeliveryAspectRatio() || resolveShotEffectiveAspectRatio(shot),
+                hasReferences: Boolean(referenceImageUrl),
+                durationSeconds: resolveVideoDurationSeconds(videoModel, Number(videoDurationSeconds) || 5),
+            });
             const originalMotionPrompt = motionPrompt;
             setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, motionPrompt } : s));
 
@@ -14918,6 +14986,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 >
                                                     Outfits
                                                 </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConceptCharacterSubtab('ages')}
+                                                    className={`text-xs px-3 py-1.5 rounded border ${conceptCharacterSubtab === 'ages' ? 'bg-indigo-600/80 text-white border-indigo-500' : 'bg-gray-900 text-gray-300 border-gray-700 hover:border-gray-500'}`}
+                                                >
+                                                    Ages
+                                                </button>
                                             </>
                                         )}
                                         {conceptEntityTab === 'environments' && (
@@ -15717,6 +15792,67 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 >
                                                     <span className="text-sm font-medium">Add Character</span>
                                                 </button>
+                                            </div>
+                                        )}
+                                        {conceptCharacterSubtab === 'ages' && (
+                                            <div className="pk-stack">
+                                                <p className="pk-hint">One base age per character; every other age is derived from that base so identity stays locked. Pick a preset or type an age, then generate. Under-18 variants are always rendered fully clothed.</p>
+                                                {references.filter(r => r.type === 'character').length === 0 && (
+                                                    <div className="pk-empty"><strong>No characters yet</strong><span>Add a character in Base Ref first.</span></div>
+                                                )}
+                                                {references.filter(r => r.type === 'character').map((ref) => {
+                                                    const variants = ref.ageVariants || [];
+                                                    const pending = variants.filter((v) => !v.imageUrl && !v.isGenerating).length;
+                                                    return (
+                                                        <section key={`ages-${ref.id}`} className="pk-card">
+                                                            <div className="pk-card__head">
+                                                                <div className="flex items-center gap-3 min-w-0">
+                                                                    <span className="w-12 h-12 rounded-md overflow-hidden flex-shrink-0" style={{ background: 'var(--edit-control-bg)' }}>
+                                                                        {ref.imageUrl && <img src={ref.imageUrl} alt="" className="w-full h-full object-cover" />}
+                                                                    </span>
+                                                                    <div className="min-w-0">
+                                                                        <div className="pk-card__title">{ref.name}</div>
+                                                                        <label className="pk-inline">Base age
+                                                                            <input type="number" min={1} max={110} value={ref.baseAge ?? ''} placeholder="e.g. 32" onChange={(e) => setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, baseAge: e.target.value ? Number(e.target.value) : undefined } : r))} />
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                                <span className="pk-actions">
+                                                                    {pending > 0 && <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={() => { void generateAllAgeVariants(ref.id); }} disabled={!ref.imageUrl}>Generate {pending} missing</button>}
+                                                                </span>
+                                                            </div>
+                                                            {!ref.imageUrl && <div className="pk-alert pk-alert--warn">Generate the base reference first — ages are derived from it.</div>}
+                                                            <div className="pk-chips">
+                                                                {AGE_PRESETS.filter((preset) => !variants.some((v) => v.age === preset.age) && preset.age !== ref.baseAge).map((preset) => (
+                                                                    <button key={preset.age} type="button" className="pk-chip" onClick={() => addAgeVariant(ref.id, preset.age, preset.label)}>+ {preset.label} · {preset.age}</button>
+                                                                ))}
+                                                                <form className="pk-inline" onSubmit={(e) => { e.preventDefault(); const input = (e.currentTarget.elements.namedItem('age') as HTMLInputElement); const value = Number(input.value); if (value > 0) { addAgeVariant(ref.id, value); input.value = ''; } }}>
+                                                                    <input name="age" type="number" min={1} max={110} placeholder="Custom age" aria-label="Custom age" />
+                                                                    <button type="submit" className="edit-text-btn edit-text-btn--outline">Add</button>
+                                                                </form>
+                                                            </div>
+                                                            {variants.length > 0 && (
+                                                                <div className="fx-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(7.5rem, 1fr))' }}>
+                                                                    {variants.map((variant) => (
+                                                                        <div key={variant.id} className="fx-tile fx-tile--div" role="group" aria-label={`${ref.name} at ${variant.age}`}>
+                                                                            <div className="fx-tile__thumb fx-tile__thumb--square" style={{ aspectRatio: '3 / 4' }}>
+                                                                                {variant.imageUrl ? <img src={variant.imageUrl} alt="" draggable={false} /> : <div className="fx-tile__placeholder" style={{ opacity: 0.35 }} />}
+                                                                                {variant.isGenerating && <div className="fx-tile__shimmer" />}
+                                                                                <span className="fx-tile__badge fx-tile__badge--left">{variant.age}</span>
+                                                                                <div className="fx-tile__actions">
+                                                                                    <button type="button" className="fx-tile__action fx-tile__action--primary" onClick={() => { void generateAgeVariant(ref.id, variant.id); }} disabled={variant.isGenerating || !ref.imageUrl}>{variant.imageUrl ? 'Again' : 'Generate'}</button>
+                                                                                    {variant.imageUrl && <button type="button" className="fx-tile__action" onClick={() => setFullResView({ url: variant.imageUrl!, title: `${ref.name} · ${variant.age}` })}>View</button>}
+                                                                                    <button type="button" className="fx-tile__action" onClick={() => removeAgeVariant(ref.id, variant.id)} title="Remove this age">×</button>
+                                                                                </div>
+                                                                            </div>
+                                                                            <span className="fx-tile__name">{variant.label}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </section>
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>
