@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StudioAgentApprovalMode, StudioAgentControlMode, Theme, Workspace } from '../types';
-import { MagicWandIcon } from './icons';
+import { CheckCircleIcon, LockIcon, MagicWandIcon } from './icons';
 import { UIMode } from '../config/uiModes';
 
 type StartupPreferences = {
@@ -17,6 +17,7 @@ interface OnboardingModalProps {
   startupPreferences: StartupPreferences;
   onUpdateStartupPreferences: (next: StartupPreferences) => void;
   hasAnyApiKey: boolean;
+  onApiKeysChanged?: () => void;
   onOpenApiSettings: () => void;
   onOpenAssistant: () => void;
   onNavigateWorkspace: (workspace: Workspace) => void;
@@ -24,6 +25,24 @@ interface OnboardingModalProps {
   uiMode?: UIMode;
   onSelectUIMode?: (mode: UIMode) => void;
 }
+
+type QuickKey = { id: string; storageKey: string; label: string; placeholder: string; usedFor: string; href: string; primary?: boolean };
+
+/** The four keys that unlock most of the app; the full list lives in Settings → Providers. */
+const QUICK_KEYS: QuickKey[] = [
+  { id: 'google', storageKey: 'gemini_api_key', label: 'Google Gemini', placeholder: 'AIzaSy…', usedFor: 'Script, assistant, Imagen, Nano Banana, Veo. Free tier available.', href: 'https://aistudio.google.com/app/apikey', primary: true },
+  { id: 'fal', storageKey: 'fal_api_key', label: 'fal.ai', placeholder: 'fal_…', usedFor: 'Most video models: Kling, Seedance, Wan, LTX, MiniMax.', href: 'https://fal.ai/dashboard/api-keys' },
+  { id: 'replicate', storageKey: 'replicate_api_key', label: 'Replicate', placeholder: 'r8_…', usedFor: 'Flux, upscaling, Lyria music, stems.', href: 'https://replicate.com/account/api-tokens' },
+  { id: 'elevenlabs', storageKey: 'elevenlabs_api_key', label: 'ElevenLabs', placeholder: 'sk-…', usedFor: 'Voiceovers.', href: 'https://elevenlabs.io/app/settings/api-keys' },
+];
+
+const readQuickKeys = (): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const key of QUICK_KEYS) {
+    try { out[key.id] = localStorage.getItem(key.storageKey) || ''; } catch { out[key.id] = ''; }
+  }
+  return out;
+};
 
 const THEME_OPTIONS: Array<{ id: Theme; label: string }> = [
   { id: 'dark', label: '🌑 Dark' },
@@ -76,6 +95,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
   startupPreferences,
   onUpdateStartupPreferences,
   hasAnyApiKey,
+  onApiKeysChanged,
   onOpenApiSettings,
   onOpenAssistant,
   onNavigateWorkspace,
@@ -84,6 +104,29 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onSelectUIMode,
 }) => {
   const [step, setStep] = useState(0);
+  const [quickKeys, setQuickKeys] = useState<Record<string, string>>(() => readQuickKeys());
+  const [quickKeysSaved, setQuickKeysSaved] = useState<Record<string, boolean>>(() => {
+    const initial = readQuickKeys();
+    return Object.fromEntries(QUICK_KEYS.map((key) => [key.id, Boolean(initial[key.id])]));
+  });
+  const saveTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const updateQuickKey = (key: QuickKey, value: string) => {
+    setQuickKeys((prev) => ({ ...prev, [key.id]: value }));
+    setQuickKeysSaved((prev) => ({ ...prev, [key.id]: false }));
+    clearTimeout(saveTimers.current[key.id]);
+    saveTimers.current[key.id] = setTimeout(() => {
+      const trimmed = value.trim();
+      try {
+        if (trimmed) localStorage.setItem(key.storageKey, trimmed);
+        else localStorage.removeItem(key.storageKey);
+      } catch { /* storage unavailable */ }
+      setQuickKeysSaved((prev) => ({ ...prev, [key.id]: Boolean(trimmed) }));
+      onApiKeysChanged?.();
+    }, 500);
+  };
+  useEffect(() => () => { Object.values(saveTimers.current).forEach((timer) => clearTimeout(timer)); }, []);
+  const quickKeyCount = QUICK_KEYS.filter((key) => quickKeys[key.id]?.trim()).length;
+  const connected = hasAnyApiKey || quickKeyCount > 0;
   const [markCompleted, setMarkCompleted] = useState(true);
   const [selectedMode, setSelectedMode] = useState<UIMode>(uiMode);
   const totalSteps = 4;
@@ -113,6 +156,9 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
     if (isOpen) {
       setStep(0);
       setSelectedMode(uiMode);
+      const stored = readQuickKeys();
+      setQuickKeys(stored);
+      setQuickKeysSaved(Object.fromEntries(QUICK_KEYS.map((key) => [key.id, Boolean(stored[key.id])])));
     }
   }, [isOpen]);
 
@@ -225,31 +271,44 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 This app uses AI providers to generate images and videos. To get started, you only need one key.
               </p>
 
-              {/* Primary recommendation */}
-              <div className="app-card p-4 border-indigo-500/30 bg-indigo-500/5">
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">🔑</span>
-                  <div className="flex-1">
-                    <div className="font-semibold text-white text-sm">Start with Google Gemini (free)</div>
-                    <p className="text-xs app-muted mt-1">
-                      Powers the AI assistant and basic generation. Get your key in seconds.
-                    </p>
-                    <a
-                      href="https://aistudio.google.com/app/apikey"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-block mt-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      Get Gemini Key (free) →
-                    </a>
-                  </div>
-                </div>
+              <div className="onboard-keys">
+                {QUICK_KEYS.map((key) => {
+                  const value = quickKeys[key.id] || '';
+                  const has = value.trim().length > 0;
+                  return (
+                    <div key={key.id} className={`settings-provider ${has ? 'settings-provider--on' : ''}`}>
+                      <div className="settings-provider__head">
+                        <div className="settings-provider__name">
+                          <span className={`settings-provider__dot ${has ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                          <strong>{key.label}</strong>
+                          {key.primary && !has && <span className="pk-chip pk-chip--accent">start here · free</span>}
+                          {has && quickKeysSaved[key.id] && <span className="pk-chip pk-chip--ok"><CheckCircleIcon className="w-3 h-3" />saved</span>}
+                        </div>
+                        <a className="settings-provider__link" href={key.href} target="_blank" rel="noreferrer">Get a key ↗</a>
+                      </div>
+                      <label className="settings-provider__field">
+                        <LockIcon className="w-3.5 h-3.5" />
+                        <input
+                          type="password"
+                          value={value}
+                          onChange={(event) => updateQuickKey(key, event.target.value)}
+                          placeholder={key.placeholder}
+                          aria-label={`${key.label} API key`}
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </label>
+                      <p className="pk-hint">{key.usedFor}</p>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* Status & settings link */}
-              <div className="flex items-center justify-between">
-                <span className={`text-xs font-medium ${hasAnyApiKey ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {hasAnyApiKey ? '✓ API key detected — you\'re connected!' : '○ No key yet — add one to unlock generation'}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className={`text-xs font-medium ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {connected
+                    ? `✓ ${quickKeyCount > 0 ? `${quickKeyCount} of ${QUICK_KEYS.length} connected` : 'Connected'} — keys stay on this Mac.`
+                    : '○ No key yet — paste one to unlock generation. Keys stay on this Mac.'}
                 </span>
                 <button type="button" className="text-xs app-muted hover:text-white underline underline-offset-2" onClick={onOpenApiSettings}>
                   All providers →
@@ -259,7 +318,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
               {selectedMode === 'pro' && (
                 <div className="app-card p-3">
                   <p className="text-xs app-muted">
-                    <strong className="text-gray-300">Pro tip:</strong> Add Replicate or FAL for advanced video generation. You can connect them in Settings → API Keys anytime.
+                    <strong className="text-gray-300">Pro tip:</strong> Higgsfield, Midjourney (your own account) and local Claude Code / Codex agents connect in Settings → Providers and Agents.
                   </p>
                 </div>
               )}

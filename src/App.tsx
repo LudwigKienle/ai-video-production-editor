@@ -7268,9 +7268,11 @@ function App() {
         },
     };
 
+    const [apiKeysRevision, setApiKeysRevision] = useState(0);
     const hasAnyApiKeyConfigured = useMemo(() => hasAnyLocalApiKey(), [
         apiKeyReady,
         showSettings,
+        apiKeysRevision,
     ]);
 
     const completeOnboarding = (markCompleted: boolean) => {
@@ -9016,6 +9018,10 @@ function App() {
                 startupPreferences={startupPreferences}
                 onUpdateStartupPreferences={setStartupPreferences}
                 hasAnyApiKey={hasAnyApiKeyConfigured}
+                onApiKeysChanged={() => {
+                    setApiKeysRevision((value) => value + 1);
+                    if (hasAnyLocalApiKey()) setApiKeyReady(true);
+                }}
                 onOpenApiSettings={() => {
                     setShowOnboarding(false);
                     setShowSettings(true);
