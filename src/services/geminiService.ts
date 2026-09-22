@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, FunctionDeclaration, GenerateImagesResponse } from "@google/genai";
+import { withModelFallback } from './geminiModelFallback';
 import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
 import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
@@ -129,7 +130,7 @@ const getAiClient = () => {
     if (!apiKey) {
         throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings.");
     }
-    return new GoogleGenAI({ apiKey });
+    return withModelFallback(new GoogleGenAI({ apiKey }));
 };
 
 const shouldUseReplicateForGoogleModels = () => getGoogleModelProvider() === 'replicate';

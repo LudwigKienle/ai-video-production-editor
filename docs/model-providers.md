@@ -43,6 +43,10 @@ Same queue pattern as fal (`POST /{model}` → `request_id` + `status_url`; poll
 Higgsfield). Auto prefers fal when a fal key exists. Higgsfield-only models (DoP, Soul) always go
 to Higgsfield.
 
+## Gemini model names
+
+Google renames models (preview suffixes, new generations) and not every key sees every model. Every Gemini client goes through `withModelFallback` (`geminiModelFallback.ts`): on a 404 "model not found" it lists the models the key can use, picks the closest one of the same family (flash / pro / image) and retries once; the substitution is cached for the session and logged as a warning.
+
 ## Prompt shaping
 
 Every call passes through `adaptPromptForModel` (`src/services/promptStyle.ts`) — see the

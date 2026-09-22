@@ -4,6 +4,7 @@
  */
 
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { withModelFallback } from './geminiModelFallback';
 import { recordUsage } from '../utils/usageTracker';
 import { prepareVideoFileDataForGemini } from './geminiService';
 
@@ -139,7 +140,7 @@ const getAiClient = () => {
     if (!apiKey) {
         throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings.");
     }
-    return new GoogleGenAI({ apiKey });
+    return withModelFallback(new GoogleGenAI({ apiKey }));
 };
 
 const withRetry = async <T>(

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { withModelFallback } from './geminiModelFallback';
 import {
     EditPlan,
     EditPlanFinding,
@@ -38,7 +39,7 @@ const getAiClient = () => {
     if (!apiKey) {
         return null;
     }
-    return new GoogleGenAI({ apiKey });
+    return withModelFallback(new GoogleGenAI({ apiKey }));
 };
 
 const extractJsonFromText = (text: string) => {
