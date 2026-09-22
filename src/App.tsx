@@ -72,6 +72,7 @@ import { resolveWorkspaceNav } from './config/workspaceNav';
 import { STUDIO_AGENT_STATUS_STYLES } from './components/StudioAgentStrip';
 import ActivityCenter from './components/ActivityCenter';
 import { useTaskCenter } from './hooks/useTaskCenter';
+import { useAgentTaskBridge } from './hooks/useAgentTaskBridge';
 import { estimateProgress, summarizeTasks } from './services/taskCenter';
 import ApiKeyModal from './components/ApiKeyModal';
 import OnboardingModal from './components/OnboardingModal';
@@ -883,6 +884,7 @@ function App() {
     const [activityDrawerOpen, setActivityDrawerOpen] = useState(false);
     const [projectMenuOpen, setProjectMenuOpen] = useState(false);
     const taskCenterTasks = useTaskCenter();
+    useAgentTaskBridge();
     const [
         mediaItems,
         setMediaItemsWithHistory,

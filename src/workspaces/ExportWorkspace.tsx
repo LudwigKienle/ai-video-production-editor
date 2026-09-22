@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { startTask, type TaskHandle } from '../services/taskCenter';
 import { MediaItem, TimelineClip, TimelineTrack } from '../types';
 import { ExportIcon } from '../components/icons';
 import PreviewPlayer, { PreviewPlayerHandle } from '../components/PreviewPlayer';
@@ -70,6 +71,21 @@ const ExportWorkspace: React.FC<ExportWorkspaceProps> = ({ mediaItems, timelineC
     // Rendering State
     const [renderPlayhead, setRenderPlayhead] = useState(0);
     const [isRendering, setIsRendering] = useState(false);
+    // Mirror the render into the Activity drawer so it lines up with generations and agent jobs.
+    const renderTaskRef = useRef<TaskHandle | null>(null);
+    useEffect(() => {
+        if (status === 'RENDERING') {
+            if (!renderTaskRef.current) {
+                renderTaskRef.current = startTask({ label: `Render · ${downloadName}`, kind: 'export', provider: settings.useFfmpeg ? 'ffmpeg' : 'browser', message: 'Rendering…', progress: 0 });
+            }
+            renderTaskRef.current.update({ progress: Math.max(0, Math.min(1, progress / 100)), message: `Rendering ${Math.round(progress)}%` });
+        } else if (renderTaskRef.current) {
+            if (status === 'DONE') renderTaskRef.current.complete(exportOutputPath ? `Saved ${exportOutputPath}` : 'Ready to download');
+            else if (status === 'ERROR') renderTaskRef.current.fail(renderDetail || 'Render failed');
+            else renderTaskRef.current.cancel();
+            renderTaskRef.current = null;
+        }
+    }, [status, progress]);
 
     const playerRef = useRef<PreviewPlayerHandle>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);

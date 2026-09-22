@@ -260,6 +260,7 @@ type FalQueueStatus = {
     status?: string;
     response_url?: string;
     status_url?: string;
+    cancel_url?: string;
     error?: string;
 };
 
@@ -280,6 +281,7 @@ const runFalQueueInner = async (
     input: Record<string, any>,
     opts?: { pollIntervalMs?: number; maxChecks?: number },
     onStatus?: (status: string, checks: number) => void,
+    control?: { onQueued?: (cancelUrl: string | null) => void; isCancelled?: () => boolean },
 ) => {
     const token = getFalKeyOptional();
     const url = `https://queue.fal.run/${model}`;
@@ -322,6 +324,7 @@ const runFalQueueInner = async (
     if (!requestId) {
         throw new Error('FAL Queue did not return a request_id.');
     }
+    control?.onQueued?.(start.cancel_url || (token ? `https://queue.fal.run/${model}/requests/${requestId}/cancel` : null));
 
     let status = (start.status || '').toUpperCase();
     let responseUrl = start.response_url;
@@ -340,6 +343,9 @@ const runFalQueueInner = async (
         }
         checks += 1;
         onStatus?.(status, checks);
+        if (control?.isCancelled?.()) {
+            throw new Error('Cancelled.');
+        }
         await sleep(pollIntervalMs);
 
         const statusBody = token
@@ -423,11 +429,27 @@ const runFalQueue = async (
     input: Record<string, any>,
     opts?: { pollIntervalMs?: number; maxChecks?: number }
 ) => {
-    const task = startTask({ label: describeFalModel(model), kind: falTaskKind(model), provider: 'fal', estimatedMs: falEstimateMs(model), message: 'Queued…' });
+    // Cancel from the Activity drawer: flag the poll loop and tell fal's queue to drop the request.
+    let cancelUrl: string | null = null;
+    let cancelled = false;
+    const task = startTask({
+        label: describeFalModel(model),
+        kind: falTaskKind(model),
+        provider: 'fal',
+        estimatedMs: falEstimateMs(model),
+        message: 'Queued…',
+        cancel: () => {
+            cancelled = true;
+            const token = getFalKeyOptional();
+            if (cancelUrl && token) {
+                fetch(proxyFalUrl(cancelUrl), { method: 'PUT', headers: { Authorization: `Key ${token}` } }).catch(() => undefined);
+            }
+        },
+    });
     try {
         const output = await runFalQueueInner(model, input, opts, (status) => {
             task.update({ message: status === 'IN_PROGRESS' ? 'Rendering…' : status === 'IN_QUEUE' ? 'Waiting in queue…' : status ? status.toLowerCase() : 'Working…' });
-        });
+        }, { onQueued: (url) => { cancelUrl = url; }, isCancelled: () => cancelled });
         task.complete();
         return output;
     } catch (error) {
