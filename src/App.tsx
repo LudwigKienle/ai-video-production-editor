@@ -1,4 +1,5 @@
 
+import { FAL_VIDEO_CATALOG } from './services/falVideoCatalog';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
     Workspace,
@@ -499,6 +500,7 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-wan-v27-i2v', provider: 'fal', model: 'fal-ai/wan/v2.7/image-to-video', kind: 'video', unitCost: withMargin(0.1), unitLabel: 'second', label: 'FAL WAN 2.7 I2V' },
     { id: 'fal-wan-30-t2v', provider: 'fal', model: 'alibaba/wan-3.0/text-to-video', kind: 'video', unitCost: withMargin(0.2), unitLabel: 'second', label: 'FAL Wan 3.0 T2V (1080p)' },
     { id: 'fal-wan-30-i2v', provider: 'fal', model: 'alibaba/wan-3.0/image-to-video', kind: 'video', unitCost: withMargin(0.2), unitLabel: 'second', label: 'FAL Wan 3.0 I2V (1080p)' },
+    ...FAL_VIDEO_CATALOG.flatMap((entry) => [entry.paths.text, entry.paths.image].filter((path): path is string => Boolean(path)).map((path) => ({ id: `fal-catalog-${entry.id}-${path.split('/').pop()}`, provider: 'fal' as const, model: path, kind: 'video' as const, unitCost: withMargin(entry.costPerSecond), unitLabel: 'second' as const, label: entry.label }))),
     { id: 'fal-happy-horse-t2v', provider: 'fal', model: 'alibaba/happy-horse/text-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Happy Horse 1.0 T2V (1080p)' },
     { id: 'fal-happy-horse-i2v', provider: 'fal', model: 'alibaba/happy-horse/image-to-video', kind: 'video', unitCost: withMargin(0.28), unitLabel: 'second', label: 'FAL Happy Horse 1.0 I2V (1080p)' },
     { id: 'fal-seedance-2-i2v', provider: 'fal', model: 'bytedance/seedance-2.0/image-to-video', kind: 'video', unitCost: withMargin(0.3024), unitLabel: 'second', label: 'FAL Seedance 2.0 I2V (720p)' },

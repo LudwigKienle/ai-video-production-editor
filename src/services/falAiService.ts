@@ -1,6 +1,7 @@
 import { MediaItem } from '../types';
 import { getVideoDuration } from '../utils/helpers';
 import { recordUsage } from '../utils/usageTracker';
+import { getFalVideoCatalogEntry, pickCatalogAspect, pickCatalogDuration } from './falVideoCatalog';
 import { byokProxyJson, shouldUseByokProxy } from './byokProxyClient';
 import { startTask, type TaskKind } from './taskCenter';
 
@@ -2610,4 +2611,57 @@ export const generateVideoWithFalWan30Image = async (
     if (opts?.endImage?.base64) input.end_image_url = toDataUri(opts.endImage);
     const output = await runFalQueue(MODELS.WAN_30_I2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
     return finishWan30Video(MODELS.WAN_30_I2V, output, prompt, input.duration, 'image-to-video', 'fal-wan-30-i2v');
+};
+
+// ---------------------------------------------------------------------------
+// Catalog-driven generators (see falVideoCatalog.ts). One code path for every
+// vendor-namespaced fal endpoint that follows the common prompt / image_url /
+// duration / aspect_ratio / resolution shape.
+
+export const generateVideoWithFalCatalog = async (
+    modelId: string,
+    prompt: string,
+    opts?: {
+        image?: { base64: string; mimeType: string };
+        endImage?: { base64: string; mimeType: string };
+        duration?: number;
+        aspectRatio?: string;
+        resolution?: string;
+        audio?: boolean;
+        negativePrompt?: string;
+    }
+): Promise<MediaItem> => {
+    const entry = getFalVideoCatalogEntry(modelId);
+    if (!entry) throw new Error(`Unknown fal catalog model: ${modelId}`);
+    const hasImage = Boolean(opts?.image?.base64);
+    const path = hasImage ? entry.paths.image : entry.paths.text;
+    if (!path) throw new Error(`${entry.label} needs ${hasImage ? 'a text-to-video' : 'an image-to-video'} endpoint, which it does not have.`);
+
+    const duration = pickCatalogDuration(entry, opts?.duration);
+    const input: Record<string, any> = { prompt, ...(entry.extra || {}) };
+    if (hasImage) input[entry.imageField] = toDataUri(opts!.image!);
+    if (hasImage && entry.endField && opts?.endImage?.base64) input[entry.endField] = toDataUri(opts.endImage);
+    if (!entry.aspectOnlyForText || !hasImage) input.aspect_ratio = pickCatalogAspect(entry, opts?.aspectRatio);
+    if (entry.resolutions) input.resolution = opts?.resolution && entry.resolutions.includes(opts.resolution) ? opts.resolution : entry.defaultResolution || entry.resolutions[0];
+    if (!entry.noDuration) input.duration = entry.durationAsString ? String(duration) : duration;
+    if (entry.audioField) input[entry.audioField.name] = entry.audioField.kind === 'onoff' ? (opts?.audio === false ? 'off' : 'on') : opts?.audio !== false;
+    if (entry.supportsNegativePrompt && opts?.negativePrompt) input.negative_prompt = opts.negativePrompt;
+
+    const output = await runFalQueue(path, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    const urls = Array.from(new Set(collectFalVideoUrls(output)));
+    if (urls.length === 0) throw new Error(`${entry.label} returned no video.`);
+    const videoUrl = urls[0];
+    let resolvedDuration = typeof output?.duration === 'number' ? output.duration : duration;
+    try { resolvedDuration = await getVideoDuration(videoUrl); } catch { /* keep requested */ }
+    recordUsage({ provider: 'fal', model: path, kind: 'video', units: resolvedDuration, unitLabel: 'second', note: entry.label });
+    return {
+        id: `${entry.id}-${Date.now()}`,
+        name: `${entry.id.replace(/[^a-z0-9]+/gi, '_')}_${prompt.slice(0, 15) || 'clip'}.mp4`,
+        type: 'video',
+        url: videoUrl,
+        source: 'generated',
+        generatedBy: entry.label,
+        prompt,
+        duration: resolvedDuration,
+    };
 };

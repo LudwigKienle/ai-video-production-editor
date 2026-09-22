@@ -45,6 +45,8 @@ import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFa
 import { generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
+import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
+import { generateVideoWithFalCatalog } from '../services/falAiService';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -265,7 +267,15 @@ type FilmingVideoModel =
     | 'pixverse-c1-reference-fal'
     | 'grok-imagine-i2v-fal'
     | 'aurora-fal'
-    | 'grok-imagine-video';
+    | 'grok-imagine-video'
+    | 'kling-v3-std-fal'
+    | 'kling-v3-4k-fal'
+    | 'minimax-h3-fal'
+    | 'hailuo-2.3-fal'
+    | 'pixverse-v6-fal'
+    | 'ltx-2.5-pro-fal'
+    | 'wan-3.0-fal'
+    | 'wan-3.0-prime-fal';
 type LibraryAsset = {
     id: string;
     name: string;
@@ -714,6 +724,7 @@ const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
     'grok-imagine-i2v-fal',
     'aurora-fal',
     'grok-imagine-video',
+    ...(FAL_VIDEO_CATALOG.map((entry) => entry.id) as FilmingVideoModel[]),
 ];
 
 const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string; provider: string; icon?: string; goodFor?: string; badge?: string }> = [
@@ -743,6 +754,7 @@ const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string;
     { id: 'ltx-2.3-pro', label: 'LTX 2.3 Pro', provider: 'Replicate', goodFor: 'Higher quality multimodal generation with optional audio', badge: '⭐ Recommended' },
     { id: 'ltx-audio-to-video', label: 'LTX Audio-to-Video', provider: 'Replicate', goodFor: 'Drive shots from audio and optional key art' },
     { id: 'p-video', label: 'P-Video', provider: 'Replicate', goodFor: 'Flexible text/image/audio video generation with draft mode' },
+    ...FAL_VIDEO_CATALOG.map((entry) => ({ id: entry.id as FilmingVideoModel, label: entry.label, provider: 'FAL', goodFor: entry.goodFor, badge: entry.badge })),
 ];
 
 const PROJECT_HUB_UI_PREFS_KEY = 'project_hub_ui_prefs_v1';
@@ -11278,6 +11290,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     };
 
     const getVideoDurationConfig = (model: typeof videoModel) => {
+        const catalogEntry = getFalVideoCatalogEntry(model);
+        if (catalogEntry) return { supported: !catalogEntry.noDuration, options: catalogEntry.durations, fallback: catalogEntry.defaultDuration };
         switch (model) {
             case 'grok-imagine-video':
                 return { supported: true, options: [3, 5, 8, 10, 12, 15], fallback: 5 };
@@ -11815,6 +11829,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         shotType: klingShotType,
                         elements: resolvedKlingBindings.elements,
                         referenceImages: resolvedKlingBindings.referenceImages,
+                    });
+                }
+                if (isFalCatalogVideoModel(activeVideoModel)) {
+                    const catalogEntry = getFalVideoCatalogEntry(activeVideoModel)!;
+                    if (!referencePayload && !catalogEntry.paths.text) {
+                        throw new Error(`${catalogEntry.label} requires a storyboard or start frame.`);
+                    }
+                    return generateVideoWithFalCatalog(activeVideoModel, candidateMotionPrompt, {
+                        image: referencePayload,
+                        endImage: endFramePayload,
+                        duration: normalizedDurationSeconds,
+                        aspectRatio: pickCatalogAspect(catalogEntry, resolveFilmingDeliveryAspectRatio() || resolveShotEffectiveAspectRatio(shot)),
+                        audio: true,
+                        negativePrompt: klingNegative || undefined,
                     });
                 }
                 if (activeVideoModel === 'grok-imagine-i2v-fal') {
