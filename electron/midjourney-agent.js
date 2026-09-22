@@ -17,6 +17,8 @@ const LOGIN_URL = 'https://www.midjourney.com/login';
 const CDN_HOST = 'cdn.midjourney.com';
 const JOB_TIMEOUT_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
+// Prefix on the error message so the renderer can tell a moderation block from a page failure (IPC only carries the message).
+const MODERATION_PREFIX = '[moderated]';
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
@@ -152,6 +154,30 @@ const PAGE_SCRIPTS = {
     const text = container ? (container.innerText || '').slice(0, 400) : '';
     const percent = (text.match(/(\\d{1,3})\\s*%/) || [])[1] || null;
     return { count: indexes.size, indexes: Array.from(indexes).sort(), text, percent: percent ? Number(percent) : null };
+  })()`,
+
+  // Did Midjourney refuse the prompt? Looks for the moderation dialog / toast / inline warning.
+  promptError: `(() => {
+    const rx = /(banned prompt|prompt (?:was |has been )?(?:blocked|flagged|rejected|denied)|blocked by|moderat|community guidelines|not allowed|violat|inappropriate|try a different prompt|appeal)/i;
+    const nodes = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="alert"], [role="status"], [class*="toast" i], [class*="modal" i], [class*="notification" i], [class*="error" i], [class*="warning" i], [class*="banned" i]'));
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
+      if (text && rx.test(text)) return { blocked: true, text: text.slice(0, 400) };
+    }
+    return { blocked: false, text: '' };
+  })()`,
+
+  // Close whatever the refusal opened so the next submit starts clean.
+  dismissDialogs: `(() => {
+    let clicked = 0;
+    for (const node of document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button, [class*="toast" i] button, [class*="modal" i] button')) {
+      const label = (node.innerText || node.getAttribute('aria-label') || '').trim();
+      if (/^(ok|okay|close|dismiss|got it|cancel|×|x|understood)$/i.test(label)) { node.click(); clicked += 1; }
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    return clicked;
   })()`,
 
   // Type the prompt (React-safe) and submit with Enter; fall back to a submit button.
@@ -351,10 +377,22 @@ const persist = async (folderPath, jobId, index, buffer, mimeType) => {
  * refs: [{ base64, mimeType, name, role: 'character' | 'style' | 'image' }]
  */
 const generate = (payload) => enqueue(async () => {
-  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '', styleWeight, defaultParams } = payload || {};
+  const jobLabel = (payload && typeof payload.jobLabel === 'string' && payload.jobLabel) || `mj-${Date.now().toString(36)}`;
+  try {
+    return await generateInner(payload || {}, jobLabel);
+  } catch (error) {
+    const message = formatError(error);
+    emit({ type: 'job', id: jobLabel, phase: message.startsWith(MODERATION_PREFIX) ? 'moderated' : 'failed', error: message });
+    throw error;
+  }
+});
+
+const moderationError = (text) => new Error(`${MODERATION_PREFIX} Midjourney blocked the prompt: ${text || 'content moderation'}`);
+
+const generateInner = async (payload, jobLabel) => {
+  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '', styleWeight, defaultParams, attempt = 1 } = payload;
   if (!prompt || !prompt.trim()) throw new Error('Prompt is empty.');
-  const jobLabel = `mj-${Date.now().toString(36)}`;
-  emit({ type: 'job', id: jobLabel, phase: 'starting', prompt });
+  emit({ type: 'job', id: jobLabel, phase: 'starting', prompt, attempt });
 
   const current = await status();
   if (!current.connected) throw new Error('Jeff is not signed in to Midjourney. Open Settings → AI providers → Midjourney and connect.');
@@ -398,11 +436,24 @@ const generate = (payload) => enqueue(async () => {
     if (!jobId) {
       const ids = await run(PAGE_SCRIPTS.jobIds).catch(() => []);
       const fresh = ids.filter((id) => !before.has(id));
-      if (fresh.length) jobId = fresh[0];
-      else continue;
+      if (!fresh.length) {
+        const problem = await run(PAGE_SCRIPTS.promptError).catch(() => null);
+        if (problem && problem.blocked) {
+          await screenshot('moderated');
+          await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+          throw moderationError(problem.text);
+        }
+        continue;
+      }
+      jobId = fresh[0];
       emit({ type: 'job', id: jobLabel, phase: 'queued', jobId });
     }
     const state = await run(PAGE_SCRIPTS.jobState(jobId)).catch(() => null);
+    if (state && state.count === 0 && /(blocked|moderat|banned|flagged|violat)/i.test(state.text || '')) {
+      await screenshot('moderated-job');
+      await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+      throw moderationError(state.text);
+    }
     if (state) emit({ type: 'job', id: jobLabel, phase: 'rendering', jobId, percent: state.percent, count: state.count });
     if (state && state.count >= 4 && state.percent === null) { done = state; break; }
     if (state && state.count >= 4 && state.percent !== null && state.percent >= 100) { done = state; break; }
@@ -436,7 +487,7 @@ const generate = (payload) => enqueue(async () => {
   }
   emit({ type: 'job', id: jobLabel, phase: 'done', jobId, count: images.length });
   return { ok: true, jobId, prompt: fullPrompt, images };
-});
+};
 
 const toggleWindow = (show) => {
   if (show) showWindow(); else hideWindow();

@@ -137,6 +137,30 @@ const GEMINI_NANO_BANANA_2_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
 const GEMINI_3_PRO_IMAGE_MODEL = 'gemini-3-pro-image-preview';
 const GEMINI_TEXT_MODEL_PRO = 'gemini-3.1-pro-preview';
 const GEMINI_TEXT_MODEL_FLASH = 'gemini-3.1-flash-preview';
+
+/**
+ * Midjourney refused a prompt. Rewrite the description so it passes content
+ * moderation while keeping subject, composition, lighting and style; the
+ * parameter tail ("--ar …") is left untouched.
+ */
+export const rewritePromptForModeration = async (prompt: string, reason: string): Promise<string> => {
+    const paramsMatch = prompt.match(/\s--[a-z]/i);
+    const body = paramsMatch && paramsMatch.index !== undefined ? prompt.slice(0, paramsMatch.index).trim() : prompt.trim();
+    const params = paramsMatch && paramsMatch.index !== undefined ? prompt.slice(paramsMatch.index).trim() : '';
+    const ai = getAiClient();
+    const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
+        model: GEMINI_TEXT_MODEL_FLASH,
+        contents: `An image generator refused this prompt for content moderation (${reason.slice(0, 200)}).
+Rewrite it so it passes moderation: no nudity, gore, graphic violence, drugs, hate symbols or sexualised wording; never describe minors as undressed. Keep the subject, composition, camera, lighting, mood and art style. Same length or shorter. Return only the rewritten prompt, no quotes, no explanation.
+
+Prompt:
+${body}`,
+        config: { temperature: 0.4 },
+    }));
+    const rewritten = (response.text || '').trim().replace(/^["'`]+|["'`]+$/g, '');
+    if (!rewritten) return prompt;
+    return params ? `${rewritten} ${params}` : rewritten;
+};
 type StoryboardAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '2.39:1' | '235:100' | '239:100';
 
 const isCinemascopeStoryboardRatio = (aspectRatio: StoryboardAspectRatio) =>

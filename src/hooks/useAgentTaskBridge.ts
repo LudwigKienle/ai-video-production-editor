@@ -22,6 +22,9 @@ export const useAgentTaskBridge = () => {
           jobs.set(event.id, task);
         }
         switch (event.phase) {
+          case 'starting': if ((event.attempt || 1) > 1) task.update({ message: `Retrying with a softened prompt (attempt ${event.attempt})…`, progress: 0.05 }); break;
+          case 'moderated': task.update({ message: 'Prompt blocked by Midjourney moderation. Softening and retrying…', progress: 0.05 }); break;
+          case 'failed': task.fail(event.error || 'Midjourney job failed'); jobs.delete(event.id); break;
           case 'uploading': task.update({ message: `Uploading ${event.name || 'reference'}…`, progress: 0.1 }); break;
           case 'submitting': task.update({ message: 'Submitting prompt…', progress: 0.2 }); break;
           case 'queued': task.update({ message: 'Queued at Midjourney…', progress: 0.3 }); break;

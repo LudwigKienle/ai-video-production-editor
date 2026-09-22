@@ -5549,6 +5549,7 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .scene-strip__chip:hover { background: var(--shell-hover); }
 .scene-strip__chip--active { border-color: var(--app-accent); background: var(--shell-selected); }
 .scene-strip__chip--done small { color: var(--app-success); }
+.scene-strip__chip--next { border-color: rgb(87 184 148 / 0.45); background: rgb(87 184 148 / 0.08); }
 .scene-strip__note { align-self: center; padding-left: 0.35rem; color: var(--app-muted); font-size: var(--fs-2xs); white-space: nowrap; }
 .project-hub__phase-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .project-hub__phase-head h3 { margin: 0.1rem 0 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em; }

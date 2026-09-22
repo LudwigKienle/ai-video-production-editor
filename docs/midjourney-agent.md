@@ -39,6 +39,22 @@ Midjourney like any other image model — prompt in, four images back, nothing t
 | Storyboard | first moodboard image | `--sref` |
 | Storyboard | pose map / sketch | image prompt, first |
 
+## Moderation
+
+Midjourney refuses some prompts in the UI (dialog, toast or a job card marked as
+blocked). Jeff polls `promptError` while waiting for the new job to appear, closes the
+dialog, and rejects with a message prefixed `[moderated]`. The renderer service then
+retries the same job label up to three times:
+
+1. the prompt as written;
+2. local word swaps (`promptModeration.ts`: blood → dark stains, nude → base-layer
+   clothing, a young character never keeps "underwear", …), parameters untouched;
+3. a Gemini rewrite when a key exists, otherwise the stronger local pass that drops
+   risky sentences and adds `--no blood, gore, nudity`.
+
+The Activity drawer shows the retry on the same task. The images that come back carry
+the prompt that finally went through.
+
 ## When the page changes
 
 Every selector lives in `PAGE_SCRIPTS` inside `midjourney-agent.js`, each with several

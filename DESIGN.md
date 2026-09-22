@@ -154,6 +154,12 @@ Every browser panel is assembled from the same few parts, so new panels look fin
 - Avoid putting every expert option above the fold
 
 
+### Steps and tools (Project Hub)
+
+The left navigation lists **steps** in production order: Script → World (optional) → Concept → Storyboard → Filming → Review → Marketing. Everything else is a **tool** that opens from a step and never gets a step number: Projects and Team from the header, Director and Scene Wall from the Storyboard bar. A tool page shows "Storyboard · tool" and one "‹ Back to Storyboard" control instead of prev/next. Checkmarks come from content (script written, references with images, frames, videos, review, promo assets), never from position.
+
+**Scene strip.** Storyboard and Filming carry the same chapter strip: All · Sc 1 · Sc 2 … with per-scene progress (frames or videos out of shots). Selecting a scene scopes the board, the Director, "Generate from Script" and "Film"; a new shot list for a scene merges into the existing list. When a scene is complete the strip offers "Next: Sc N+1". Scene Wall (Pro) is the wall view of the same scenes for long scripts; picking a scene there selects it in the strip.
+
 ### Phase bars (Project Hub)
 
 Every production phase opens with the same bar, in this order:

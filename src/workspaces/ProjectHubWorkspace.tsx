@@ -3850,9 +3850,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return filtered.length > 0 ? filtered : phaseCatalog.map((phase) => phase.id);
     }, [allowedPhases, phaseCatalog]);
 
+    // The breakdown just created cast, sets and props, so land on Concept; World stays one click away and optional.
     const postScriptPhase = useMemo<ProductionPhase>(() => {
-        if (allowedPhaseIds.includes('worldbuilding')) return 'worldbuilding';
         if (allowedPhaseIds.includes('concept')) return 'concept';
+        if (allowedPhaseIds.includes('worldbuilding')) return 'worldbuilding';
         if (allowedPhaseIds.includes('storyboard')) return 'storyboard';
         return allowedPhaseIds[0] || 'script';
     }, [allowedPhaseIds]);
@@ -13099,6 +13100,21 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     );
                 })}
                 {unassignedShotCount > 0 && <span className="scene-strip__note">{unassignedShotCount} without scene</span>}
+                {(() => {
+                    if (all) return null;
+                    const index = projectScenes.findIndex((scene) => scene.sceneNumber === effectiveSceneNumber);
+                    const current = projectScenes[index];
+                    const next = projectScenes[index + 1];
+                    if (!current || !next) return null;
+                    const progress = mode === 'storyboard' ? current.frameCount : current.videoCount;
+                    if (current.shotCount === 0 || progress < current.shotCount) return null;
+                    return (
+                        <button type="button" className="scene-strip__chip scene-strip__chip--next" onClick={() => selectScene(next.sceneNumber)}>
+                            <span>Next: Sc {next.sceneNumber} ›</span>
+                            <small>scene {current.sceneNumber} is done</small>
+                        </button>
+                    );
+                })()}
             </nav>
         );
     };

@@ -1,5 +1,6 @@
 import { MediaItem } from '../types';
 import { getBase64FromUrl } from '../utils/helpers';
+import { isModerationError, softenPromptForModeration } from './promptModeration';
 
 /**
  * Renderer-side face of "Jeff", the Midjourney browser agent that lives in the
@@ -28,7 +29,9 @@ export type MidjourneyStatus = {
 export type MidjourneyJobEvent = {
   type: 'job' | 'status' | 'window';
   id?: string;
-  phase?: 'starting' | 'uploading' | 'submitting' | 'queued' | 'rendering' | 'downloading' | 'done';
+  phase?: 'starting' | 'uploading' | 'submitting' | 'queued' | 'rendering' | 'downloading' | 'done' | 'moderated' | 'failed';
+  attempt?: number;
+  error?: string;
   jobId?: string;
   percent?: number | null;
   count?: number;
@@ -52,6 +55,8 @@ type MidjourneyBridge = {
     extraParams?: string;
     styleWeight?: number;
     defaultParams?: string;
+    jobLabel?: string;
+    attempt?: number;
   }) => Promise<{ ok: true; jobId: string; prompt: string; images: Array<{ index: number; url: string; cdnUrl: string; relativePath: string | null }> }>;
   onEvent: (callback: (event: MidjourneyJobEvent) => void) => () => void;
 };
@@ -107,8 +112,28 @@ const toMidjourneyAspect = (aspectRatio?: string): string | undefined => {
   return '16:9';
 };
 
+const MODERATION_ATTEMPTS = 3;
+
+/**
+ * Attempt 1 → the prompt as written. Attempt 2 → local word swaps. Attempt 3 →
+ * Gemini rewrite when a key exists, otherwise the stronger local pass.
+ */
+const nextPromptAfterModeration = async (prompt: string, attempt: number, reason: string): Promise<string> => {
+  if (attempt === 1) return softenPromptForModeration(prompt, 1);
+  try {
+    const { rewritePromptForModeration } = await import('./geminiService');
+    const rewritten = await rewritePromptForModeration(prompt, reason);
+    if (rewritten && rewritten.trim() && rewritten.trim() !== prompt.trim()) return rewritten.trim();
+  } catch (error) {
+    console.warn('[midjourney] Gemini rewrite unavailable, using local softening.', error);
+  }
+  return softenPromptForModeration(prompt, 2);
+};
+
 /**
  * Run one Midjourney job and return its four images as MediaItems.
+ * A moderated prompt is softened and resubmitted automatically (up to three
+ * attempts); the returned items carry the prompt that finally went through.
  * The first item carries all four urls in `imageVersions` so callers that only
  * take a single image still keep the whole grid.
  */
@@ -133,15 +158,33 @@ export const generateImagesWithMidjourney = async (
       return { base64: data.base64, mimeType: data.mimeType, name: ref.name || 'reference.png', role: ref.role };
     }),
   );
-  const result = await bridge.generate({
-    prompt,
-    aspectRatio: toMidjourneyAspect(options.aspectRatio),
-    refs,
-    folderPath: options.folderPath ?? null,
-    extraParams: options.extraParams,
-    styleWeight: options.styleWeight,
-    defaultParams: options.defaultParams,
-  });
+  const jobLabel = `mj-${Date.now().toString(36)}`;
+  let currentPrompt = prompt;
+  let result: Awaited<ReturnType<MidjourneyBridge['generate']>> | null = null;
+  for (let attempt = 1; attempt <= MODERATION_ATTEMPTS; attempt += 1) {
+    try {
+      result = await bridge.generate({
+        prompt: currentPrompt,
+        aspectRatio: toMidjourneyAspect(options.aspectRatio),
+        refs,
+        folderPath: options.folderPath ?? null,
+        extraParams: options.extraParams,
+        styleWeight: options.styleWeight,
+        defaultParams: options.defaultParams,
+        jobLabel,
+        attempt,
+      });
+      break;
+    } catch (error) {
+      if (!isModerationError(error) || attempt === MODERATION_ATTEMPTS) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      const softened = await nextPromptAfterModeration(currentPrompt, attempt, reason);
+      if (softened.trim() === currentPrompt.trim()) throw error;
+      console.info(`[midjourney] prompt blocked (attempt ${attempt}); retrying with a softened prompt.`);
+      currentPrompt = softened;
+    }
+  }
+  if (!result) throw new Error('Midjourney returned no result.');
   const stamp = Date.now();
   const versions = result.images.map((image) => image.url);
   return result.images.map((image, index) => ({
