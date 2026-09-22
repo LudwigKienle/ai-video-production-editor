@@ -146,6 +146,20 @@ declare global {
                     logLines?: string[];
                 }>;
             };
+            midjourney?: {
+                status: (payload?: { refresh?: boolean }) => Promise<{ connected: boolean; checkedAt: number; error?: string | null; url?: string; visible?: boolean; busy?: boolean }>;
+                connect: () => Promise<{ connected: boolean; error?: string | null }>;
+                disconnect: () => Promise<{ connected: boolean }>;
+                toggleWindow: (payload: { show: boolean }) => Promise<{ visible: boolean }>;
+                generate: (payload: {
+                    prompt: string;
+                    aspectRatio?: string;
+                    refs?: Array<{ base64: string; mimeType: string; name?: string; role: 'character' | 'style' | 'image' }>;
+                    folderPath?: string | null;
+                    extraParams?: string;
+                }) => Promise<{ ok: true; jobId: string; prompt: string; images: Array<{ index: number; url: string; cdnUrl: string; relativePath: string | null }> }>;
+                onEvent: (callback: (event: any) => void) => () => void;
+            };
             corridorKey?: {
                 status: (payload?: { repoPath?: string | null }) => Promise<{
                     ready: boolean;

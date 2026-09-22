@@ -1,0 +1,54 @@
+# Midjourney · Jeff (browser agent)
+
+Midjourney has no public API. Jeff drives **midjourney.com** in a persistent, hidden
+Electron window with the user's own sign-in, so Concept and Storyboard can use
+Midjourney like any other image model — prompt in, four images back, nothing to click.
+
+> Automation is against Midjourney's terms of service. Jeff behaves like a person
+> (one job at a time, real waits, a real browser session), but the risk of a ban is
+> the user's. Say so in the UI; we do.
+
+## Pieces
+
+| Where | What |
+|---|---|
+| `electron/midjourney-agent.js` | The agent. Session partition `persist:midjourney`, hidden `BrowserWindow`, job queue, DOM scripts, download to `references/midjourney/<job>_<n>.png` in the project folder. |
+| `electron/main.js` | IPC: `midjourney:status / connect / disconnect / toggleWindow / generate`; forwards agent events to renderers as `midjourney:event`. |
+| `electron/preload.js` | `window.electron.midjourney.*` |
+| `src/services/midjourneyAgentService.ts` | Renderer wrapper. Maps project references → Midjourney parameters and returns `MediaItem[]` (first item carries the 4-grid in `imageVersions`). |
+| `src/components/ApiKeyModal.tsx` | Settings → AI providers → "Midjourney · Jeff": Sign in / Sign out / Show window. |
+| `src/workspaces/ProjectHubWorkspace.tsx` | Model `midjourney` in `REFERENCE_MODEL_OPTIONS`; branches in `generateReferenceImage` (Concept) and the storyboard renderer. Extra grid images are merged as reference versions via `finalizeReferenceImage.extraVersions`. |
+
+## Flow of one job
+
+1. `status()` — load `/imagine`, check for the prompt box and the absence of a login page.
+2. Upload references through the page's own uploader (file input, else drag-drop on the prompt form); wait until a `cdn.midjourney.com` url appears; record it.
+3. Clear the reference chips and build the text prompt:
+   `[image refs…] <prompt> --ar W:H --oref <first character> --sref <style…>`
+4. Type it (React-safe value setter + Enter, fallback submit button).
+5. Poll the feed every 3 s: a **new job uuid** in `cdn.midjourney.com/<uuid>/…` that was not there before submit; done when four grid images `0_0…0_3` are present and no percentage is shown. Timeout 10 min (relax mode is slow).
+6. Download `https://cdn.midjourney.com/<uuid>/0_<n>.png` through the session (cookies), fall back to the `_640_N.webp` preview, persist to the project folder, return data urls.
+
+## Reference mapping
+
+| Phase | Source | Midjourney |
+|---|---|---|
+| Concept | base image (regenerate) | `--oref` |
+| Storyboard | matched **character** refs | first → `--oref`, others → image prompt |
+| Storyboard | environment / product refs | image prompt (url before the text) |
+| Storyboard | first moodboard image | `--sref` |
+| Storyboard | pose map / sketch | image prompt, first |
+
+## When the page changes
+
+Every selector lives in `PAGE_SCRIPTS` inside `midjourney-agent.js`, each with several
+candidates. On failure the agent saves a screenshot to
+`~/Library/Application Support/<app>/midjourney/<step>-<time>.png` and puts the path in the
+error message. Settings → "Show window" makes the hidden browser visible so you can watch a
+job and see where it stalls.
+
+## Not yet
+
+- Fast/relax detection and automatic mode switching.
+- Upscales (we take the grid; each image is 1024² for square, proportionally otherwise).
+- Concurrency (Midjourney allows three fast jobs; Jeff runs one).

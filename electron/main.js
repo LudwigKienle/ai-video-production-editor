@@ -27,6 +27,7 @@ const {
   setupSurfaceMapEnvironment,
 } = require('./surface-map-runtime');
 const fontList = require('font-list');
+const midjourneyAgent = require('./midjourney-agent');
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
@@ -561,6 +562,18 @@ ipcMain.handle('corridorKey:process', async (_event, payload) => {
   return runCorridorKeyProcess(payload);
 });
 
+// Jeff: the Midjourney browser agent (see midjourney-agent.js)
+ipcMain.handle('midjourney:status', async (_event, payload) => midjourneyAgent.status(payload || {}));
+ipcMain.handle('midjourney:connect', async () => midjourneyAgent.connect());
+ipcMain.handle('midjourney:disconnect', async () => midjourneyAgent.disconnect());
+ipcMain.handle('midjourney:toggleWindow', async (_event, payload) => midjourneyAgent.toggleWindow(Boolean(payload && payload.show)));
+ipcMain.handle('midjourney:generate', async (_event, payload) => midjourneyAgent.generate(payload));
+midjourneyAgent.onEvent((event) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('midjourney:event', event);
+  }
+});
+
 ipcMain.handle('surfaceMaps:status', async (_event, payload) => {
   return probeSurfaceMapEnvironment(payload);
 });
@@ -721,7 +734,7 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!BrowserWindow.getAllWindows().some((window) => window.isVisible())) {
       createWindow();
     }
   });
@@ -731,6 +744,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  app.isQuittingForReal = true;
+  midjourneyAgent.dispose();
 });
 
 app.on('will-quit', () => {

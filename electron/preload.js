@@ -46,6 +46,18 @@ contextBridge.exposeInMainWorld('electron', {
     setup: () => ipcRenderer.invoke('audioMastering:setup'),
     process: (payload) => ipcRenderer.invoke('audioMastering:process', payload),
   },
+  midjourney: {
+    status: (payload) => ipcRenderer.invoke('midjourney:status', payload),
+    connect: () => ipcRenderer.invoke('midjourney:connect'),
+    disconnect: () => ipcRenderer.invoke('midjourney:disconnect'),
+    toggleWindow: (payload) => ipcRenderer.invoke('midjourney:toggleWindow', payload),
+    generate: (payload) => ipcRenderer.invoke('midjourney:generate', payload),
+    onEvent: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('midjourney:event', handler);
+      return () => ipcRenderer.removeListener('midjourney:event', handler);
+    },
+  },
   corridorKey: {
     status: (payload) => ipcRenderer.invoke('corridorKey:status', payload),
     setup: (payload) => ipcRenderer.invoke('corridorKey:setup', payload),

@@ -42,6 +42,7 @@ import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } 
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
 import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
+import { generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -233,7 +234,8 @@ type ReferenceImageModel =
     | 'qwen-2512'
     | 'qwen-max-fal'
     | 'qwen-multiangle'
-    | 'qwen-multiangle-fal';
+    | 'qwen-multiangle-fal'
+    | 'midjourney';
 type MarketingImageModel = ReferenceImageModel | 'nano-banana-pro';
 type FilmingVideoModel =
     | 'auto'
@@ -609,6 +611,7 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'krea-2-large-fal': 'Krea 2 Large (FAL)',
     'krea-2-turbo-fal': 'Krea 2 Turbo (FAL)',
     'ideogram-v4-fal': 'Ideogram 4 (FAL)',
+    midjourney: 'Midjourney · Jeff',
     qwen: 'Qwen 2511',
     'qwen-2512': 'Qwen 2512',
     'qwen-max-fal': 'Qwen Image Max (FAL)',
@@ -646,6 +649,7 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Aesthetic-first concept art with film-stock looks' },
     { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick concept passes', badge: '⚡ Fast' },
     { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters and title cards with clean text' },
+    { id: 'midjourney', label: 'Midjourney · Jeff', provider: 'Midjourney', goodFor: 'Your own Midjourney account, driven by a background browser agent. Returns the 4-grid as versions; storyboard shots get concept refs as --oref / --sref', badge: '🧭 Agent' },
     { id: 'qwen', label: 'Qwen 2511', provider: 'Qwen', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
     { id: 'qwen-2512', label: 'Qwen 2512', provider: 'Qwen', icon: logoQwen, goodFor: 'Improved aesthetic logic and detailed composition' },
     { id: 'qwen-max-fal', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation' },
@@ -6448,7 +6452,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             ? { loraUrl: referenceLoraUrl.trim(), loraScale: Number.isFinite(referenceLoraScale) ? referenceLoraScale : 0.75 }
             : undefined;
         let image: MediaItem;
-        if (selectedReferenceModel === 'imagen') {
+        if (selectedReferenceModel === 'midjourney') {
+            const mjRefs: MidjourneyReference[] = baseImageUrl ? [{ url: baseImageUrl, name: 'base.png', role: 'character' }] : [];
+            const images = await generateImagesWithMidjourney(prompt, { aspectRatio, references: mjRefs, folderPath: projectPath });
+            if (!images.length) throw new Error('Midjourney returned no images.');
+            image = images[0];
+        } else if (selectedReferenceModel === 'imagen') {
             image = await generateImageWithImagen(prompt, modelAspectRatio);
         } else if (selectedReferenceModel === 'gemini-pro') {
             const refs = await buildMoodboardReferences(baseImageUrl);
@@ -6826,14 +6835,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         reference: ReferenceItem,
         image: MediaItem,
         angleUrls?: string[]
-    ): Promise<Pick<ReferenceItem, 'imageUrl' | 'multiAngleUrls'>> => {
+    ): Promise<Pick<ReferenceItem, 'imageUrl' | 'multiAngleUrls'> & { extraVersions?: string[] }> => {
         const stableUrl = await stabilizeReferenceImageUrl(reference, image.url);
         const stableAngles = angleUrls
             ? await Promise.all(angleUrls.map(url => stabilizeReferenceImageUrl(reference, url)))
             : undefined;
+        // Models that return a grid (Midjourney) hand the remaining images over as versions.
+        const extras = (image.imageVersions || []).filter((url) => url && url !== image.url);
+        const extraVersions = extras.length
+            ? await Promise.all(extras.map((url) => stabilizeReferenceImageUrl(reference, url)))
+            : undefined;
         return {
             imageUrl: stableUrl,
-            multiAngleUrls: stableAngles
+            multiAngleUrls: stableAngles,
+            extraVersions,
         };
     };
 
@@ -6893,7 +6908,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         nextUrl: string | null,
         nextAngles?: string[],
         modelLabel?: string | null,
-        nextAngleMeta?: AngleMetadata[]
+        nextAngleMeta?: AngleMetadata[],
+        extraVersions?: string[]
     ): Pick<ReferenceItem, 'imageUrl' | 'imageVersions' | 'selectedVersionIndex' | 'multiAngleUrls' | 'multiAngleMeta' | 'generatedBy' | 'imageVersionNotes'> => {
         const generatedBy = modelLabel === null ? undefined : modelLabel ?? reference.generatedBy;
         const resolvedAngleMeta = nextAngleMeta
@@ -6922,7 +6938,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             };
         }
         const list = buildVersionList(reference.imageVersions, reference.imageUrl);
-        const nextList = list.includes(nextUrl) ? list : [...list, nextUrl];
+        const withMain = list.includes(nextUrl) ? list : [...list, nextUrl];
+        const nextList = (extraVersions || []).reduce((acc, url) => (url && !acc.includes(url) ? [...acc, url] : acc), withMain);
         return {
             imageUrl: nextUrl,
             imageVersions: nextList,
@@ -8255,7 +8272,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 );
                 const finalImage = await finalizeReferenceImage(currentRef, image, angleUrls);
                 const effectiveModelLabel = REFERENCE_MODEL_LABELS[effectiveModel] || effectiveModel;
-                setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, ...applyReferenceVersion(r, finalImage.imageUrl, finalImage.multiAngleUrls, effectiveModelLabel), isGenerating: false } : r));
+                setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, ...applyReferenceVersion(r, finalImage.imageUrl, finalImage.multiAngleUrls, effectiveModelLabel, undefined, finalImage.extraVersions), isGenerating: false } : r));
                 if (usedFallbackModel) {
                     fallbackCount += 1;
                 }
@@ -8389,7 +8406,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const finalImage = await finalizeReferenceImage(reference, image, angleUrls);
             setReferences(prev => prev.map(ref => ref.id === referenceId ? {
                 ...ref,
-                ...applyReferenceVersion(ref, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel),
+                ...applyReferenceVersion(ref, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel, undefined, finalImage.extraVersions),
                 isGenerating: false
             } : ref));
         } catch (error) {
@@ -10395,7 +10412,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     : referenceImageModel;
                 if (referenceImageModel === 'auto') console.info(`Auto model: ${activeReferenceModel}`);
                 let imageMedia: MediaItem;
-                if (activeReferenceModel === 'qwen-2512') {
+                if (activeReferenceModel === 'midjourney') {
+                    // Characters become the omni reference, environments/products image prompts, the moodboard a style ref.
+                    const mjRefs: MidjourneyReference[] = [];
+                    activeRefs.forEach((ref) => {
+                        if (!ref.imageUrl) return;
+                        mjRefs.push({ url: ref.imageUrl, name: `${ref.name}.png`, role: ref.type === 'character' ? 'character' : 'image' });
+                    });
+                    const styleSource = (storyBible.moodboard || []).find((item) => item.url)?.url;
+                    if (styleSource) mjRefs.push({ url: styleSource, name: 'moodboard.png', role: 'style' });
+                    if (compositionData) mjRefs.unshift({ url: `data:${compositionData.mimeType};base64,${compositionData.base64}`, name: 'composition.png', role: 'image' });
+                    const images = await generateImagesWithMidjourney(fullPrompt, { aspectRatio: effectiveAspectRatio, references: mjRefs, folderPath: projectPath });
+                    if (!images.length) throw new Error('Midjourney returned no images.');
+                    imageMedia = images[0];
+                } else if (activeReferenceModel === 'qwen-2512') {
                     const baseImage = qwenInputs[0];
                     imageMedia = await generateImageWithQwenImage(qwen2512Prompt, modelAspectRatio, baseImage);
                 } else if (activeReferenceModel === 'qwen-max-fal') {
@@ -15059,7 +15089,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                 ref.imageUrl || undefined
                                                             );
                                                             const finalImage = await finalizeReferenceImage(ref, image, angleUrls);
-                                                            setReferences(prev => prev.map(r => r.id === id ? { ...r, ...applyReferenceVersion(r, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel), isGenerating: false } : r));
+                                                            setReferences(prev => prev.map(r => r.id === id ? { ...r, ...applyReferenceVersion(r, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel, undefined, finalImage.extraVersions), isGenerating: false } : r));
                                                         } catch (e) {
                                                             setReferences(prev => prev.map(r => r.id === id ? { ...r, isGenerating: false } : r));
                                                             handleError(e);

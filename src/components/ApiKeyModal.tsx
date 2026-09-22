@@ -6,6 +6,7 @@ import { DEFAULT_SHORTCUTS, SHORTCUT_DEFINITIONS } from '../utils/shortcuts';
 import { clearCloudAuth, getCloudAuth, getCloudClientId, setCloudClientId, startCloudOAuth } from '../services/cloudAuthService';
 import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } from '../services/googleModelProvider';
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
+import { connectMidjourney, disconnectMidjourney, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 
 type AutosaveSettings = {
     enabled: boolean;
@@ -336,6 +337,27 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     type SettingsSection = 'providers' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
     const [section, setSection] = useState<SettingsSection>('providers');
     const [showAllProviders, setShowAllProviders] = useState(false);
+    const [mjStatus, setMjStatus] = useState<MidjourneyStatus>({ available: isMidjourneyAgentAvailable(), connected: false });
+    const [mjBusy, setMjBusy] = useState<'connect' | 'disconnect' | null>(null);
+    const [mjWindowOpen, setMjWindowOpen] = useState(false);
+    useEffect(() => {
+        if (!isMidjourneyAgentAvailable()) return;
+        let cancelled = false;
+        getMidjourneyStatus().then((next) => { if (!cancelled) setMjStatus(next); });
+        const off = onMidjourneyEvent((event) => {
+            if (event.type === 'status') setMjStatus((prev) => ({ ...prev, available: true, connected: Boolean(event.connected) }));
+            if (event.type === 'window') setMjWindowOpen(Boolean(event.visible));
+        });
+        return () => { cancelled = true; off(); };
+    }, []);
+    const handleMidjourneyConnect = async () => {
+        setMjBusy('connect');
+        try { setMjStatus(await connectMidjourney()); } finally { setMjBusy(null); }
+    };
+    const handleMidjourneyDisconnect = async () => {
+        setMjBusy('disconnect');
+        try { setMjStatus(await disconnectMidjourney()); } finally { setMjBusy(null); }
+    };
 
     type ProviderRow = {
         id: string;
@@ -474,7 +496,33 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                             : `Add ${essentialMissing === 4 ? 'a Gemini or fal.ai key' : 'the remaining recommended keys'} to unlock generation. Keys are stored locally and never sent anywhere but the provider.`}
                                     </p>
                                 </div>
-                                <div className="settings__providers">{visibleProviders.map(renderProvider)}</div>
+                                <div className="settings__providers">
+                                    <div className={`settings-provider ${mjStatus.connected ? 'settings-provider--on' : ''}`}>
+                                        <div className="settings-provider__head">
+                                            <div className="settings-provider__name">
+                                                <span className={`settings-provider__dot ${mjStatus.connected ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                                                <strong>Midjourney · Jeff</strong>
+                                                <span className={`pk-chip ${mjStatus.connected ? 'pk-chip--ok' : ''}`}>{!mjStatus.available ? 'desktop app only' : mjStatus.connected ? 'signed in' : 'not signed in'}</span>
+                                                {mjStatus.busy && <span className="pk-chip pk-chip--accent">working</span>}
+                                            </div>
+                                            <span className="pk-actions">
+                                                {mjStatus.available && mjStatus.connected && (
+                                                    <button type="button" className="edit-text-btn" onClick={async () => setMjWindowOpen((await toggleMidjourneyWindow(!mjWindowOpen)).visible)}>{mjWindowOpen ? 'Hide window' : 'Show window'}</button>
+                                                )}
+                                                {mjStatus.available && (mjStatus.connected ? (
+                                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={handleMidjourneyDisconnect} disabled={mjBusy !== null}>{mjBusy === 'disconnect' ? 'Signing out…' : 'Sign out'}</button>
+                                                ) : (
+                                                    <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={handleMidjourneyConnect} disabled={mjBusy !== null}>{mjBusy === 'connect' ? 'Waiting for sign-in…' : 'Sign in'}</button>
+                                                ))}
+                                            </span>
+                                        </div>
+                                        <p className="pk-hint">
+                                            No API key — Jeff is a background browser that uses your own Midjourney account. Sign in once (Google or Discord) in the window that opens; after that Concept and Storyboard can pick “Midjourney · Jeff” as the image model and everything runs unattended. Automation is against Midjourney’s terms; use at your own risk.
+                                        </p>
+                                        {mjStatus.error && <p className="pk-hint" style={{ color: 'var(--app-danger)' }}>{mjStatus.error}</p>}
+                                    </div>
+                                    {visibleProviders.map(renderProvider)}
+                                </div>
                                 {hiddenCount > 0 && (
                                     <button type="button" className="edit-text-btn edit-text-btn--outline self-start" onClick={() => setShowAllProviders(true)}>Show {hiddenCount} more provider{hiddenCount === 1 ? '' : 's'}</button>
                                 )}
