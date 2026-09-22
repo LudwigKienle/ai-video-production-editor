@@ -1158,6 +1158,19 @@ export type StoryBible = {
   researchSources?: ResearchSourceLink[];
   /** Project template that sets aspect ratio, look and casting defaults everywhere. */
   productionFormat?: import('./data/productionFormats').ProductionFormatId;
+  /** Images that define the look for image generation (Midjourney --sref and friends). */
+  styleReferences?: StyleReference[];
+  /** Midjourney style weight (--sw, 0-1000). Undefined = model default. */
+  styleWeight?: number;
+  /** Midjourney defaults appended to every prompt, e.g. "--v 8.2 --style raw". */
+  midjourneyParams?: string;
+};
+
+export type StyleReference = {
+  id: string;
+  url: string;
+  label?: string;
+  source: 'moodboard' | 'upload' | 'library';
 };
 
 export type ReferenceItem = {
@@ -1184,6 +1197,8 @@ export type ReferenceItem = {
   consistencyLocks?: string[];
   consistencyNotes?: string;
   characterBackground?: 'auto' | 'white' | 'black' | 'green' | 'natural';
+  /** What the base reference wears: neutral base layer for costume-driven humans, the first outfit for creatures, uniforms, armour. */
+  baseReferenceMode?: 'auto' | 'neutral' | 'outfit';
   characterPerspective?: 'auto' | 'close_up' | 'full_body' | 'side' | 'profile_full' | 'back';
   environmentTimeOfDay?: 'auto' | 'day' | 'night' | 'sunset' | 'sunrise';
   environmentCoverageZones?: string[];

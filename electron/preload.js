@@ -46,6 +46,28 @@ contextBridge.exposeInMainWorld('electron', {
     setup: () => ipcRenderer.invoke('audioMastering:setup'),
     process: (payload) => ipcRenderer.invoke('audioMastering:process', payload),
   },
+  localAgents: {
+    list: () => ipcRenderer.invoke('localAgents:list'),
+    prompt: (payload) => ipcRenderer.invoke('localAgents:prompt', payload),
+    cancel: (payload) => ipcRenderer.invoke('localAgents:cancel', payload),
+    stop: (payload) => ipcRenderer.invoke('localAgents:stop', payload),
+    answerPermission: (payload) => ipcRenderer.invoke('localAgents:answerPermission', payload),
+    openLogin: (payload) => ipcRenderer.invoke('localAgents:openLogin', payload),
+    onEvent: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('localAgents:event', handler);
+      return () => ipcRenderer.removeListener('localAgents:event', handler);
+    },
+  },
+  studioTools: {
+    register: (tools) => ipcRenderer.invoke('studioTools:register', tools),
+    onCall: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('studioTools:call', handler);
+      return () => ipcRenderer.removeListener('studioTools:call', handler);
+    },
+    reply: (payload) => ipcRenderer.send('studioTools:result', payload),
+  },
   midjourney: {
     status: (payload) => ipcRenderer.invoke('midjourney:status', payload),
     connect: () => ipcRenderer.invoke('midjourney:connect'),

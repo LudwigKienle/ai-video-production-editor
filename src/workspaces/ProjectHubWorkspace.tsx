@@ -43,6 +43,7 @@ import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
 import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
 import { generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
+import type { StyleReference } from '../types';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -1298,7 +1299,25 @@ const composeReferencePrompt = (reference: ReferenceItem, opts?: { includeCamera
     return [basePrompt, ...extras].filter(Boolean).join('. ');
 };
 
+/**
+ * Neutral base (form-fitting base layer, T-pose) is right for humans whose wardrobe changes per scene.
+ * Creatures, armour, uniforms, mechs and children get their first outfit instead — a neutral base
+ * would be meaningless or inappropriate.
+ */
+const OUTFIT_BASE_HINT_REGEX = /\b(creature|monster|beast|alien|dragon|robot|android|droid|mech|cyborg|animal|dog|cat|wolf|horse|bird|fish|insect|demon|ghost|zombie|skeleton|golem|elemental|spirit|soldier|trooper|knight|samurai|warrior|armou?r|armored|uniform|police|officer|firefighter|astronaut|spacesuit|space suit|pilot|nurse|doctor|surgeon|priest|monk|nun|mascot|costume|superhero|kreatur|monster|tier|soldat|ritter|rüstung|uniform|polizist|astronaut)\b/i;
+const resolveBaseReferenceMode = (reference: ReferenceItem): 'neutral' | 'outfit' => {
+    if (reference.baseReferenceMode && reference.baseReferenceMode !== 'auto') return reference.baseReferenceMode;
+    if (isLikelyChildReference(reference)) return 'outfit';
+    const text = [reference.name, reference.description, reference.prompt, ...(reference.tags || [])].filter(Boolean).join(' ');
+    return OUTFIT_BASE_HINT_REGEX.test(text) ? 'outfit' : 'neutral';
+};
+
 const composeCharacterBaseReferencePrompt = (reference: ReferenceItem, opts?: { includeCamera?: boolean }) => {
+    const mode = resolveBaseReferenceMode(reference);
+    const firstOutfit = reference.outfits?.[0];
+    const outfitLine = firstOutfit
+        ? `wearing their first outfit: ${[firstOutfit.name, firstOutfit.description || firstOutfit.prompt].filter(Boolean).join(' — ')}`
+        : 'wearing their signature outfit exactly as described, complete and consistent';
     const enforcedBase: ReferenceItem = {
         ...reference,
         characterBackground: 'white',
@@ -1310,7 +1329,9 @@ const composeCharacterBaseReferencePrompt = (reference: ReferenceItem, opts?: { 
     return [
         basePrompt,
         'neutral studio setup, seamless white or neutral light gray backdrop',
-        'plain solid-color swimsuit as base wardrobe, no outerwear, no shoes, no accessories',
+        mode === 'outfit'
+            ? outfitLine
+            : 'plain neutral form-fitting base layer (simple solid-color sports underwear or swimsuit), no outerwear, no shoes, no accessories',
         'clean studio reference look, full body visible',
         'straight standing full-body t-pose, arms extended horizontally, neutral expression'
     ].filter(Boolean).join('. ');
@@ -1615,11 +1636,22 @@ const ReferenceCard: React.FC<{
         }
     };
 
+    const hasImage = Boolean(reference.imageUrl);
+    const versionCount = imageVersions.length;
+    const goToVersion = (index: number) => {
+        const next = Math.max(0, Math.min(versionCount - 1, index));
+        onUpdate(reference.id, { selectedVersionIndex: next, imageUrl: imageVersions[next] });
+    };
+    const resolvedBaseMode = reference.type === 'character' ? resolveBaseReferenceMode(reference) : null;
+    const closeMenu = (event: React.MouseEvent) => {
+        (event.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open');
+    };
+
     return (
-        <div className="relative group bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-lg transition-all hover:border-indigo-500/50 hover:shadow-indigo-500/10 flex flex-col h-full">
+        <div className="ref-card">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
 
-            <div className="relative bg-gray-900 flex-shrink-0" style={{ aspectRatio: aspect || '3 / 4' }}>
+            <div className="ref-card__media" style={{ aspectRatio: aspect || '3 / 4' }}>
                 {hasMultiAngle ? (
                     <div className="grid grid-cols-2 grid-rows-2 w-full h-full">
                         {visibleAngles.map((url, index) => {
@@ -1634,207 +1666,133 @@ const ReferenceCard: React.FC<{
                                     title="Set as primary angle"
                                 >
                                     <img src={url} className="w-full h-full object-cover" alt={`${reference.name} angle ${index + 1}`} />
-                                    {isSelected && (
-                                        <div className="absolute inset-0 ring-2 ring-indigo-400 ring-inset"></div>
-                                    )}
+                                    {isSelected && <div className="absolute inset-0 ring-2 ring-inset" style={{ boxShadow: 'inset 0 0 0 2px var(--app-accent)' }}></div>}
                                     {index === visibleAngles.length - 1 && extraAngles > 0 && (
-                                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-xs font-bold">
-                                            +{extraAngles}
-                                        </div>
+                                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-xs font-bold">+{extraAngles}</div>
                                     )}
                                 </button>
                             );
                         })}
                     </div>
-                ) : reference.imageUrl ? (
+                ) : hasImage ? (
                     <img
-                        src={reference.imageUrl}
-                        className="w-full h-full object-cover"
+                        src={reference.imageUrl!}
+                        className="w-full h-full object-cover cursor-zoom-in"
                         alt={reference.name}
                         onDoubleClick={() => onViewFull(reference.imageUrl!, reference.name)}
+                        title="Double-click for full view"
                     />
                 ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 p-4 text-center">
+                    <div className="ref-card__empty">
                         {getIcon()}
-                        <span className="text-xs font-medium uppercase tracking-wider opacity-50">{reference.type}</span>
-                        <button
-                            onClick={() => onRegenerateImage(reference.id)}
-                            className="mt-4 bg-gray-700 hover:bg-indigo-600 text-white text-xs font-bold py-2 px-4 rounded-full flex items-center gap-2 transition-all"
-                        >
-                            <MagicWandIcon className="w-3 h-3" />
-                            Generate
-                        </button>
+                        <span className="pk-label">{reference.type}</span>
                     </div>
                 )}
 
                 {reference.isGenerating && (
-                    <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center backdrop-blur-sm z-10">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-400 mb-2"></div>
-                        <span className="text-xs text-indigo-300 animate-pulse">Generating...</span>
+                    <div className="ref-card__busy">
+                        <span className="pk-spinner" />
+                        <span>Generating…</span>
                     </div>
                 )}
 
-                {hasMultiAngle && (
-                    <div className="absolute top-2 left-2 bg-black/70 text-[10px] uppercase tracking-wider text-gray-200 px-2 py-1 rounded">
-                        Multi-Angle
-                    </div>
-                )}
-                {reference.generatedBy && (
-                    <div className="absolute bottom-2 left-2 bg-black/70 text-[10px] text-gray-200 px-2 py-1 rounded">
-                        {reference.generatedBy}
-                    </div>
-                )}
-                {imageVersions.length > 1 && (
-                    <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/60 backdrop-blur-md rounded-md border border-white/10 p-0.5">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                const nextIndex = Math.max(0, selectedVersionIndex - 1);
-                                onUpdate(reference.id, {
-                                    selectedVersionIndex: nextIndex,
-                                    imageUrl: imageVersions[nextIndex],
-                                });
-                            }}
-                            disabled={selectedVersionIndex === 0}
-                            className="p-1 text-gray-300 hover:text-white disabled:opacity-30"
-                        >
-                            <ChevronLeftIcon className="w-3 h-3" />
-                        </button>
-                        <span className="text-[9px] font-bold text-gray-200 min-w-[20px] text-center">
-                            v{selectedVersionIndex + 1}
-                        </span>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                const nextIndex = Math.min(imageVersions.length - 1, selectedVersionIndex + 1);
-                                onUpdate(reference.id, {
-                                    selectedVersionIndex: nextIndex,
-                                    imageUrl: imageVersions[nextIndex],
-                                });
-                            }}
-                            disabled={selectedVersionIndex >= imageVersions.length - 1}
-                            className="p-1 text-gray-300 hover:text-white disabled:opacity-30"
-                        >
-                            <ChevronRightIcon className="w-3 h-3" />
-                        </button>
-                    </div>
-                )}
+                {hasMultiAngle && <span className="fx-tile__badge fx-tile__badge--left">Multi-angle</span>}
+                {reference.generatedBy && !hasMultiAngle && <span className="fx-tile__badge fx-tile__badge--left" title="Generated with">{reference.generatedBy}</span>}
 
-                <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/80 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-200 flex flex-col p-3 z-20 pointer-events-none">
-                    <div className="flex justify-end">
-                        <button onClick={() => onRemove(reference.id)} className="p-1.5 bg-red-500/20 hover:bg-red-500 text-red-300 hover:text-white rounded-full transition-colors pointer-events-auto" title="Remove">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                        </button>
+                {versionCount > 1 && (
+                    <div className="ref-card__versions" onDoubleClick={(event) => event.stopPropagation()}>
+                        <button type="button" onClick={() => goToVersion(selectedVersionIndex - 1)} disabled={selectedVersionIndex === 0} aria-label="Previous version">‹</button>
+                        <span className="pk-mono">{selectedVersionIndex + 1}/{versionCount}</span>
+                        <button type="button" onClick={() => goToVersion(selectedVersionIndex + 1)} disabled={selectedVersionIndex >= versionCount - 1} aria-label="Next version">›</button>
                     </div>
-                    <div className="mt-auto space-y-2">
-                        <div className="grid grid-cols-3 gap-2">
-                            <button onClick={() => onGenerateDetails(reference.id)} className="bg-gray-700 hover:bg-indigo-600 text-white text-xs py-2 rounded font-medium transition-colors pointer-events-auto">
-                                Auto-Prompt
-                            </button>
-                            <button onClick={handleUploadClick} className="bg-gray-700 hover:bg-indigo-600 text-white text-xs py-2 rounded font-medium transition-colors pointer-events-auto">
-                                Upload
-                            </button>
-                            <button onClick={() => onImportFromLibrary(reference.id)} className="bg-gray-700 hover:bg-indigo-600 text-white text-xs py-2 rounded font-medium transition-colors pointer-events-auto">
-                                Library
-                            </button>
-                        </div>
-                        {reference.imageUrl && (
-                            <div className="space-y-2">
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button onClick={() => onViewFull(reference.imageUrl!, reference.name)} className="bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded font-bold pointer-events-auto">
-                                        Full View
-                                    </button>
-                                    <a
-                                        href={reference.imageUrl}
-                                        download
-                                        className="bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded font-bold pointer-events-auto flex items-center justify-center gap-2"
-                                    >
-                                        <DownloadIcon className="w-3 h-3" />
-                                        Download
-                                    </a>
-                                    <button onClick={() => onRegenerateImage(reference.id)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2 rounded font-bold flex items-center justify-center gap-2 pointer-events-auto">
-                                        <MagicWandIcon className="w-3 h-3" /> Re-roll
-                                    </button>
-                                </div>
-                                {onRelight && (
-                                    <button
-                                        onClick={() => onRelight(reference.id)}
-                                        className="w-full bg-gray-700 hover:bg-indigo-600 text-white text-xs py-2 rounded font-bold flex items-center justify-center gap-2 pointer-events-auto"
-                                    >
-                                        <SparklesIcon className="w-3 h-3" />
-                                        Relight
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
+                )}
             </div>
 
-            <div className="p-3 bg-gray-800 flex flex-col gap-2 flex-grow">
+            <div className="ref-card__body">
                 <input
                     type="text"
                     value={reference.name}
                     onChange={e => onUpdate(reference.id, { name: e.target.value })}
-                    className="bg-transparent font-bold text-sm w-full text-white focus:outline-none focus:border-b focus:border-indigo-500 placeholder-gray-500"
+                    className="ref-card__name"
                     placeholder="Name"
+                    aria-label="Reference name"
                 />
                 <textarea
                     value={reference.description}
                     onChange={e => onUpdate(reference.id, { description: e.target.value })}
-                    placeholder="Brief description..."
+                    placeholder="Brief description…"
                     rows={2}
-                    className="w-full bg-gray-900/50 text-gray-400 text-xs p-2 rounded border border-gray-700 focus:border-indigo-500 focus:ring-0 resize-none flex-grow"
+                    className="ref-card__desc"
+                    aria-label="Reference description"
                 />
-                {onOpenSheet && (
-                    <button
-                        type="button"
-                        onClick={() => onOpenSheet(reference.id)}
-                        className="w-full text-[11px] font-semibold text-indigo-200 bg-indigo-600/20 border border-indigo-500/40 rounded-lg py-1.5 hover:bg-indigo-600/40"
-                    >
-                        Open Sheet
-                    </button>
-                )}
-                {detailsContent && (
-                    <div className="pt-2 border-t border-gray-700/60 space-y-2">
-                        <button
-                            type="button"
-                            onClick={() => setDetailsOpen(prev => !prev)}
-                            className="w-full flex items-center justify-between text-[11px] font-semibold text-gray-300 bg-gray-900/50 border border-gray-700 rounded-lg px-2.5 py-1.5 hover:border-indigo-500/60 hover:text-white"
-                        >
-                            <span>{detailsLabel || 'Details'}</span>
-                            <span className="text-[10px] text-gray-400">{detailsOpen ? 'Hide' : 'Show'}</span>
-                        </button>
-                        {detailsOpen && (
-                            <div className="space-y-3">
-                                {showAngleStrip && hasMultiAngle && (
-                                    <div className="space-y-1">
-                                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Angle Library</div>
-                                        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-                                            {multiAngleUrls.map((url, index) => {
-                                                const isSelected = url === reference.imageUrl;
-                                                return (
-                                                    <button
-                                                        key={`${reference.id}-angle-strip-${index}`}
-                                                        type="button"
-                                                        onClick={() => onUpdate(reference.id, { imageUrl: url })}
-                                                        className={`w-16 h-16 rounded-md overflow-hidden border ${isSelected ? 'border-indigo-400' : 'border-gray-700'} flex-shrink-0`}
-                                                        title="Set as primary angle"
-                                                    >
-                                                        <img src={url} alt={`${reference.name} angle ${index + 1}`} className="w-full h-full object-cover" />
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-                                {detailsContent}
-                            </div>
-                        )}
+
+                {resolvedBaseMode && (
+                    <div className="ref-card__base" title="What the base reference wears: a neutral base layer in T-pose, or the first outfit. Auto picks Outfit for creatures, uniforms, armour and children.">
+                        <span className="pk-label">Base wardrobe{(reference.baseReferenceMode || 'auto') === 'auto' ? ` · auto → ${resolvedBaseMode}` : ''}</span>
+                        <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                            {([['auto', 'Auto'], ['neutral', 'Neutral'], ['outfit', 'Outfit']] as const).map(([mode, label]) => (
+                                <button key={mode} type="button" aria-pressed={(reference.baseReferenceMode || 'auto') === mode} onClick={() => onUpdate(reference.id, { baseReferenceMode: mode })}>{label}</button>
+                            ))}
+                        </div>
                     </div>
                 )}
+
+                <div className="ref-card__actions">
+                    <button type="button" className="edit-text-btn edit-text-btn--primary grow" onClick={() => onRegenerateImage(reference.id)} disabled={reference.isGenerating}>
+                        <MagicWandIcon className="w-3.5 h-3.5" />
+                        {hasImage ? 'Generate again' : 'Generate'}
+                    </button>
+                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={handleUploadClick} title="Upload an image">Upload</button>
+                    <details className="ref-card__menu">
+                        <summary className="edit-icon-btn" aria-label="More actions" title="More">⋯</summary>
+                        <div className="app-menu ref-card__menu-panel" role="menu">
+                            <div className="app-menu__section app-menu__section--list">
+                                <button type="button" className="app-menu-item" onClick={(e) => { closeMenu(e); onGenerateDetails(reference.id); }}>Write prompt with AI</button>
+                                <button type="button" className="app-menu-item" onClick={(e) => { closeMenu(e); onImportFromLibrary(reference.id); }}>Pick from library…</button>
+                                {hasImage && <button type="button" className="app-menu-item" onClick={(e) => { closeMenu(e); onViewFull(reference.imageUrl!, reference.name); }}>Full view</button>}
+                                {hasImage && <a className="app-menu-item" href={reference.imageUrl!} download onClick={closeMenu}>Download</a>}
+                                {hasImage && onRelight && <button type="button" className="app-menu-item" onClick={(e) => { closeMenu(e); onRelight(reference.id); }}>Relight…</button>}
+                                {onOpenSheet && <button type="button" className="app-menu-item" onClick={(e) => { closeMenu(e); onOpenSheet(reference.id); }}>Open sheet</button>}
+                            </div>
+                            <div className="app-menu__section app-menu__section--list">
+                                <button type="button" className="app-menu-item app-menu-item--danger" onClick={(e) => { closeMenu(e); if (window.confirm(`Remove "${reference.name || 'this reference'}"? This cannot be undone.`)) onRemove(reference.id); }}>Remove reference</button>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                {detailsContent && (
+                    <details className="pk-details" open={detailsOpen} onToggle={(event) => setDetailsOpen((event.currentTarget as HTMLDetailsElement).open)}>
+                        <summary>{detailsLabel || 'Details'}</summary>
+                        <div className="pk-details__body">
+                            {showAngleStrip && hasMultiAngle && (
+                                <div className="space-y-1">
+                                    <div className="pk-label">Angle library</div>
+                                    <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                                        {multiAngleUrls.map((url, index) => {
+                                            const isSelected = url === reference.imageUrl;
+                                            return (
+                                                <button
+                                                    key={`${reference.id}-angle-strip-${index}`}
+                                                    type="button"
+                                                    onClick={() => onUpdate(reference.id, { imageUrl: url })}
+                                                    className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0"
+                                                    style={{ boxShadow: isSelected ? '0 0 0 2px var(--app-accent)' : 'inset 0 0 0 1px var(--edit-hairline-strong)' }}
+                                                    title="Set as primary angle"
+                                                >
+                                                    <img src={url} alt={`${reference.name} angle ${index + 1}`} className="w-full h-full object-cover" />
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            {detailsContent}
+                        </div>
+                    </details>
+                )}
                 {showCameraControls && !detailsContent && (
-                    <div className="pt-2 border-t border-gray-700/60">
+                    <div className="pt-2" style={{ borderTop: '1px solid var(--edit-hairline)' }}>
                         <CameraAngleControl
                             yaw={reference.cameraYaw}
                             pitch={reference.cameraPitch}
@@ -1843,7 +1801,7 @@ const ReferenceCard: React.FC<{
                     </div>
                 )}
                 {extraContent && (
-                    <div className="pt-2 border-t border-gray-700/60">
+                    <div className="pt-2" style={{ borderTop: '1px solid var(--edit-hairline)' }}>
                         {extraContent}
                     </div>
                 )}
@@ -3669,6 +3627,119 @@ const ShotTile: React.FC<{
     );
 };
 
+const DEFAULT_MIDJOURNEY_PARAMS = '--v 8.2 --style raw';
+
+/** Picks the images that define the look: project moodboard, library images, or fresh uploads. Feeds Midjourney --sref. */
+const StyleReferencePicker: React.FC<{
+    open: boolean;
+    onClose: () => void;
+    storyBible: StoryBible;
+    setStoryBible: React.Dispatch<React.SetStateAction<StoryBible>>;
+    libraryAssets: LibraryAsset[];
+}> = ({ open, onClose, storyBible, setStoryBible, libraryAssets }) => {
+    const uploadRef = useRef<HTMLInputElement>(null);
+    const [tab, setTab] = useState<'moodboard' | 'library' | 'uploads'>('moodboard');
+    if (!open) return null;
+    const selected = storyBible.styleReferences || [];
+    const selectedIds = new Set(selected.map((ref) => ref.id));
+    const categories = storyBible.categorizedMoodboard?.categories || [];
+    const categoryLabel = (id: string) => categories.find((c) => c.id === id)?.label || id.replace(/_/g, ' ');
+    const moodboardEntries: Array<{ id: string; url: string; label: string; group: string }> = [
+        ...(storyBible.categorizedMoodboard?.items || []).filter((item) => item.url && item.kind !== 'text' && item.kind !== 'note').map((item) => ({ id: `mb-${item.id}`, url: item.url!, label: item.label || '', group: categoryLabel(item.categoryId) })),
+        ...(storyBible.moodboard || []).filter((item) => item.url).map((item) => ({ id: `mb-${item.id}`, url: item.url, label: item.label || '', group: 'Moodboard' })),
+    ];
+    const seen = new Set<string>();
+    const uniqueMoodboard = moodboardEntries.filter((e) => (seen.has(e.url) ? false : (seen.add(e.url), true)));
+    const groups = Array.from(new Set(uniqueMoodboard.map((e) => e.group)));
+    const libraryImages = libraryAssets.filter((asset) => asset.url && (/\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(asset.url) || asset.url.startsWith('data:image/')));
+    const uploads = selected.filter((ref) => ref.source === 'upload');
+    const toggle = (ref: StyleReference) => {
+        setStoryBible((prev) => {
+            const list = prev.styleReferences || [];
+            const exists = list.some((entry) => entry.id === ref.id);
+            return { ...prev, styleReferences: exists ? list.filter((entry) => entry.id !== ref.id) : [...list, ref] };
+        });
+    };
+    const handleUpload = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const next: StyleReference[] = [];
+        for (const file of Array.from(files).slice(0, 8)) {
+            const base64 = await fileToBase64(file);
+            next.push({ id: `up-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, url: `data:${file.type || 'image/png'};base64,${base64}`, label: file.name, source: 'upload' });
+        }
+        setStoryBible((prev) => ({ ...prev, styleReferences: [...(prev.styleReferences || []), ...next] }));
+        setTab('uploads');
+    };
+    const tile = (ref: StyleReference) => {
+        const active = selectedIds.has(ref.id);
+        return (
+            <button key={ref.id} type="button" className={`style-pick__tile ${active ? 'style-pick__tile--on' : ''}`} onClick={() => toggle(ref)} title={ref.label || ref.source} aria-pressed={active}>
+                <img src={ref.url} alt="" draggable={false} />
+                {active && <span className="style-pick__check">✓</span>}
+            </button>
+        );
+    };
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="style-pick-title" onClick={onClose}>
+            <div className="style-pick" onClick={(event) => event.stopPropagation()}>
+                <header className="style-pick__head">
+                    <div>
+                        <h3 id="style-pick-title">Style references</h3>
+                        <p className="pk-hint">The look every generated image should follow. Midjourney uses them as <code className="pk-mono">--sref</code>; up to five are sent, in this order.</p>
+                    </div>
+                    <button type="button" className="edit-text-btn" onClick={onClose}>Done</button>
+                </header>
+                <div className="style-pick__selected">
+                    {selected.length === 0 ? <span className="pk-hint">Nothing selected — the project's first moodboard image is used as a fallback.</span> : selected.map((ref, index) => (
+                        <span key={ref.id} className="style-pick__chip" title={ref.label || ref.source}>
+                            <img src={ref.url} alt="" />
+                            <span className="pk-mono">{index + 1}</span>
+                            <button type="button" aria-label="Remove" onClick={() => toggle(ref)}>×</button>
+                        </span>
+                    ))}
+                </div>
+                <div className="style-pick__controls">
+                    <label className="pk-field" style={{ flex: 1 }}>
+                        <span>Style weight · {storyBible.styleWeight ?? 100}</span>
+                        <input type="range" min={0} max={1000} step={10} value={storyBible.styleWeight ?? 100} onChange={(event) => setStoryBible((prev) => ({ ...prev, styleWeight: Number(event.target.value) }))} />
+                    </label>
+                    <label className="pk-field" style={{ flex: 1 }}>
+                        <span>Midjourney defaults</span>
+                        <input type="text" value={storyBible.midjourneyParams ?? DEFAULT_MIDJOURNEY_PARAMS} onChange={(event) => setStoryBible((prev) => ({ ...prev, midjourneyParams: event.target.value }))} placeholder={DEFAULT_MIDJOURNEY_PARAMS} spellCheck={false} />
+                    </label>
+                </div>
+                <div className="fx-filters" role="tablist">
+                    {([['moodboard', `Moodboard · ${uniqueMoodboard.length}`], ['library', `Library · ${libraryImages.length}`], ['uploads', `Uploads · ${uploads.length}`]] as const).map(([id, label]) => (
+                        <button key={id} type="button" role="tab" aria-selected={tab === id} className={`fx-filters__item ${tab === id ? 'fx-filters__item--active' : ''}`} onClick={() => setTab(id)}>{label}</button>
+                    ))}
+                </div>
+                <div className="style-pick__scroll">
+                    {tab === 'moodboard' && (uniqueMoodboard.length === 0 ? (
+                        <div className="pk-empty"><strong>No moodboard images yet</strong><span>Add images in the Moodboard workspace, or upload style references here.</span></div>
+                    ) : groups.map((group) => (
+                        <section key={group} className="fx-section">
+                            <header className="fx-section__title">{group}</header>
+                            <div className="style-pick__grid">{uniqueMoodboard.filter((e) => e.group === group).map((e) => tile({ id: e.id, url: e.url, label: e.label, source: 'moodboard' }))}</div>
+                        </section>
+                    )))}
+                    {tab === 'library' && (libraryImages.length === 0 ? (
+                        <div className="pk-empty"><strong>No library images</strong><span>Images from your other projects show up here once a project folder is set.</span></div>
+                    ) : (
+                        <div className="style-pick__grid">{libraryImages.map((asset) => tile({ id: `lib-${asset.id}`, url: asset.url!, label: `${asset.name} · ${asset.projectName}`, source: 'library' }))}</div>
+                    ))}
+                    {tab === 'uploads' && (
+                        <div className="pk-stack">
+                            <input ref={uploadRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ''; }} />
+                            <button type="button" className="edit-text-btn edit-text-btn--outline self-start" onClick={() => uploadRef.current?.click()}>Upload images…</button>
+                            {uploads.length > 0 && <div className="style-pick__grid">{uploads.map(tile)}</div>}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     storyBible,
     setStoryBible,
@@ -3792,6 +3863,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     });
     const lastAppliedRequestedPhaseRef = useRef<ProductionPhase | null>(null);
     const [storyboardFocusShot, setStoryboardFocusShot] = useState<number | null>(null);
+    const [styleRefsOpen, setStyleRefsOpen] = useState(false);
     const [filmingFocusShot, setFilmingFocusShot] = useState<number | null>(null);
     const [conceptEntityTab, setConceptEntityTab] = useState<ConceptEntityTab>(() => storedUiPrefs.conceptEntityTab || 'characters');
     const [conceptCharacterSubtab, setConceptCharacterSubtab] = useState<ConceptCharacterSubtab>(() => storedUiPrefs.conceptCharacterSubtab || 'base_ref');
@@ -4430,6 +4502,22 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         && storyboardVisibleShots.length === 0;
     const selectedLensPreset = LENS_PRESETS.find(preset => preset.id === lensPresetId);
     const isMultiAngleModel = referenceImageModel === 'qwen-multiangle' || referenceImageModel === 'qwen-multiangle-fal';
+    const styleReferences = storyBible.styleReferences || [];
+    const styleRefsButton = (
+        <button type="button" className="style-refs-btn" onClick={() => setStyleRefsOpen(true)} title="Style references for image generation (Midjourney --sref)">
+            <span className="style-refs-btn__thumbs">
+                {styleReferences.slice(0, 4).map((ref) => <img key={ref.id} src={ref.url} alt="" />)}
+                {styleReferences.length === 0 && <span className="style-refs-btn__empty">+</span>}
+            </span>
+            <span>Style{styleReferences.length ? ` · ${styleReferences.length}` : ''}</span>
+        </button>
+    );
+    const midjourneyStyleRefs = (): MidjourneyReference[] => {
+        const picked = styleReferences.map((ref) => ({ url: ref.url, name: `${ref.label || ref.source}.png`, role: 'style' as const }));
+        if (picked.length > 0) return picked;
+        const fallback = (storyBible.categorizedMoodboard?.items || []).find((item) => item.url)?.url || (storyBible.moodboard || []).find((item) => item.url)?.url;
+        return fallback ? [{ url: fallback, name: 'moodboard.png', role: 'style' }] : [];
+    };
     const useFalMultiAngle = referenceImageModel === 'qwen-multiangle-fal';
     const referenceModelLabel = REFERENCE_MODEL_LABELS[referenceImageModel] || referenceImageModel;
     const isReferenceModelMultiAngleMode = useCallback((model: ReferenceImageModel) => (
@@ -6453,8 +6541,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             : undefined;
         let image: MediaItem;
         if (selectedReferenceModel === 'midjourney') {
-            const mjRefs: MidjourneyReference[] = baseImageUrl ? [{ url: baseImageUrl, name: 'base.png', role: 'character' }] : [];
-            const images = await generateImagesWithMidjourney(prompt, { aspectRatio, references: mjRefs, folderPath: projectPath });
+            // Concept renders are fresh takes: only the style references go along, never the previous iteration.
+            const mjRefs: MidjourneyReference[] = midjourneyStyleRefs();
+            const images = await generateImagesWithMidjourney(prompt, { aspectRatio, references: mjRefs, folderPath: projectPath, styleWeight: storyBible.styleWeight, defaultParams: storyBible.midjourneyParams });
             if (!images.length) throw new Error('Midjourney returned no images.');
             image = images[0];
         } else if (selectedReferenceModel === 'imagen') {
@@ -10419,10 +10508,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         if (!ref.imageUrl) return;
                         mjRefs.push({ url: ref.imageUrl, name: `${ref.name}.png`, role: ref.type === 'character' ? 'character' : 'image' });
                     });
-                    const styleSource = (storyBible.moodboard || []).find((item) => item.url)?.url;
-                    if (styleSource) mjRefs.push({ url: styleSource, name: 'moodboard.png', role: 'style' });
+                    mjRefs.push(...midjourneyStyleRefs());
                     if (compositionData) mjRefs.unshift({ url: `data:${compositionData.mimeType};base64,${compositionData.base64}`, name: 'composition.png', role: 'image' });
-                    const images = await generateImagesWithMidjourney(fullPrompt, { aspectRatio: effectiveAspectRatio, references: mjRefs, folderPath: projectPath });
+                    const images = await generateImagesWithMidjourney(fullPrompt, { aspectRatio: effectiveAspectRatio, references: mjRefs, folderPath: projectPath, styleWeight: storyBible.styleWeight, defaultParams: storyBible.midjourneyParams });
                     if (!images.length) throw new Error('Midjourney returned no images.');
                     imageMedia = images[0];
                 } else if (activeReferenceModel === 'qwen-2512') {
@@ -12801,6 +12889,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         <div className={`project-hub h-full flex flex-col ${teamMode ? 'project-hub--team' : ''}`}>
             {/* Main Workspace Area */}
             <div className="flex-grow overflow-hidden relative">
+                <StyleReferencePicker open={styleRefsOpen} onClose={() => setStyleRefsOpen(false)} storyBible={storyBible} setStoryBible={setStoryBible} libraryAssets={libraryAssets} />
                 {isLoading && (
                     <div className="project-hub__loading" role="status" aria-live="polite">
                         <span className="pk-spinner" />
@@ -14659,6 +14748,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     </div>
                                     <div className="phase-bar__tools">
                                         <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
+                                        {styleRefsButton}
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
                                             <span className="text-xs font-bold text-gray-400 px-2">Model:</span>
                                             <div className="relative z-10 w-full min-w-[220px]">
@@ -15060,7 +15150,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 ${conceptCharacterSubtab === 'outfits' ? 'hidden' : ''}`}>
                                             {references.filter(r => r.type === 'character').map(ref => (
                                                 <ReferenceCard
-                                                    aspect={isPortraitAspect(referenceAspectRatio) ? '3 / 4' : aspectRatioToCss(referenceAspectRatio)}
+                                                    aspect="3 / 4"
                                                     key={ref.id}
                                                     reference={ref}
                                                     onUpdate={(id, u) => setReferences(prev => prev.map(r => r.id === id ? { ...r, ...u } : r))}
@@ -16125,6 +16215,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     </div>
                                     <div className="phase-bar__tools">
                                         <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
+                                        {styleRefsButton}
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 mr-2">
                                             {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
                                                 <select

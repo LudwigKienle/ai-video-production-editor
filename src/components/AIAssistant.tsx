@@ -4,6 +4,21 @@ import { runChat, analyzeImage } from '../services/geminiService';
 import { MagicWandIcon, UploadIcon } from './icons';
 import { fileToBase64 } from '../utils/helpers';
 import { FunctionDeclaration } from '@google/genai';
+import {
+  answerLocalAgentPermission,
+  cancelLocalAgent,
+  isLocalAgentsAvailable,
+  listLocalAgents,
+  onLocalAgentEvent,
+  promptLocalAgent,
+  registerStudioTools,
+  type LocalAgentEvent,
+  type LocalAgentId,
+  type LocalAgentInfo,
+} from '../services/localAgentsService';
+
+type AgentChoice = 'gemini' | LocalAgentId;
+const AGENT_CHOICE_KEY = 'assistant_agent_choice_v1';
 
 interface AIAssistantProps {
   apiKeyReady: boolean;
@@ -182,6 +197,101 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecu
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<AssistantMode>('chat');
   const [isLoading, setIsLoading] = useState(false);
+  const [agentChoice, setAgentChoice] = useState<AgentChoice>(() => {
+    try { const raw = localStorage.getItem(AGENT_CHOICE_KEY); return raw === 'claude-code' || raw === 'codex' ? raw : 'gemini'; } catch { return 'gemini'; }
+  });
+  const [localAgents, setLocalAgents] = useState<LocalAgentInfo[]>([]);
+  const [pendingPermission, setPendingPermission] = useState<Extract<LocalAgentEvent, { type: 'permission' }> | null>(null);
+  const [agentActivity, setAgentActivity] = useState<string | null>(null);
+  const streamingIdRef = useRef<string | null>(null);
+  const toolLinesRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => { try { localStorage.setItem(AGENT_CHOICE_KEY, agentChoice); } catch { /* ignore */ } }, [agentChoice]);
+
+  // Offer the assistant's tools to local agents through the studio MCP server.
+  useEffect(() => {
+    if (!isLocalAgentsAvailable()) return;
+    listLocalAgents().then(setLocalAgents);
+    return registerStudioTools(tools, toolExecutor);
+  }, [tools, toolExecutor]);
+
+  // Stream local-agent output into the chat as it arrives.
+  useEffect(() => {
+    if (!isLocalAgentsAvailable()) return;
+    const appendToStream = (text: string) => {
+      setMessages((prev) => {
+        const id = streamingIdRef.current;
+        const index = id ? prev.findIndex((m) => m.id === id) : -1;
+        if (index < 0) {
+          const message = buildMessage('model', text);
+          streamingIdRef.current = message.id || null;
+          return [...prev, message];
+        }
+        const next = [...prev];
+        next[index] = { ...next[index], text: next[index].text + text };
+        return next;
+      });
+    };
+    const rewriteToolLine = (toolCallId: string, line: string) => {
+      const previous = toolLinesRef.current.get(toolCallId);
+      toolLinesRef.current.set(toolCallId, line);
+      setMessages((prev) => {
+        const id = streamingIdRef.current;
+        const index = id ? prev.findIndex((m) => m.id === id) : -1;
+        if (index < 0) return prev;
+        const next = [...prev];
+        const text = next[index].text;
+        next[index] = { ...next[index], text: previous && text.includes(previous) ? text.replace(previous, line) : `${text}${text.endsWith('\n') || text.length === 0 ? '' : '\n'}${line}\n` };
+        return next;
+      });
+    };
+    return onLocalAgentEvent((event) => {
+      if (event.agent !== agentChoice) return;
+      if (event.type === 'update') {
+        const update = event.update as any;
+        if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') appendToStream(update.content.text);
+        else if (update.sessionUpdate === 'agent_thought_chunk') setAgentActivity('Thinking…');
+        else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+          const status = update.status === 'completed' ? '✓' : update.status === 'failed' ? '✗' : '▸';
+          const title = update.title || update.kind || 'tool';
+          rewriteToolLine(update.toolCallId, `${status} ${title}`);
+          setAgentActivity(update.status === 'completed' || update.status === 'failed' ? null : `Running ${title}`);
+        }
+      } else if (event.type === 'permission') {
+        setPendingPermission(event);
+      } else if (event.type === 'turn') {
+        if (event.phase === 'start') { streamingIdRef.current = null; toolLinesRef.current.clear(); setAgentActivity('Starting…'); }
+        else { setAgentActivity(null); setIsLoading(false); streamingIdRef.current = null; }
+        if (event.phase === 'error' && event.error) appendToStream(`\n⚠️ ${event.error}`);
+      } else if (event.type === 'exit') {
+        setAgentActivity(null); setIsLoading(false);
+        listLocalAgents().then(setLocalAgents);
+      }
+    });
+  }, [agentChoice]);
+
+  const activeLocalAgent = agentChoice === 'gemini' ? null : localAgents.find((a) => a.id === agentChoice) || null;
+  const agentLabel = agentChoice === 'gemini' ? 'Gemini' : activeLocalAgent?.label || agentChoice;
+
+  const handleLocalAgentTurn = async (text: string) => {
+    if (!activeLocalAgent?.installed) {
+      appendAssistantMessage(`${agentLabel} is not installed on this machine. ${activeLocalAgent?.loginHint || ''}`.trim());
+      return;
+    }
+    setMessages((prev) => [...prev, buildMessage('user', text)]);
+    onUserTurnStart?.(text);
+    setInput('');
+    setIsLoading(true);
+    setAgentActivity('Starting…');
+    try {
+      await promptLocalAgent({ agent: agentChoice as LocalAgentId, text: context ? `${text}\n\n<studio_context>\n${context}\n</studio_context>` : text, permissionPolicy: 'ask' });
+    } catch (error) {
+      appendAssistantMessage(`⚠️ ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsLoading(false);
+      setAgentActivity(null);
+    }
+  };
   const [image, setImage] = useState<{ file: File; url: string } | null>(null);
   const [coachEnabled, setCoachEnabled] = useState(true);
   const [walkthroughStep, setWalkthroughStep] = useState(0);
@@ -430,6 +540,11 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecu
       return;
     }
 
+    if (agentChoice !== 'gemini') {
+      await handleLocalAgentTurn(userMessageText);
+      return;
+    }
+
     if (!apiKeyReady) {
       alert('Please select an API key first.');
       return;
@@ -503,9 +618,18 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecu
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
       <header className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <MagicWandIcon className="w-6 h-6 text-indigo-400" />
-          <h2 className="text-xl font-bold">AI Assistant</h2>
+        <div className="flex items-center gap-3 min-w-0">
+          <MagicWandIcon className="w-6 h-6 text-indigo-400 flex-shrink-0" />
+          <h2 className="text-xl font-bold">Assistant</h2>
+          {localAgents.length > 0 && (
+            <div className="edit-seg" role="tablist" aria-label="Agent">
+              {([{ id: 'gemini' as AgentChoice, label: 'Gemini', ok: true }, ...localAgents.map((a) => ({ id: a.id as AgentChoice, label: a.label, ok: a.installed && a.adapterAvailable }))]).map((entry) => (
+                <button key={entry.id} type="button" role="tab" aria-selected={agentChoice === entry.id} className={`edit-seg__item ${agentChoice === entry.id ? 'edit-seg__item--active' : ''}`} onClick={() => setAgentChoice(entry.id)} disabled={!entry.ok} title={entry.ok ? `Use ${entry.label}` : `${entry.label} is not installed`}>
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -696,7 +820,25 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecu
             </div>
           );
         })}
-        {isLoading && <div className="text-center text-gray-400">Assistant is thinking...</div>}
+        {pendingPermission && (
+          <div className="pk-card pk-card--accent mb-3">
+            <div className="pk-card__head"><span className="pk-card__title">{agentLabel} asks for permission</span></div>
+            <p className="pk-body">{pendingPermission.toolCall?.title || pendingPermission.toolCall?.kind || 'Run a tool'}</p>
+            <div className="pk-actions">
+              {pendingPermission.options.map((option) => (
+                <button key={option.optionId} type="button" className={`edit-text-btn ${option.kind.startsWith('allow') ? 'edit-text-btn--primary' : 'edit-text-btn--outline'}`} onClick={() => { void answerLocalAgentPermission(pendingPermission.agent, pendingPermission.requestId, option.optionId); setPendingPermission(null); }}>
+                  {option.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {isLoading && (
+          <div className="text-center text-gray-400 flex items-center justify-center gap-2">
+            <span>{agentActivity || `${agentLabel} is thinking…`}</span>
+            {agentChoice !== 'gemini' && <button type="button" className="edit-text-btn" onClick={() => { void cancelLocalAgent(agentChoice as LocalAgentId); }}>Stop</button>}
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 

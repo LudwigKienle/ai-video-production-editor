@@ -28,6 +28,7 @@ const {
 } = require('./surface-map-runtime');
 const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
+const localAgents = require('./local-agents');
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
@@ -562,6 +563,14 @@ ipcMain.handle('corridorKey:process', async (_event, payload) => {
   return runCorridorKeyProcess(payload);
 });
 
+// Local coding agents over ACP (see local-agents.js); the editor's tools reach them through studio-mcp-server.js
+ipcMain.handle('localAgents:list', async () => localAgents.list());
+ipcMain.handle('localAgents:prompt', async (_event, payload) => localAgents.prompt(payload));
+ipcMain.handle('localAgents:cancel', async (_event, payload) => localAgents.cancel(payload));
+ipcMain.handle('localAgents:stop', async (_event, payload) => localAgents.stop(payload));
+ipcMain.handle('localAgents:answerPermission', async (_event, payload) => localAgents.answerPermission(payload));
+ipcMain.handle('localAgents:openLogin', async (_event, payload) => localAgents.openLogin(payload));
+
 // Jeff: the Midjourney browser agent (see midjourney-agent.js)
 ipcMain.handle('midjourney:status', async (_event, payload) => midjourneyAgent.status(payload || {}));
 ipcMain.handle('midjourney:connect', async () => midjourneyAgent.connect());
@@ -749,6 +758,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuittingForReal = true;
   midjourneyAgent.dispose();
+  localAgents.dispose();
 });
 
 app.on('will-quit', () => {

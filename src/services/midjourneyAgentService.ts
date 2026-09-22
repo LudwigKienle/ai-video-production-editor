@@ -50,6 +50,8 @@ type MidjourneyBridge = {
     refs?: Array<{ base64: string; mimeType: string; name?: string; role: MidjourneyRefRole }>;
     folderPath?: string | null;
     extraParams?: string;
+    styleWeight?: number;
+    defaultParams?: string;
   }) => Promise<{ ok: true; jobId: string; prompt: string; images: Array<{ index: number; url: string; cdnUrl: string; relativePath: string | null }> }>;
   onEvent: (callback: (event: MidjourneyJobEvent) => void) => () => void;
 };
@@ -117,6 +119,10 @@ export const generateImagesWithMidjourney = async (
     references?: MidjourneyReference[];
     folderPath?: string | null;
     extraParams?: string;
+    /** Midjourney --sw (0-1000). */
+    styleWeight?: number;
+    /** Overrides the agent's built-in defaults ("--v 8.2 --style raw"). */
+    defaultParams?: string;
   } = {},
 ): Promise<MediaItem[]> => {
   const bridge = api();
@@ -133,6 +139,8 @@ export const generateImagesWithMidjourney = async (
     refs,
     folderPath: options.folderPath ?? null,
     extraParams: options.extraParams,
+    styleWeight: options.styleWeight,
+    defaultParams: options.defaultParams,
   });
   const stamp = Date.now();
   const versions = result.images.map((image) => image.url);

@@ -305,15 +305,26 @@ const enqueue = (task) => {
   return result;
 };
 
-const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, extraParams }) => {
+// Defaults every prompt gets unless the caller (or the prompt itself) already sets them.
+const DEFAULT_PARAMS = '--v 8.2 --style raw';
+
+const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight, extraParams, defaultParams }) => {
   const parts = [];
   if (imageRefUrls && imageRefUrls.length) parts.push(imageRefUrls.join(' '));
   parts.push(prompt.trim());
   const params = [];
   if (aspectRatio) params.push(`--ar ${aspectRatio.replace(/\s/g, '')}`);
   if (characterRefUrls && characterRefUrls.length) params.push(`--oref ${characterRefUrls[0]}`);
-  if (styleRefUrls && styleRefUrls.length) params.push(`--sref ${styleRefUrls.slice(0, 3).join(' ')}`);
+  if (styleRefUrls && styleRefUrls.length) {
+    params.push(`--sref ${styleRefUrls.slice(0, 5).join(' ')}`);
+    if (Number.isFinite(styleWeight)) params.push(`--sw ${Math.max(0, Math.min(1000, Math.round(styleWeight)))}`);
+  }
   if (extraParams) params.push(extraParams.trim());
+  const everything = `${prompt} ${params.join(' ')}`;
+  for (const token of String(defaultParams ?? DEFAULT_PARAMS).trim().split(/\s+--/).filter(Boolean)) {
+    const flag = token.replace(/^--/, '').split(/\s+/)[0];
+    if (flag && !new RegExp(`--${flag}(\\s|$)`).test(everything)) params.push(`--${token.replace(/^--/, '')}`);
+  }
   return `${parts.join(' ')} ${params.join(' ')}`.replace(/\s+/g, ' ').trim();
 };
 
@@ -340,7 +351,7 @@ const persist = async (folderPath, jobId, index, buffer, mimeType) => {
  * refs: [{ base64, mimeType, name, role: 'character' | 'style' | 'image' }]
  */
 const generate = (payload) => enqueue(async () => {
-  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '' } = payload || {};
+  const { prompt, aspectRatio, refs = [], folderPath = null, extraParams = '', styleWeight, defaultParams } = payload || {};
   if (!prompt || !prompt.trim()) throw new Error('Prompt is empty.');
   const jobLabel = `mj-${Date.now().toString(36)}`;
   emit({ type: 'job', id: jobLabel, phase: 'starting', prompt });
@@ -370,7 +381,7 @@ const generate = (payload) => enqueue(async () => {
 
   // 2. Submit.
   const before = new Set(await run(PAGE_SCRIPTS.jobIds));
-  const fullPrompt = buildPrompt({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, extraParams });
+  const fullPrompt = buildPrompt({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight, extraParams, defaultParams });
   emit({ type: 'job', id: jobLabel, phase: 'submitting', fullPrompt });
   const submitted = await run(PAGE_SCRIPTS.submitPrompt(fullPrompt));
   if (!submitted || !submitted.ok) {

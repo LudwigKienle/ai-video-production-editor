@@ -7,6 +7,7 @@ import { clearCloudAuth, getCloudAuth, getCloudClientId, setCloudClientId, start
 import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } from '../services/googleModelProvider';
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
 import { connectMidjourney, disconnectMidjourney, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
+import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
 
 type AutosaveSettings = {
     enabled: boolean;
@@ -334,12 +335,15 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         onKeySelected();
     };
 
-    type SettingsSection = 'providers' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
+    type SettingsSection = 'providers' | 'agents' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
     const [section, setSection] = useState<SettingsSection>('providers');
     const [showAllProviders, setShowAllProviders] = useState(false);
     const [mjStatus, setMjStatus] = useState<MidjourneyStatus>({ available: isMidjourneyAgentAvailable(), connected: false });
     const [mjBusy, setMjBusy] = useState<'connect' | 'disconnect' | null>(null);
     const [mjWindowOpen, setMjWindowOpen] = useState(false);
+    const [localAgents, setLocalAgents] = useState<LocalAgentInfo[]>([]);
+    const refreshLocalAgents = () => { if (isLocalAgentsAvailable()) listLocalAgents().then(setLocalAgents); };
+    useEffect(() => { refreshLocalAgents(); }, []);
     useEffect(() => {
         if (!isMidjourneyAgentAvailable()) return;
         let cancelled = false;
@@ -459,6 +463,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
     const nav: Array<{ id: SettingsSection; label: string; hint: string; icon: React.FC<{ className?: string }> }> = [
         { id: 'providers', label: 'AI providers', hint: `${connectedCount} of ${providers.length} connected`, icon: SparklesIcon },
+        { id: 'agents', label: 'Local agents', hint: localAgents.some((a) => a.installed) ? localAgents.filter((a) => a.installed).map((a) => a.label).join(', ') : 'Claude Code, Codex', icon: KeyboardIcon },
         { id: 'cloud', label: 'Cloud', hint: dropboxConnected || googleDriveConnected ? 'connected' : 'Dropbox, Google Drive', icon: FolderIcon },
         { id: 'shortcuts', label: 'Shortcuts', hint: 'keyboard', icon: KeyboardIcon },
         { id: 'startup', label: 'Startup', hint: 'workspace, assistant', icon: SettingsIcon },
@@ -529,6 +534,42 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                 {showAllProviders && hiddenCount === 0 && providers.some((row) => !row.essential && !row.value.trim()) && (
                                     <button type="button" className="edit-text-btn self-start" onClick={() => setShowAllProviders(false)}>Show fewer</button>
                                 )}
+                            </div>
+                        )}
+
+                        {section === 'agents' && (
+                            <div className="pk-stack">
+                                <div className="settings__head settings__head--row">
+                                    <div>
+                                        <h3>Local agents</h3>
+                                        <p className="pk-hint">Claude Code and Codex run as agents inside the editor, signed in with their own CLI login — no API key, no token copied. They get the editor's tools and can operate the timeline, the project hub and generation for you.</p>
+                                    </div>
+                                    <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={refreshLocalAgents}>Refresh</button>
+                                </div>
+                                {!isLocalAgentsAvailable() && <div className="pk-alert pk-alert--info">Local agents are available in the desktop app only.</div>}
+                                <div className="settings__providers">
+                                    {localAgents.map((agent) => (
+                                        <div key={agent.id} className={`settings-provider ${agent.installed ? 'settings-provider--on' : ''}`}>
+                                            <div className="settings-provider__head">
+                                                <div className="settings-provider__name">
+                                                    <span className={`settings-provider__dot ${agent.installed ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                                                    <strong>{agent.label}</strong>
+                                                    <span className={`pk-chip ${agent.installed ? 'pk-chip--ok' : 'pk-chip--warn'}`}>{agent.installed ? (agent.version || 'installed') : 'not installed'}</span>
+                                                    {agent.installed && <span className="pk-chip">{agent.login === 'signed-in' ? 'signed in' : agent.login === 'likely' ? 'login found' : 'sign-in unknown'}</span>}
+                                                    {agent.running && <span className="pk-chip pk-chip--accent">running</span>}
+                                                    {!agent.adapterAvailable && <span className="pk-chip pk-chip--warn">adapter missing</span>}
+                                                </div>
+                                                <span className="pk-actions">
+                                                    {agent.installed && <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => { void openLocalAgentLogin(agent.id); }}>Sign in in Terminal</button>}
+                                                    {agent.running && <button type="button" className="edit-text-btn" onClick={() => { void stopLocalAgent(agent.id)?.then(refreshLocalAgents); }}>Stop</button>}
+                                                </span>
+                                            </div>
+                                            <p className="pk-hint">{agent.installed ? `${agent.binary}` : agent.loginHint}</p>
+                                            {agent.installed && agent.login !== 'signed-in' && <p className="pk-hint">{agent.loginHint}</p>}
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="pk-hint">Pick the agent at the top of the Assistant panel. The editor's tools are offered to it as an MCP server; anything else the agent wants to do (edit files, run commands) asks you first.</p>
                             </div>
                         )}
 
