@@ -219,6 +219,13 @@ const PAGE_SCRIPTS = {
       const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
       if (text && rx.test(text)) return { blocked: true, text: text.slice(0, 400) };
     }
+    const rejectRx = /(you submitted|only valid option|invalid|not a valid|unknown parameter|unrecognized|must be between|too long|maximum)/i;
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const text = (node.innerText || '').replace(/\\s+/g, ' ').trim();
+      if (text && rejectRx.test(text)) return { blocked: false, invalid: true, text: text.slice(0, 400) };
+    }
     return { blocked: false, text: '' };
   })()`,
 
@@ -446,6 +453,39 @@ const sanitizeParams = (text) => {
   return kept;
 };
 
+// How many words each flag takes; 'many' runs until the next flag. Extra words are description, not a value.
+const FLAG_ARITY = { ar: 1, aspect: 1, v: 1, version: 1, style: 1, s: 1, stylize: 1, c: 1, chaos: 1, w: 1, weird: 1, q: 1, quality: 1, seed: 1, stop: 1, iw: 1, sw: 1, sv: 1, cw: 1, ow: 1, p: 1, personalize: 1, r: 1, repeat: 1, motion: 1, exp: 1, niji: 1, sref: 'many', cref: 'many', oref: 'many', no: 'many', raw: 0, tile: 0, draft: 0, fast: 0, relax: 0, turbo: 0, hd: 0, video: 0 };
+const OPTIONAL_VALUE_FLAGS = new Set(['p', 'personalize', 'niji']);
+
+/**
+ * "…, --style raw photorealistic imax anamorphic" makes Midjourney refuse the whole job
+ * ("raw is the only valid option for style"). Keep each flag's real value and move stray
+ * words back into the description; duplicates keep the last occurrence.
+ */
+const normalizePromptParams = (text) => {
+  const first = text.search(/(^|\s)--[a-z]/i);
+  if (first < 0) return text.trim();
+  const body = [text.slice(0, first).trim()];
+  const flags = new Map();
+  const tail = text.slice(first).trim();
+  const rx = /--([a-z]+)((?:\s+(?!--)\S+)*)/gi;
+  let match;
+  while ((match = rx.exec(tail))) {
+    const flag = match[1].toLowerCase();
+    const words = match[2].trim().split(/\s+/).filter(Boolean);
+    const arity = FLAG_ARITY[flag];
+    if (arity === undefined) { console.warn('[jeff] dropping unknown flag', flag); body.push(words.join(' ')); continue; }
+    if (arity === 'many') { flags.set(flag, words.join(' ')); continue; }
+    let take = arity;
+    if (OPTIONAL_VALUE_FLAGS.has(flag) && words.length && !/^[a-z0-9._-]+$/i.test(words[0])) take = 0;
+    flags.set(flag, words.slice(0, take).join(' '));
+    if (words.length > take) body.push(words.slice(take).join(' '));
+  }
+  const description = body.filter(Boolean).join(', ').replace(/\s+,/g, ',').replace(/,\s*,/g, ',').trim();
+  const params = Array.from(flags, ([flag, value]) => (value ? `--${flag} ${value}` : `--${flag}`)).join(' ');
+  return `${description} ${params}`.replace(/\s+/g, ' ').trim();
+};
+
 const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imageRefUrls, styleWeight, extraParams, defaultParams }) => {
   const parts = [];
   if (imageRefUrls && imageRefUrls.length) parts.push(imageRefUrls.join(' '));
@@ -463,7 +503,7 @@ const buildPrompt = ({ prompt, aspectRatio, characterRefUrls, styleRefUrls, imag
     const flag = token.slice(2).split(/\s+/)[0];
     if (flag && !new RegExp(`--${flag}(\\s|$)`).test(everything)) params.push(token);
   }
-  return `${parts.join(' ')} ${params.join(' ')}`.replace(/\s+/g, ' ').trim();
+  return normalizePromptParams(`${parts.join(' ')} ${params.join(' ')}`);
 };
 
 const persist = async (folderPath, jobId, index, buffer, mimeType) => {
@@ -666,6 +706,11 @@ const resolveJobId = async (job, knownIds) => {
       await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
       throw moderationError(problem.text);
     }
+    if (problem && problem.invalid) {
+      await screenshot('rejected');
+      await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+      throw new Error(`Midjourney rejected the prompt: ${problem.text}`);
+    }
     const cards = await run(PAGE_SCRIPTS.jobCards).catch(() => ({}));
     const claimed = claimedJobIds();
     const fresh = Object.keys(cards).filter((id) => !knownIds.has(id) && !claimed.has(id));
@@ -754,7 +799,9 @@ const submitJob = async (job) => {
           await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
           throw moderationError(problem.text);
         }
-        const shot = await screenshot('submit-not-accepted');
+        const shot = await screenshot(problem && problem.invalid ? 'rejected' : 'submit-not-accepted');
+        await run(PAGE_SCRIPTS.dismissDialogs).catch(() => 0);
+        if (problem && problem.invalid) throw new Error(`Midjourney rejected the prompt: ${problem.text}${shot ? ` (screenshot: ${shot})` : ''}`);
         throw new Error(`Midjourney kept the prompt in the box (Enter and the send button ${clicked && clicked.ok ? `"${clicked.label}"` : 'were tried'} did not submit)${shot ? ` (screenshot: ${shot})` : ''}`);
       }
     }
