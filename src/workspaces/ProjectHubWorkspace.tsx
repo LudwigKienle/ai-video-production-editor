@@ -678,32 +678,54 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'qwen-multiangle-fal', label: 'Qwen Image Max Edit (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'High fidelity and detailed image editing workflows' },
 ];
 
-const ALL_PHASES: Array<{ id: ProductionPhase; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'library', label: 'Library', icon: FolderIcon },
-    { id: 'script', label: 'Script', icon: ScriptIcon },
-    { id: 'worldbuilding', label: 'World', icon: LandscapeIcon },
-    { id: 'director', label: 'Director', icon: ClapperboardIcon },
-    { id: 'concept', label: 'Concept', icon: UserCircleIcon },
-    { id: 'scene_wall', label: 'Scene Wall', icon: ListIcon },
-    { id: 'storyboard', label: 'Storyboard', icon: GridIcon },
-    { id: 'filming', label: 'Filming', icon: FilmIcon },
-    { id: 'review', label: 'Review', icon: ClipboardCheckIcon },
-    { id: 'marketing', label: 'Marketing', icon: SparklesIcon },
-    { id: 'team', label: 'Team', icon: UserCircleIcon },
+/**
+ * Steps are the production order shown in the navigation. Tools open from a step
+ * (Director and Scene Wall from Storyboard, Projects and Team from the header)
+ * and never count as their own step.
+ */
+type PhaseKind = 'step' | 'tool';
+const ALL_PHASES: Array<{ id: ProductionPhase; label: string; icon: React.ComponentType<{ className?: string }>; kind: PhaseKind; parent?: ProductionPhase }> = [
+    { id: 'library', label: 'Projects', icon: FolderIcon, kind: 'tool', parent: 'script' },
+    { id: 'script', label: 'Script', icon: ScriptIcon, kind: 'step' },
+    { id: 'worldbuilding', label: 'World', icon: LandscapeIcon, kind: 'step' },
+    { id: 'concept', label: 'Concept', icon: UserCircleIcon, kind: 'step' },
+    { id: 'storyboard', label: 'Storyboard', icon: GridIcon, kind: 'step' },
+    { id: 'director', label: 'Director', icon: ClapperboardIcon, kind: 'tool', parent: 'storyboard' },
+    { id: 'scene_wall', label: 'Scene Wall', icon: ListIcon, kind: 'tool', parent: 'storyboard' },
+    { id: 'filming', label: 'Filming', icon: FilmIcon, kind: 'step' },
+    { id: 'review', label: 'Review', icon: ClipboardCheckIcon, kind: 'step' },
+    { id: 'marketing', label: 'Marketing', icon: SparklesIcon, kind: 'step' },
+    { id: 'team', label: 'Team', icon: UserCircleIcon, kind: 'tool', parent: 'script' },
 ];
+const getPhaseMeta = (phase: ProductionPhase) => ALL_PHASES.find((entry) => entry.id === phase);
 
 const PHASE_DESCRIPTIONS: Record<ProductionPhase, string> = {
-    library: 'Open saved projects',
+    library: 'Open or switch projects',
     script: 'Write the story base',
-    worldbuilding: 'Define world rules',
-    director: 'Choose creative direction',
-    concept: 'Collect visual references',
-    scene_wall: 'Arrange scenes',
-    storyboard: 'Create shot frames',
-    filming: 'Generate video shots',
-    review: 'Check and approve',
-    marketing: 'Create campaign assets',
+    worldbuilding: 'World rules and lore · optional',
+    director: 'Shot list with cinematic direction',
+    concept: 'Cast, sets, props and style',
+    scene_wall: 'Reels and scene cards for long scripts',
+    storyboard: 'Shots and frames, scene by scene',
+    filming: 'Film the frames, scene by scene',
+    review: 'Continuity check and approval',
+    marketing: 'Posters, thumbnails, promo',
     team: 'Sync, chat and meetings',
+};
+
+/**
+ * Chapter-by-chapter work: a new shot list for some scenes replaces only those
+ * scenes. Everything else keeps its numbers, frames and videos.
+ */
+const mergeShotsIntoScenes = (existing: ShotPrompt[], incoming: ShotPrompt[], sceneNumbers: number[]): ShotPrompt[] => {
+    if (existing.length === 0 || sceneNumbers.length === 0) return incoming;
+    const replaced = new Set(sceneNumbers);
+    const kept = existing.filter((shot) => !(Number.isFinite(shot.sceneNumber) && replaced.has(Number(shot.sceneNumber))));
+    let nextNumber = kept.reduce((max, shot) => Math.max(max, shot.shot), 0);
+    const renumbered = incoming.map((shot) => ({ ...shot, shot: ++nextNumber }));
+    const sceneKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : Number.POSITIVE_INFINITY);
+    const orderKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneShotNumber) ? Number(shot.sceneShotNumber) : shot.shot);
+    return [...kept, ...renumbered].sort((a, b) => sceneKey(a) - sceneKey(b) || orderKey(a) - orderKey(b) || a.shot - b.shot);
 };
 
 const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
@@ -790,6 +812,7 @@ type ProjectHubUiPrefs = {
     useGeminiContextMemory?: boolean;
     useStoryboardContinuityAutoRefine?: boolean;
     useFilmingContinuityAutoRefine?: boolean;
+    selectedSceneNumber?: number | null;
 };
 
 const isProductionPhase = (value: string): value is ProductionPhase =>
@@ -878,6 +901,9 @@ const readProjectHubUiPrefs = (scope: string): ProjectHubUiPrefs => {
         }
         if (typeof scoped.useFilmingContinuityAutoRefine === 'boolean') {
             safe.useFilmingContinuityAutoRefine = scoped.useFilmingContinuityAutoRefine;
+        }
+        if (scoped.selectedSceneNumber === null || (typeof scoped.selectedSceneNumber === 'number' && Number.isFinite(scoped.selectedSceneNumber))) {
+            safe.selectedSceneNumber = scoped.selectedSceneNumber;
         }
         return safe;
     } catch {
@@ -3827,7 +3853,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const postScriptPhase = useMemo<ProductionPhase>(() => {
         if (allowedPhaseIds.includes('worldbuilding')) return 'worldbuilding';
         if (allowedPhaseIds.includes('concept')) return 'concept';
-        if (allowedPhaseIds.includes('director')) return 'director';
+        if (allowedPhaseIds.includes('storyboard')) return 'storyboard';
         return allowedPhaseIds[0] || 'script';
     }, [allowedPhaseIds]);
     const backFromWorldbuildingPhase = useMemo<ProductionPhase>(() => {
@@ -3836,7 +3862,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return allowedPhaseIds[0] || 'script';
     }, [allowedPhaseIds]);
     const nextFromWorldbuildingPhase = useMemo<ProductionPhase>(() => {
-        if (allowedPhaseIds.includes('director')) return 'director';
         if (allowedPhaseIds.includes('concept')) return 'concept';
         if (allowedPhaseIds.includes('storyboard')) return 'storyboard';
         return allowedPhaseIds[0] || 'script';
@@ -3887,6 +3912,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     });
     const lastAppliedRequestedPhaseRef = useRef<ProductionPhase | null>(null);
     const [storyboardFocusShot, setStoryboardFocusShot] = useState<number | null>(null);
+    const [hubSceneNumber, setHubSceneNumber] = useState<number | null>(() => (typeof storedUiPrefs.selectedSceneNumber === 'number' ? storedUiPrefs.selectedSceneNumber : null));
     const [styleRefsOpen, setStyleRefsOpen] = useState(false);
     const [filmingFocusShot, setFilmingFocusShot] = useState<number | null>(null);
     const [conceptEntityTab, setConceptEntityTab] = useState<ConceptEntityTab>(() => storedUiPrefs.conceptEntityTab || 'characters');
@@ -4077,8 +4103,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             useGeminiContextMemory,
             useStoryboardContinuityAutoRefine,
             useFilmingContinuityAutoRefine,
+            selectedSceneNumber: hubSceneNumber,
         });
     }, [
+        hubSceneNumber,
         activePhase,
         conceptBrandingSubtab,
         conceptCharacterSubtab,
@@ -4136,7 +4164,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
     const scriptSceneBlocks = useMemo(() => splitScriptIntoSceneBlocks(storyBible.script || ''), [storyBible.script]);
     const detectedScriptSceneCount = scriptSceneBlocks.length;
-    const directorSceneSelectionEnabled = scriptLength === 'feature' || detectedScriptSceneCount >= 25;
+    const directorSceneSelectionEnabled = detectedScriptSceneCount > 1;
     const directorSceneScope = useMemo(() => {
         const fullScript = (storyBible.script || '').trim();
         const allSummary = detectedScriptSceneCount > 0
@@ -4340,7 +4368,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         if (shotPersonaFilter === 'all') return shotPrompts;
         return shotPrompts.filter((shot) => getShotPersonaId(shot) === shotPersonaFilter);
     }, [shotPersonaFilter, shotPrompts, getShotPersonaId]);
-    const focusedFilmingShot = filteredPersonaShots.find((entry) => entry.shot === filmingFocusShot) || filteredPersonaShots[0] || null;
     const continuityReviewedShots = useMemo(
         () => shotPrompts.filter((shot) => Boolean(shot.continuityReview)),
         [shotPrompts],
@@ -4493,33 +4520,78 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
         return String(shot.shot);
     }, [inferredSceneShotIndexByShotNumber]);
-    const storyboardSceneFilteringAvailable = Boolean(
-        canUseSceneWall && sceneWallEnabled && selectedSceneWallScene,
+    /** Scenes for the chapter strip: Scene Wall cards when active, otherwise the script's scene headings, plus whatever the shots reference. */
+    const projectScenes = useMemo(() => {
+        type SceneEntry = { sceneNumber: number; slugline: string; sceneId?: string; shotCount: number; frameCount: number; videoCount: number };
+        const map = new Map<number, SceneEntry>();
+        const add = (sceneNumber: number, slugline: string, sceneId?: string) => {
+            if (!Number.isFinite(sceneNumber)) return;
+            if (!map.has(sceneNumber)) map.set(sceneNumber, { sceneNumber, slugline, sceneId, shotCount: 0, frameCount: 0, videoCount: 0 });
+        };
+        const usingWall = Boolean(canUseSceneWall && sceneWallEnabled && sceneWallState?.scenes?.length);
+        if (usingWall) {
+            [...(sceneWallState?.scenes || [])]
+                .filter((scene) => !scene.parked)
+                .sort((a, b) => (a.order !== b.order ? a.order - b.order : a.sceneNumber - b.sceneNumber))
+                .forEach((scene) => add(scene.sceneNumber, scene.slugline || scene.sceneCode || `Scene ${scene.sceneNumber}`, scene.id));
+        } else {
+            scriptSceneBlocks.forEach((block) => add(block.sceneNumber, block.slugline));
+        }
+        shotPrompts.forEach((shot) => {
+            const sceneNumber = Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : sceneWallShotSceneMap.get(shot.shot)?.sceneNumber;
+            if (!Number.isFinite(sceneNumber)) return;
+            add(Number(sceneNumber), shot.sceneSlugline || `Scene ${sceneNumber}`);
+            const entry = map.get(Number(sceneNumber))!;
+            entry.shotCount += 1;
+            if (shot.imageUrl) entry.frameCount += 1;
+            if (shot.videoUrl) entry.videoCount += 1;
+        });
+        const list = Array.from(map.values());
+        return usingWall ? list : list.sort((a, b) => a.sceneNumber - b.sceneNumber);
+    }, [canUseSceneWall, sceneWallEnabled, sceneWallState, scriptSceneBlocks, shotPrompts, sceneWallShotSceneMap]);
+    const sceneNavigationAvailable = projectScenes.length > 1;
+    const unassignedShotCount = useMemo(
+        () => shotPrompts.filter((shot) => !Number.isFinite(shot.sceneNumber) && !sceneWallShotSceneMap.has(shot.shot)).length,
+        [shotPrompts, sceneWallShotSceneMap],
     );
-    const storyboardVisibleShots = useMemo(() => {
-        if (!storyboardSceneFilteringAvailable || storyboardSceneView === 'all') {
-            return filteredPersonaShots;
+    /** null = whole script. Storyboard, Filming, Director and "Generate from Script" all follow this. */
+    const effectiveSceneNumber: number | null = !sceneNavigationAvailable || storyboardSceneView === 'all'
+        ? null
+        : (hubSceneNumber ?? selectedSceneNumber ?? null);
+    const selectScene = useCallback((sceneNumber: number | null) => {
+        if (sceneNumber === null) {
+            setStoryboardSceneView('all');
+            setHubSceneNumber(null);
+            setDirectorSceneTargetMode('all');
+            return;
         }
-        if (selectedSceneShotNumbers.length > 0) {
+        setHubSceneNumber(sceneNumber);
+        setStoryboardSceneView('selected');
+        const wallSceneId = projectScenes.find((scene) => scene.sceneNumber === sceneNumber)?.sceneId;
+        if (wallSceneId && onChangeSceneWallState && sceneWallState && sceneWallState.selectedSceneId !== wallSceneId) {
+            onChangeSceneWallState({ ...sceneWallState, selectedSceneId: wallSceneId, updatedAt: new Date().toISOString() });
+        }
+        if (scriptSceneBlocks.some((block) => block.sceneNumber === sceneNumber)) {
+            setDirectorSceneTargetMode('list');
+            setDirectorSceneListInput(String(sceneNumber));
+        }
+    }, [onChangeSceneWallState, projectScenes, sceneWallState, scriptSceneBlocks]);
+    const filterShotsToScene = useCallback((shots: ShotPrompt[]) => {
+        if (effectiveSceneNumber === null) return shots;
+        const wallSelected = selectedSceneWallScene && selectedSceneWallScene.sceneNumber === effectiveSceneNumber && selectedSceneShotNumbers.length > 0;
+        if (wallSelected) {
             const linkedSet = new Set<number>(selectedSceneShotNumbers);
-            return filteredPersonaShots.filter((shot) => linkedSet.has(shot.shot));
+            return shots.filter((shot) => linkedSet.has(shot.shot) || (Number.isFinite(shot.sceneNumber) && Number(shot.sceneNumber) === effectiveSceneNumber));
         }
-        if (Number.isFinite(selectedSceneNumber)) {
-            return filteredPersonaShots.filter((shot) => {
-                if (Number.isFinite(shot.sceneNumber) && Number(shot.sceneNumber) === selectedSceneNumber) return true;
-                const linked = sceneWallShotSceneMap.get(shot.shot);
-                return linked?.sceneNumber === selectedSceneNumber;
-            });
-        }
-        return [] as ShotPrompt[];
-    }, [
-        filteredPersonaShots,
-        sceneWallShotSceneMap,
-        selectedSceneNumber,
-        selectedSceneShotNumbers,
-        storyboardSceneFilteringAvailable,
-        storyboardSceneView,
-    ]);
+        return shots.filter((shot) => {
+            if (Number.isFinite(shot.sceneNumber)) return Number(shot.sceneNumber) === effectiveSceneNumber;
+            return sceneWallShotSceneMap.get(shot.shot)?.sceneNumber === effectiveSceneNumber;
+        });
+    }, [effectiveSceneNumber, selectedSceneWallScene, selectedSceneShotNumbers, sceneWallShotSceneMap]);
+    const storyboardSceneFilteringAvailable = sceneNavigationAvailable;
+    const storyboardVisibleShots = useMemo(() => filterShotsToScene(filteredPersonaShots), [filterShotsToScene, filteredPersonaShots]);
+    const filmingVisibleShots = storyboardVisibleShots;
+    const focusedFilmingShot = filmingVisibleShots.find((entry) => entry.shot === filmingFocusShot) || filmingVisibleShots[0] || null;
     const focusedStoryboardShot = storyboardVisibleShots.find((entry) => entry.shot === storyboardFocusShot) || storyboardVisibleShots[0] || null;
     const storyboardSceneHasNoLinkedShots = storyboardSceneFilteringAvailable
         && storyboardSceneView === 'selected'
@@ -4698,8 +4770,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const hasFirstShots = shotCount >= 3 || generatedShotImages >= 1;
         const hasFirstRender = renderedVideos >= 1;
         const hasSceneWall = !canUseSceneWall || sceneWallEnabled;
-        const checklist = [hasApi, hasMoodboard, hasFirstShots, hasFirstRender, hasSceneWall];
-        const totalCount = canUseSceneWall ? checklist.length : checklist.length - 1;
+        const checklist = [hasApi, hasMoodboard, hasFirstShots, hasFirstRender];
+        const totalCount = checklist.length;
         return {
             hasApi,
             hasMoodboard,
@@ -4709,7 +4781,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             shotCount,
             generatedShotImages,
             renderedVideos,
-            completedCount: (canUseSceneWall ? checklist : checklist.slice(0, 4)).filter(Boolean).length,
+            completedCount: checklist.filter(Boolean).length,
             totalCount,
         };
     }, [apiKeyReady, canUseSceneWall, moodboardCount, sceneWallEnabled, shotPrompts]);
@@ -8320,6 +8392,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 updatedAt: new Date().toISOString(),
             });
         }
+        const wallScene = sceneWallState?.scenes?.find((scene) => scene.id === sceneId);
+        setHubSceneNumber(Number.isFinite(wallScene?.sceneNumber) ? Number(wallScene?.sceneNumber) : null);
         setStoryboardSceneView('selected');
         setActivePhase('storyboard');
     }, [onChangeSceneWallState, sceneWallState]);
@@ -9821,6 +9895,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return;
         }
 
+        if (!scopedForFeature && shotPrompts.some((shot) => shot.imageUrl || shot.videoUrl)) {
+            if (!window.confirm('Regenerate the whole shot list? Existing frames and videos will be dropped. Select a scene in the strip first to redo only that scene.')) return;
+        }
         setIsLoading(scopedForFeature
             ? `Generating Context-Aware Shot List for ${directorSceneScope.summary}...`
             : 'Generating Context-Aware Shot List...');
@@ -9937,7 +10014,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     voiceoverIsGenerating: false,
                 };
             });
-            setShotPrompts(nextShotPrompts);
+            setShotPrompts(scopedForFeature ? mergeShotsIntoScenes(shotPrompts, nextShotPrompts, directorSceneScope.selectedSceneNumbers) : nextShotPrompts);
             if (canUseSceneWall && sceneWallEnabled && onChangeSceneWallState) {
                 const nextSceneWall = buildSceneWallFromProjectContext({
                     scriptText: storyBible.script || '',
@@ -12190,7 +12267,19 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             };
         });
 
-        setShotPrompts(alignedShots);
+        const treatmentScenes = Array.from(new Set(alignedShots.map((shot) => shot.sceneNumber).filter((value): value is number => Number.isFinite(value))));
+        const scopedScenes = directorSceneScope.isScoped ? directorSceneScope.selectedSceneNumbers : treatmentScenes;
+        const hasGeneratedMedia = shotPrompts.some((shot) => shot.imageUrl || shot.videoUrl);
+        if (!directorSceneScope.isScoped && hasGeneratedMedia && shotPrompts.some((shot) => !Number.isFinite(shot.sceneNumber) || !scopedScenes.includes(Number(shot.sceneNumber)))) {
+            if (!window.confirm('This treatment covers the whole script. Shots outside its scenes, including their frames and videos, will be dropped. Continue?')) {
+                return { shotCount: 0 };
+            }
+        }
+        const merged = mergeShotsIntoScenes(shotPrompts, alignedShots, scopedScenes);
+        setShotPrompts(merged);
+        if (directorSceneScope.isScoped && directorSceneScope.selectedSceneNumbers.length > 0) {
+            selectScene(directorSceneScope.selectedSceneNumbers[0]);
+        }
         setActivePhase('storyboard');
         return { shotCount: alignedShots.length };
     };
@@ -12905,8 +12994,33 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         } catch (e) { handleError(e); } finally { setIsLoading(false); }
     };
 
-    const phases = phaseCatalog.filter((phase) => allowedPhaseIds.includes(phase.id));
+    const phases = phaseCatalog.filter((phase) => allowedPhaseIds.includes(phase.id) && (teamMode || phase.kind === 'step'));
+    const activePhaseMeta = getPhaseMeta(activePhase);
+    const isToolPhase = !teamMode && activePhaseMeta?.kind === 'tool';
+    const activeToolParent: ProductionPhase | null = isToolPhase
+        ? (activePhaseMeta?.parent && allowedPhaseIds.includes(activePhaseMeta.parent) ? activePhaseMeta.parent : (phases[0]?.id ?? null))
+        : null;
     const activePhaseLabel = getPhaseLabel(activePhase);
+    const hasWorldbuildingContent = (() => {
+        const value = storyBible.worldbuilding as unknown;
+        if (!value || typeof value !== 'object') return false;
+        return Object.values(value as Record<string, unknown>).some((entry) => {
+            if (typeof entry === 'string') return entry.trim().length > 0;
+            if (Array.isArray(entry)) return entry.length > 0;
+            if (entry && typeof entry === 'object') return Object.keys(entry as object).length > 0;
+            return false;
+        });
+    })();
+    /** Content-based, not positional: a step is done when it produced something. */
+    const phaseDone: Partial<Record<ProductionPhase, boolean>> = {
+        script: Boolean(storyBible.script?.trim()),
+        worldbuilding: hasWorldbuildingContent,
+        concept: references.some((ref) => Boolean(ref.imageUrl)),
+        storyboard: shotPrompts.some((shot) => Boolean(shot.imageUrl)),
+        filming: shotPrompts.some((shot) => Boolean(shot.videoUrl)),
+        review: Boolean(reviewFeedback),
+        marketing: (storyBible.extraAssets?.assets || []).some((asset) => Boolean(asset.imageUrl)),
+    };
     const projectLabel = (storyBible.title || projectPath?.split(/[\\/]/).pop() || 'Untitled Project').trim();
     const progressPercent = quickstartStatus.totalCount > 0
         ? Math.round((quickstartStatus.completedCount / quickstartStatus.totalCount) * 100)
@@ -12942,8 +13056,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 ? `${quickstartStatus.shotCount} shots ready, ${quickstartStatus.generatedShotImages} with frames.`
                 : 'Create storyboard frames before moving into filming.',
             complete: quickstartStatus.hasFirstShots,
-            actionLabel: canUseSceneWall ? 'Open Scene Wall' : 'Open Storyboard',
-            onAction: () => setActivePhase(canUseSceneWall ? 'scene_wall' : 'storyboard'),
+            actionLabel: 'Open Storyboard',
+            onAction: () => setActivePhase('storyboard'),
         },
         {
             id: 'render',
@@ -12953,24 +13067,41 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             actionLabel: 'Open Filming',
             onAction: () => setActivePhase('filming'),
         },
-        ...(canUseSceneWall ? [{
-            id: 'scene-wall',
-            label: 'Scene Wall',
-            detail: quickstartStatus.hasSceneWall ? 'Enabled for scene-level planning.' : 'Optional planning layer for long scripts.',
-            complete: quickstartStatus.hasSceneWall,
-            actionLabel: sceneWallEnabled ? 'Open Scene Wall' : 'Turn On Scene Wall',
-            onAction: () => {
-                if (sceneWallEnabled) {
-                    setActivePhase('scene_wall');
-                } else {
-                    onToggleSceneWallFeature?.(true);
-                }
-            },
-        }] : []),
     ];
     const nextReadinessItem = readinessItems.find((item) => !item.complete);
-    const currentPhaseIndex = Math.max(0, phases.findIndex((phase) => phase.id === activePhase));
+    const currentPhaseIndex = Math.max(0, phases.findIndex((phase) => phase.id === (activeToolParent || activePhase)));
     const nextPhase = phases[currentPhaseIndex + 1] || null;
+
+    const renderSceneStrip = (mode: 'storyboard' | 'filming') => {
+        if (!sceneNavigationAvailable) return null;
+        const all = effectiveSceneNumber === null;
+        return (
+            <nav className="scene-strip" aria-label="Scenes">
+                <button type="button" className={`scene-strip__chip ${all ? 'scene-strip__chip--active' : ''}`} onClick={() => selectScene(null)}>
+                    <span>All</span>
+                    <small>{shotPrompts.length} shots</small>
+                </button>
+                {projectScenes.map((scene) => {
+                    const active = !all && scene.sceneNumber === effectiveSceneNumber;
+                    const progress = mode === 'storyboard' ? scene.frameCount : scene.videoCount;
+                    const done = scene.shotCount > 0 && progress >= scene.shotCount;
+                    return (
+                        <button
+                            key={scene.sceneNumber}
+                            type="button"
+                            className={`scene-strip__chip ${active ? 'scene-strip__chip--active' : ''} ${done ? 'scene-strip__chip--done' : ''}`}
+                            title={scene.slugline}
+                            onClick={() => selectScene(scene.sceneNumber)}
+                        >
+                            <span>Sc {scene.sceneNumber}</span>
+                            <small>{scene.shotCount === 0 ? 'no shots' : `${progress}/${scene.shotCount}`}</small>
+                        </button>
+                    );
+                })}
+                {unassignedShotCount > 0 && <span className="scene-strip__note">{unassignedShotCount} without scene</span>}
+            </nav>
+        );
+    };
 
     const renderProjectCard = (project: RecentProject) => (
         <div key={project.path} className="app-card p-4 flex flex-col gap-3">
@@ -13024,6 +13155,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             <div className="project-hub__nav-head">
                                 <div className="project-hub-kicker">Project</div>
                                 <h2 className="project-hub__title">{projectLabel}</h2>
+                                {!teamMode && allowedPhaseIds.includes('library') && (
+                                    <button type="button" className="project-hub__switch" onClick={() => setActivePhase('library')} aria-pressed={activePhase === 'library'}>Switch project ›</button>
+                                )}
                                 <div className="project-hub__progress" title={`${quickstartStatus.completedCount} of ${quickstartStatus.totalCount} setup steps done`}>
                                     <span style={{ width: `${progressPercent}%` }} />
                                 </div>
@@ -13049,8 +13183,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                             <ol className="project-hub__phases" role="list">
                                 {phases.map((phase, index) => {
-                                    const isActive = activePhase === phase.id;
-                                    const isPast = currentPhaseIndex > index;
+                                    const isActive = activePhase === phase.id || activeToolParent === phase.id;
+                                    const isPast = Boolean(phaseDone[phase.id]);
                                     const emphasised = getProductionFormat(storyBible.productionFormat).emphasisPhases.includes(phase.id);
                                     return (
                                         <li key={phase.id}>
@@ -13124,26 +13258,31 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                 </details>
                             )}
 
-                            {canUseSceneWall && sceneWallEnabled && (
+                            {!teamMode && allowedPhaseIds.includes('team') && (
                                 <div className="project-hub__tools">
-                                    <button type="button" onClick={() => handleDeepSyncSceneWallFromScript('Project Context')} className="app-button app-secondary text-xs">Sync Scene Wall</button>
-                                    <button type="button" onClick={() => onToggleSceneWallFeature?.(false)} className="app-button app-tertiary text-xs">Disable Scene Wall</button>
+                                    <button type="button" className={`app-button app-tertiary text-xs ${activePhase === 'team' ? 'is-active' : ''}`} onClick={() => setActivePhase('team')}>Team &amp; sync</button>
                                 </div>
                             )}
                         </aside>
 
                         <header className="project-hub__phase-head">
                             <div>
-                                <div className="project-hub-kicker">Step {currentPhaseIndex + 1} of {phases.length}</div>
+                                <div className="project-hub-kicker">{isToolPhase && activeToolParent ? `${getPhaseLabel(activeToolParent)} · tool` : `Step ${currentPhaseIndex + 1} of ${phases.length}`}</div>
                                 <h3>{activePhaseLabel}</h3>
                                 <p>{PHASE_DESCRIPTIONS[activePhase]}</p>
                             </div>
                             <div className="project-hub__phase-nav">
-                                {currentPhaseIndex > 0 && (
-                                    <button type="button" className="toolbar-button" onClick={() => setActivePhase(phases[currentPhaseIndex - 1].id as ProductionPhase)}>‹ {phases[currentPhaseIndex - 1].label}</button>
-                                )}
-                                {nextPhase && (
-                                    <button type="button" className="toolbar-button toolbar-button--text" onClick={() => setActivePhase(nextPhase.id)}>{nextPhase.label} ›</button>
+                                {isToolPhase && activeToolParent ? (
+                                    <button type="button" className="toolbar-button" onClick={() => setActivePhase(activeToolParent)}>‹ Back to {getPhaseLabel(activeToolParent)}</button>
+                                ) : (
+                                    <>
+                                        {currentPhaseIndex > 0 && (
+                                            <button type="button" className="toolbar-button" onClick={() => setActivePhase(phases[currentPhaseIndex - 1].id as ProductionPhase)}>‹ {phases[currentPhaseIndex - 1].label}</button>
+                                        )}
+                                        {nextPhase && (
+                                            <button type="button" className="toolbar-button toolbar-button--text" onClick={() => setActivePhase(nextPhase.id)}>{nextPhase.label} ›</button>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </header>
@@ -14469,7 +14608,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                             onClick={handleApplyDirectorToStoryboard}
                                                             className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg flex items-center gap-2"
                                                         >
-                                                            <GridIcon className="w-5 h-5" /> Create Storyboard
+                                                            <GridIcon className="w-5 h-5" /> {directorSceneScope.isScoped ? `Apply to ${directorSceneScope.summary}` : 'Apply to Storyboard'}
                                                         </button>
                                                     </>
                                                 )}
@@ -14852,11 +14991,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 if (canGenerateStoryboard) {
                                                     handleGenerateStoryboard();
                                                 }
-                                                setActivePhase(canUseSceneWall ? 'scene_wall' : 'storyboard');
+                                                setActivePhase('storyboard');
                                             }}
                                             className="app-button app-secondary phase-next"
                                         >
-                                            Next: {canUseSceneWall ? 'Scene Wall' : 'Storyboard'} <span aria-hidden="true">→</span>
+                                            Next: Storyboard <span aria-hidden="true">→</span>
                                         </button>
                                         </div>
                                     </div>
@@ -16256,7 +16395,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                     <div>
                                         <h2 className="text-2xl font-bold text-white">Scene Wall (Pro)</h2>
                                         <p className="text-gray-400 text-sm mt-1">
-                                            Full scene wall workspace directly in Project. Move cards, park scenes, and review structure across long feature scripts.
+                                            The wall view of your storyboard for long scripts: reels, scene cards, parking and drag ordering. The scene strip in Storyboard and Filming follows the scene you pick here.
                                         </p>
                                         <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-300">
                                             <span className="px-2 py-1 rounded-full bg-gray-800 border border-gray-700">Shots: {shotPrompts.length}</span>
@@ -16303,9 +16442,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <button
                                             type="button"
                                             onClick={() => setActivePhase('storyboard')}
-                                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-5 rounded-lg shadow-lg"
+                                            className="app-button app-primary"
                                         >
-                                            Next: Storyboard <span aria-hidden="true">→</span>
+                                            Back to Storyboard
                                         </button>
                                     </div>
                                 </div>
@@ -16361,18 +16500,27 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         </div>
                                     </div>
                                                                             <div className="phase-bar__actions">
-                                        {shotPrompts.length === 0 && canGenerateStoryboard && (
+                                        {canGenerateStoryboard && (shotPrompts.length === 0 || (effectiveSceneNumber !== null && storyboardVisibleShots.length === 0)) && (
                                             <button onClick={handleGenerateStoryboard} className="app-button app-primary">
-                                                Generate from Script
+                                                {effectiveSceneNumber !== null ? `Shot list for scene ${effectiveSceneNumber}` : 'Generate from Script'}
                                             </button>
                                         )}
-                                        {shotPrompts.length > 0 && canGenerateStoryboard && (
+                                        {shotPrompts.length > 0 && canGenerateStoryboard && storyboardVisibleShots.length > 0 && (
                                             <button
                                                 onClick={() => handleGenerateAllShotImages(storyboardVisibleShots)}
-                                                disabled={storyboardVisibleShots.length === 0}
                                                 className="app-button app-primary"
                                             >
-                                                <MagicWandIcon className="w-5 h-5" /> Generate All Shots
+                                                <MagicWandIcon className="w-5 h-5" /> {effectiveSceneNumber !== null ? `Generate scene ${effectiveSceneNumber}` : 'Generate All Shots'}
+                                            </button>
+                                        )}
+                                        {canRunDirector && allowedPhaseIds.includes('director') && (
+                                            <button onClick={() => setActivePhase('director')} className="app-button app-secondary" title="Let the Director propose a shot list with camera, lighting and pacing notes">
+                                                <ClapperboardIcon className="w-4 h-4" /> {effectiveSceneNumber !== null ? `Direct scene ${effectiveSceneNumber}` : 'Director'}
+                                            </button>
+                                        )}
+                                        {canUseSceneWall && allowedPhaseIds.includes('scene_wall') && (
+                                            <button onClick={() => setActivePhase('scene_wall')} className="app-button app-tertiary" title="Reels, scene cards, parking and ordering for long scripts">
+                                                Scene Wall
                                             </button>
                                         )}
                                         {shotPrompts.length > 0 && (
@@ -16477,27 +16625,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 )}
                                             </div>
                                         </div>
-                                        {storyboardSceneFilteringAvailable && (
-                                            <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700">
-                                                <span className="text-xs font-bold text-gray-400 px-2">Scene:</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setStoryboardSceneView('selected')}
-                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'selected' ? 'bg-indigo-900/50 border-indigo-500/60 text-indigo-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
-                                                    title={selectedSceneWallScene?.slugline}
-                                                >
-                                                    {selectedSceneWallScene?.sceneCode || `Sc ${String(selectedSceneWallScene?.sceneNumber || '').padStart(3, '0')}`}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setStoryboardSceneView('all')}
-                                                    className={`px-2 py-1 rounded text-xs font-semibold border ${storyboardSceneView === 'all' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}
-                                                >
-                                                    All Scenes
-                                                </button>
-                                            </div>
-                                        )}
                                     </div>
+                                    {renderSceneStrip('storyboard')}
                                     <details className="phase-settings">
                                         <summary>Camera, lens &amp; context<small>{CAMERA_PRESETS.find((preset) => preset.id === cameraPresetId)?.label || "Auto"} · {LENS_PRESETS.find((preset) => preset.id === lensPresetId)?.label || "Auto"}{shotPersonaFilter !== "all" ? " · persona filter" : ""}</small></summary>
                                         <div className="phase-settings__body">
@@ -17777,8 +17906,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <div className="phase-bar__actions">
                                         {canGenerateFilming && (
                                             <button
-                                                onClick={() => handleGenerateAllVideos(filteredPersonaShots)}
-                                                disabled={filteredPersonaShots.filter(s => {
+                                                onClick={() => handleGenerateAllVideos(filmingVisibleShots)}
+                                                disabled={filmingVisibleShots.filter(s => {
                                                     const hasAudio = !requiresShotAudio || Boolean(s.voiceoverUrl);
                                                     const hasMotionRef = videoModel !== 'kling-v2.6-motion-control'
                                                         && !(videoModel === 'kling-o3-pro-fal' && klingUseReferenceVideoForO3)
@@ -17790,7 +17919,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 }).length === 0}
                                                 className="app-button app-primary"
                                             >
-                                                <CameraIcon className="w-5 h-5" /> Film All Remaining
+                                                <CameraIcon className="w-5 h-5" /> {effectiveSceneNumber !== null ? `Film scene ${effectiveSceneNumber}` : 'Film All Remaining'}
                                             </button>
                                         )}
                                         <button
@@ -17891,6 +18020,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             )}
                                         </div>
                                     </div>
+                                    {renderSceneStrip('filming')}
                                     <details className="phase-settings">
                                         <summary>Model options<small>{FILMING_VIDEO_MODEL_OPTIONS.find(o => o.id === videoModel)?.label}{shotPersonaFilter !== "all" ? " · persona filter" : ""}</small></summary>
                                         <div className="phase-settings__body">
@@ -18167,8 +18297,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         </div>
                                             <div className="pk-actions">
                                         <button
-                                            onClick={() => handleRunGeminiContinuityReview(filteredPersonaShots.map((shot) => shot.shot))}
-                                            disabled={geminiContinuityReviewRunning || filteredPersonaShots.every((shot) => !shot.videoUrl && !shot.imageUrl && !shot.startFrameUrl)}
+                                            onClick={() => handleRunGeminiContinuityReview(filmingVisibleShots.map((shot) => shot.shot))}
+                                            disabled={geminiContinuityReviewRunning || filmingVisibleShots.every((shot) => !shot.videoUrl && !shot.imageUrl && !shot.startFrameUrl)}
                                             className="app-button app-secondary"
                                         >
                                             <BrainIcon className="w-5 h-5" /> {geminiContinuityReviewRunning ? 'Reviewing...' : 'Run Continuity Review'}
@@ -18176,9 +18306,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         {canGenerateFilming && (
                                             <button
                                                 onClick={() => handleRefilmContinuityPriorityShots(
-                                                    filteredPersonaShots.filter((shot) => continuityPriorityRankMap.has(shot.shot)),
+                                                    filmingVisibleShots.filter((shot) => continuityPriorityRankMap.has(shot.shot)),
                                                 )}
-                                                disabled={!filteredPersonaShots.some((shot) => continuityPriorityRankMap.has(shot.shot))}
+                                                disabled={!filmingVisibleShots.some((shot) => continuityPriorityRankMap.has(shot.shot))}
                                                 className="app-button app-secondary"
                                             >
                                                 <PlayIcon className="w-5 h-5" /> Re-Film Drift Queue
@@ -18191,10 +18321,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                                 <div className="shot-page">
                                     {shotPrompts.length > 0 ? (
-                                        filteredPersonaShots.length > 0 ? (
+                                        filmingVisibleShots.length > 0 ? (
                                             <>
                                             <div className={`shot-page__grid ${isPortraitAspect(referenceAspectRatio) ? "shot-page__grid--portrait" : ""}`}>
-                                                {filteredPersonaShots.map((shot) => (
+                                                {filmingVisibleShots.map((shot) => (
                                                     <ShotTile key={shot.shot} shot={shot} label={formatShotLabel(shot)} active={focusedFilmingShot?.shot === shot.shot} mode="filming" aspect={aspectRatioToCss(resolveShotEffectiveAspectRatio(shot))} onSelect={() => setFilmingFocusShot(shot.shot)} />
                                                 ))}
                                             </div>
@@ -18202,8 +18332,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             <div className="shot-page__inspector-head">
                                                 <span>{focusedFilmingShot ? `Shot ${formatShotLabel(focusedFilmingShot)}` : 'Inspector'}</span>
                                                 <span className="pk-actions">
-                                                    <button type="button" className="edit-icon-btn" aria-label="Previous shot" title="Previous shot" disabled={!focusedFilmingShot || filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) <= 0} onClick={() => { const index = filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index > 0) setFilmingFocusShot(filteredPersonaShots[index - 1].shot); }}>‹</button>
-                                                    <button type="button" className="edit-icon-btn" aria-label="Next shot" title="Next shot" disabled={!focusedFilmingShot || filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) >= filteredPersonaShots.length - 1} onClick={() => { const index = filteredPersonaShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index >= 0 && index < filteredPersonaShots.length - 1) setFilmingFocusShot(filteredPersonaShots[index + 1].shot); }}>›</button>
+                                                    <button type="button" className="edit-icon-btn" aria-label="Previous shot" title="Previous shot" disabled={!focusedFilmingShot || filmingVisibleShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) <= 0} onClick={() => { const index = filmingVisibleShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index > 0) setFilmingFocusShot(filmingVisibleShots[index - 1].shot); }}>‹</button>
+                                                    <button type="button" className="edit-icon-btn" aria-label="Next shot" title="Next shot" disabled={!focusedFilmingShot || filmingVisibleShots.findIndex((entry) => entry.shot === focusedFilmingShot.shot) >= filmingVisibleShots.length - 1} onClick={() => { const index = filmingVisibleShots.findIndex((entry) => entry.shot === focusedFilmingShot?.shot); if (index >= 0 && index < filmingVisibleShots.length - 1) setFilmingFocusShot(filmingVisibleShots[index + 1].shot); }}>›</button>
                                                 </span>
                                             </div>
                                             {focusedFilmingShot ? ((shot: ShotPrompt) => {

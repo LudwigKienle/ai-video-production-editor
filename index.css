@@ -5540,6 +5540,16 @@ body[data-theme="light"] .studio-workspace select, body[data-theme="light"] .pro
 .project-hub__tips { display: grid; gap: 0.3rem; }
 .project-hub__tips ul { margin: 0; padding-left: 1rem; color: var(--app-muted); font-size: 0.74rem; line-height: 1.4; }
 .project-hub__tools { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.project-hub__tools .is-active { background: var(--shell-selected); }
+.project-hub__switch { justify-self: start; padding: 0; border: 0; background: none; color: var(--app-accent-strong); font-size: 0.72rem; font-weight: 600; cursor: pointer; }
+.project-hub__switch:hover { text-decoration: underline; }
+.scene-strip { display: flex; gap: 0.35rem; overflow-x: auto; padding: 0.1rem 0 0.35rem; scrollbar-width: thin; }
+.scene-strip__chip { flex: none; display: grid; gap: 0.05rem; min-width: 4.4rem; padding: 0.35rem 0.6rem; border: 1px solid var(--shell-hairline); border-radius: 0.6rem; background: rgb(var(--app-panel-rgb) / 0.6); color: var(--app-text); text-align: left; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; transition: background 100ms ease, border-color 100ms ease; }
+.scene-strip__chip small { color: var(--app-muted); font-size: var(--fs-2xs); font-weight: 500; }
+.scene-strip__chip:hover { background: var(--shell-hover); }
+.scene-strip__chip--active { border-color: var(--app-accent); background: var(--shell-selected); }
+.scene-strip__chip--done small { color: var(--app-success); }
+.scene-strip__note { align-self: center; padding-left: 0.35rem; color: var(--app-muted); font-size: var(--fs-2xs); white-space: nowrap; }
 .project-hub__phase-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .project-hub__phase-head h3 { margin: 0.1rem 0 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.015em; }
 .project-hub__phase-head p { margin: 0.2rem 0 0; color: var(--app-muted); font-size: 0.86rem; }
