@@ -1,6 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
+  vgenv: {
+    configure: (key) => ipcRenderer.invoke('vgenv:configure', key),
+    ready: () => ipcRenderer.invoke('vgenv:ready'),
+    list: (projectPath) => ipcRenderer.invoke('vgenv:list', projectPath),
+    create: (payload) => ipcRenderer.invoke('vgenv:create', payload),
+    get: (payload) => ipcRenderer.invoke('vgenv:get', payload),
+    cancel: (payload) => ipcRenderer.invoke('vgenv:cancel', payload),
+    download: (payload) => ipcRenderer.invoke('vgenv:download', payload),
+  },
   project: {
     selectFolder: () => ipcRenderer.invoke('project:selectFolder'),
     selectFile: () => ipcRenderer.invoke('project:selectFile'),

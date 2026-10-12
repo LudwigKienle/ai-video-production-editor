@@ -3,7 +3,7 @@ const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const fsSync = require('fs');
-const { pathToFileURL } = require('url');
+const { pathToFileURL, fileURLToPath } = require('url');
 const { spawn } = require('child_process');
 const { renderTimeline, prepareVideoProxy } = require('./ffmpeg-handler');
 const {
@@ -29,6 +29,35 @@ const {
 const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
 const localAgents = require('./local-agents');
+const vgenvVideo = require('./vgenv-video').createVgenvVideo();
+
+ipcMain.handle('vgenv:configure', (_event, key) => vgenvVideo.configure(key));
+ipcMain.handle('vgenv:ready', () => vgenvVideo.ready());
+ipcMain.handle('vgenv:list', (_event, projectPath) => vgenvVideo.list(projectPath));
+ipcMain.handle('vgenv:create', (_event, payload) => vgenvVideo.create(payload));
+ipcMain.handle('vgenv:get', (_event, payload) => vgenvVideo.get(payload));
+ipcMain.handle('vgenv:cancel', (_event, payload) => vgenvVideo.cancel(payload));
+ipcMain.handle('vgenv:download', async (_event, payload) => {
+  const saved = await vgenvVideo.download(payload);
+  // Keep the project index in sync immediately, so a restart finds the saved clip.
+  const relativePath = `media/videos/vgenv-${payload.id.replace(/[^a-zA-Z0-9_-]/g, '')}.mp4`;
+  if (path.resolve(payload.projectPath, relativePath) !== fileURLToPath(saved.url)) {
+    throw new Error('Saved vgenv video path did not match this project.');
+  }
+  try {
+    const project = parseProjectJson(await fs.readFile(projectFilePath(payload.projectPath), 'utf8'));
+    const id = `vgenv-${payload.id}`;
+    if (!Array.isArray(project.mediaItems)) project.mediaItems = [];
+    if (!project.mediaItems.some((item) => item.id === id)) {
+      project.mediaItems.push({ id, name: `MiniMax H3 ${payload.id}.mp4`, type: 'video', source: 'generated', generatedBy: 'MiniMax H3 (vgenv)', path: relativePath });
+      await writeProjectJsonAtomic(payload.projectPath, project);
+    }
+    return { ...saved, attached: true };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { ...saved, attached: false };
+    throw error;
+  }
+});
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);

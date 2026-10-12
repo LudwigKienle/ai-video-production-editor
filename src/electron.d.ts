@@ -6,6 +6,15 @@ export { };
 declare global {
     interface Window {
         electron: {
+            vgenv?: {
+                configure: (key: string) => Promise<{ ready: boolean }>;
+                ready: () => Promise<boolean>;
+                list: (projectPath: string) => Promise<Array<{ id: string; status: string; price?: { currency: 'CNY' | 'USD'; amount_micros: number } | null; localPath?: string }>>;
+                create: (payload: { projectPath: string; input: import('./services/vgenvVideoService').VgenvInput }) => Promise<import('./services/vgenvVideoService').VgenvJob>;
+                get: (payload: { projectPath: string; id: string }) => Promise<import('./services/vgenvVideoService').VgenvJob>;
+                cancel: (payload: { projectPath: string; id: string }) => Promise<import('./services/vgenvVideoService').VgenvJob>;
+                download: (payload: { projectPath: string; id: string }) => Promise<{ url: string; attached: boolean; price?: { currency: 'CNY' | 'USD'; amount_micros: number } | null }>;
+            };
             project: {
                 selectFolder: () => Promise<string | null>;
                 selectFile: () => Promise<string | null>;
