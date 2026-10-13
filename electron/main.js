@@ -30,14 +30,11 @@ const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
 const localAgents = require('./local-agents');
 const vgenvVideo = require('./vgenv-video').createVgenvVideo();
+const { createVgenvIpcSecurity, registerVgenvIpc, isTrustedStudioUrl, protectStudioNavigation } = require('./vgenv-ipc');
+const packagedStudioPath = path.join(__dirname, '../dist/studio.html');
+const vgenvIpcSecurity = createVgenvIpcSecurity(packagedStudioPath);
 
-ipcMain.handle('vgenv:configure', (_event, key) => vgenvVideo.configure(key));
-ipcMain.handle('vgenv:ready', () => vgenvVideo.ready());
-ipcMain.handle('vgenv:list', (_event, projectPath) => vgenvVideo.list(projectPath));
-ipcMain.handle('vgenv:create', (_event, payload) => vgenvVideo.create(payload));
-ipcMain.handle('vgenv:get', (_event, payload) => vgenvVideo.get(payload));
-ipcMain.handle('vgenv:cancel', (_event, payload) => vgenvVideo.cancel(payload));
-ipcMain.handle('vgenv:download', async (_event, payload) => {
+registerVgenvIpc(ipcMain, vgenvVideo, vgenvIpcSecurity, async (payload) => {
   const saved = await vgenvVideo.download(payload);
   // Keep the project index in sync immediately, so a restart finds the saved clip.
   const relativePath = `media/videos/vgenv-${payload.id.replace(/[^a-zA-Z0-9_-]/g, '')}.mp4`;
@@ -57,6 +54,9 @@ ipcMain.handle('vgenv:download', async (_event, payload) => {
     if (error.code === 'ENOENT') return { ...saved, attached: false };
     throw error;
   }
+}, async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
 });
 
 process.on('uncaughtException', (error) => {
@@ -152,6 +152,8 @@ function createWindow() {
       webSecurity: false, // Disabled to allow direct calls to Replicate API from localhost/file protocol
     },
   });
+  vgenvIpcSecurity.registerWindow(win.webContents);
+  protectStudioNavigation(win.webContents, vgenvIpcSecurity, (url) => shell.openExternal(url));
 
   // Remove the default menu bar for a cinematic look
   win.setMenuBarVisibility(false);
@@ -193,7 +195,7 @@ function createWindow() {
     'http://127.0.0.1:5173/studio.html',
     'http://localhost:5174/studio.html',
     'http://127.0.0.1:5174/studio.html',
-  ].filter(Boolean);
+  ].filter((url) => url && isTrustedStudioUrl(url, packagedStudioPath));
 
   let devServerIndex = 0;
   const showDevServerHelp = (reason) => {
@@ -220,6 +222,7 @@ function createWindow() {
     }
     const targetUrl = devServerCandidates[devServerIndex];
     devServerIndex += 1;
+    vgenvIpcSecurity.setStudioUrl(win.webContents, targetUrl);
     win.loadURL(targetUrl).catch((error) => {
       console.error(`Failed to load dev server ${targetUrl}:`, error);
       setTimeout(tryLoadDevServer, 600);
@@ -235,33 +238,29 @@ function createWindow() {
     tryLoadDevServer();
     win.webContents.openDevTools(); // Open DevTools to see errors
   } else {
-    win.loadFile(path.join(__dirname, '../dist/studio.html'));
+    vgenvIpcSecurity.setStudioUrl(win.webContents, pathToFileURL(packagedStudioPath).href);
+    win.loadFile(packagedStudioPath);
   }
 
   win.webContents.on('did-finish-load', resetZoom);
   win.on('focus', resetZoom);
 
-  // Open external links (like Gumroad) in the default browser, not the app window
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:')) {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    }
-    return { action: 'allow' };
-  });
 }
 
-ipcMain.handle('project:selectFolder', async () => {
+ipcMain.handle('project:selectFolder', async (event) => {
+  vgenvIpcSecurity.assertSender(event);
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory'],
   });
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
+  await vgenvIpcSecurity.selectProject(event, result.filePaths[0]);
   return result.filePaths[0];
 });
 
-ipcMain.handle('project:selectFile', async () => {
+ipcMain.handle('project:selectFile', async (event) => {
+  vgenvIpcSecurity.assertSender(event);
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
@@ -272,6 +271,7 @@ ipcMain.handle('project:selectFile', async () => {
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
+  await vgenvIpcSecurity.selectProject(event, path.dirname(result.filePaths[0]));
   return result.filePaths[0];
 });
 
@@ -304,7 +304,8 @@ ipcMain.handle('project:save', async (_event, { folderPath, project, assets }) =
   return { ok: true };
 });
 
-ipcMain.handle('project:load', async (_event, { folderPath }) => {
+ipcMain.handle('project:load', async (event, { folderPath }) => {
+  vgenvIpcSecurity.assertSender(event);
   const primaryPath = projectFilePath(folderPath);
   const backupPath = projectBackupFilePath(folderPath);
   let project;
@@ -325,6 +326,7 @@ ipcMain.handle('project:load', async (_event, { folderPath }) => {
     }
   }
 
+  await vgenvIpcSecurity.noteProjectLoaded(event, folderPath);
   const mediaItems = (project.mediaItems || []).map((item) => ({
     ...item,
     url: item.path ? toFileUrl(folderPath, item.path) : '',

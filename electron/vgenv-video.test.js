@@ -8,9 +8,9 @@ const { createVgenvVideo } = require('./vgenv-video');
 const input = { prompt: 'A dog runs across a field', duration: 5, resolution: '480p', aspectRatio: '16:9', promptMode: 'raw' };
 const job = (status, extra = {}) => ({ id: 'job_test', status, price: { currency: 'CNY', amount_micros: 123456 }, ...extra });
 const json = (value, status = 200) => ({ ok: status < 400, status, json: async () => value });
-const setup = async (fetchImpl) => {
+const setup = async (fetchImpl, transport = {}) => {
   const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'vgenv-test-'));
-  const api = createVgenvVideo({ fetchImpl });
+  const api = createVgenvVideo({ fetchImpl, ...transport });
   api.configure('test-secret');
   return { projectPath, api };
 };
@@ -96,19 +96,72 @@ test('all provider states are retained and cancellation only succeeds after GET 
 test('expired signed URL refreshes; retry download does not POST or send API key to CDN', async () => {
   let downloads = 0;
   const calls = [];
+  const destinations = [];
   const { api, projectPath } = await setup(async (url, options) => {
     calls.push({ url, options });
-    if (url.startsWith('https://api.vgenv.com/')) return json(job('succeeded', { output: { url: 'https://cdn.example/video.mp4', expires_at: '2000-01-01T00:00:00Z' } }));
+    return json(job('succeeded', { output: { url: 'https://cdn.example/video.mp4', expires_at: '2000-01-01T00:00:00Z' } }));
+  }, {
+    lookupImpl: async () => [{ address: '8.8.8.8', family: 4 }],
+    downloadRequestImpl: async (url, address) => {
+      destinations.push([url.href, address]);
     downloads++;
-    if (downloads === 1) return { ok: false, status: 503 };
-    return { ok: true, status: 200, arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer };
+      if (downloads === 1) return { status: 503 };
+      return { status: 200, bytes: Buffer.from([1, 2, 3]) };
+    },
   });
   await assert.rejects(api.download({ projectPath, id: 'job_test' }), /retry download/);
   const saved = await api.download({ projectPath, id: 'job_test' });
   assert.ok(saved.url.startsWith('file://'));
   assert.equal(saved.price.currency, 'CNY');
   assert.ok(calls.every((call) => call.options.method !== 'POST'));
-  assert.ok(calls.filter((call) => call.url.startsWith('https://cdn.')).every((call) => !call.options.headers));
+  assert.equal(destinations.length, 2);
+  assert.ok(destinations.every(([url, address]) => url.startsWith('https://cdn.') && address === '8.8.8.8'));
+  assert.ok(calls.every((call) => call.url.startsWith('https://api.vgenv.com/')));
+});
+
+test('initial, expiry-refresh, and 403-refresh URLs reject private targets before download', async () => {
+  for (const caseName of ['initial', 'expired', 'forbidden']) {
+    let gets = 0;
+    let downloads = 0;
+    const { api, projectPath } = await setup(async () => {
+      gets++;
+      const unsafe = caseName === 'initial' || (caseName !== 'initial' && gets > 1);
+      return json(job('succeeded', { output: {
+        url: unsafe ? 'http://127.0.0.1:12345/private' : 'https://cdn.example/video.mp4',
+        expires_at: caseName === 'expired' ? '2000-01-01T00:00:00Z' : '2999-01-01T00:00:00Z',
+      } }));
+    }, {
+      lookupImpl: async () => [{ address: '8.8.8.8', family: 4 }],
+      downloadRequestImpl: async () => { downloads++; return { status: 403 }; },
+    });
+    await assert.rejects(api.download({ projectPath, id: 'job_test' }), /unsafe download URL/);
+    assert.equal(downloads, caseName === 'forbidden' ? 1 : 0);
+  }
+});
+
+test('redirects are validated and DNS resolution is pinned to a public address', async () => {
+  const destinations = [];
+  const { api, projectPath } = await setup(async () => json(job('succeeded', {
+    output: { url: 'https://cdn.example/video.mp4', expires_at: '2999-01-01T00:00:00Z' },
+  })), {
+    lookupImpl: async (host) => [{ address: host === 'cdn.example' ? '8.8.8.8' : '1.1.1.1', family: 4 }],
+    downloadRequestImpl: async (url, address) => {
+      destinations.push([url.href, address]);
+      return { status: 302, location: 'http://127.0.0.1:12345/private' };
+    },
+  });
+  await assert.rejects(api.download({ projectPath, id: 'job_test' }), /unsafe download URL/);
+  assert.deepEqual(destinations, [['https://cdn.example/video.mp4', '8.8.8.8']]);
+
+  let requested = false;
+  const unsafeDns = await setup(async () => json(job('succeeded', {
+    output: { url: 'https://cdn.example/video.mp4', expires_at: '2999-01-01T00:00:00Z' },
+  })), {
+    lookupImpl: async () => [{ address: '8.8.8.8', family: 4 }, { address: '10.0.0.5', family: 4 }],
+    downloadRequestImpl: async () => { requested = true; return { status: 200, bytes: Buffer.from([1]) }; },
+  });
+  await assert.rejects(unsafeDns.api.download({ projectPath: unsafeDns.projectPath, id: 'job_test' }), /public addresses/);
+  assert.equal(requested, false);
 });
 
 test('rejects invalid input before paid create', async () => {
@@ -123,4 +176,67 @@ test('provider errors retain status and never enter the successful job registry'
   const { api, projectPath } = await setup(async () => json({ error: { message: 'insufficient balance' } }, 402));
   await assert.rejects(api.create({ projectPath, input }), /vgenv 402: insufficient balance/);
   assert.ok((await api.list(projectPath)).every((entry) => !entry.id || entry.id.startsWith('pending:')));
+});
+
+test('parallel status, cancellation and create updates retain every project job', async () => {
+  const fetchImpl = async (url, options) => {
+    await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 4)));
+    if (options.method === 'POST') return json({ id: 'job_created', status: 'queued' }, 202);
+    const id = decodeURIComponent(url.split('/').pop());
+    return json({ id, status: options.method === 'DELETE' ? 'cancelled' : id === 'job_cancel' ? 'queued' : 'running' });
+  };
+  const { api, projectPath } = await setup(fetchImpl);
+  const operations = Array.from({ length: 10 }, (_, index) => api.get({ projectPath, id: `job_${index}` }));
+  operations.push(api.cancel({ projectPath, id: 'job_cancel' }));
+  operations.push(api.create({ projectPath, input }));
+  await Promise.all(operations);
+  const saved = await api.list(projectPath);
+  assert.equal(saved.length, 12);
+  assert.ok(Array.from({ length: 10 }, (_, index) => saved.some((item) => item.id === `job_${index}`)).every(Boolean));
+  assert.equal(saved.find((item) => item.id === 'job_cancel').status, 'queued');
+  assert.equal(saved.find((item) => item.id === 'job_created').status, 'queued');
+  const restarted = createVgenvVideo({ fetchImpl });
+  assert.equal((await restarted.list(projectPath)).length, 12);
+});
+
+test('pending idempotency recovers after restart and project indexes stay isolated', async () => {
+  const keys = [];
+  let posts = 0;
+  const fetchImpl = async (_url, options) => {
+    if (options.method === 'POST') {
+      keys.push(options.headers['Idempotency-Key']);
+      posts++;
+      if (posts === 1) throw new Error('uncertain timeout');
+      return json({ id: 'job_recovered', status: 'queued' }, 202);
+    }
+    return json({ id: 'job_other', status: 'running' });
+  };
+  const { api, projectPath } = await setup(fetchImpl);
+  const otherPath = await fs.mkdtemp(path.join(os.tmpdir(), 'vgenv-other-project-'));
+  await assert.rejects(api.create({ projectPath, input }), /uncertain timeout/);
+  await api.get({ projectPath: otherPath, id: 'job_other' });
+  const restarted = createVgenvVideo({ fetchImpl });
+  restarted.configure('test-secret');
+  await restarted.create({ projectPath, input });
+  assert.equal(keys[0], keys[1]);
+  assert.deepEqual((await restarted.list(projectPath)).map((job) => job.id), ['job_recovered']);
+  assert.deepEqual((await restarted.list(otherPath)).map((job) => job.id), ['job_other']);
+});
+
+test('concurrent retries for one completed job share one signed download', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let downloads = 0;
+  const { api, projectPath } = await setup(async () => json(job('succeeded', {
+    output: { url: 'https://cdn.example/video.mp4', expires_at: '2999-01-01T00:00:00Z' },
+  })), {
+    lookupImpl: async () => [{ address: '8.8.8.8', family: 4 }],
+    downloadRequestImpl: async () => { downloads++; await gate; return { status: 200, bytes: Buffer.from([1]) }; },
+  });
+  const first = api.download({ projectPath, id: 'job_test' });
+  const second = api.download({ projectPath, id: 'job_test' });
+  release();
+  const results = await Promise.all([first, second]);
+  assert.equal(downloads, 1);
+  assert.equal(results[0].url, results[1].url);
 });

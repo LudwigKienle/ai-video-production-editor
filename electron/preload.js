@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
   vgenv: {
+    projectReady: (projectPath) => ipcRenderer.invoke('vgenv:projectReady', projectPath),
+    selectProject: (projectPath) => ipcRenderer.invoke('vgenv:selectProject', projectPath),
     configure: (key) => ipcRenderer.invoke('vgenv:configure', key),
     ready: () => ipcRenderer.invoke('vgenv:ready'),
     list: (projectPath) => ipcRenderer.invoke('vgenv:list', projectPath),

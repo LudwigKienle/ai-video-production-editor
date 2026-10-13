@@ -43,6 +43,7 @@ import { getProductionFormat, type ProductionFormatId } from '../data/production
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
 import { formatVgenvPrice, vgenvApi, waitForVgenvJob, type VgenvJob } from '../services/vgenvVideoService';
+import { advanceVgenvProjectEpoch, isCurrentVgenvProject as isCurrentProjectEpoch, jobForVgenvProject } from '../services/vgenvProjectScope';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -487,15 +488,45 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const [vgenvResolution, setVgenvResolution] = useState<'480p' | '768p'>('480p');
   const [vgenvPromptMode, setVgenvPromptMode] = useState<'raw' | 'enhance'>('raw');
   const [vgenvReady, setVgenvReady] = useState(false);
-  const [vgenvJob, setVgenvJob] = useState<VgenvJob | null>(null);
-  const [vgenvJobs, setVgenvJobs] = useState<Array<{ id: string; status: string; localPath?: string }>>([]);
+  const [vgenvProjectReadyState, setVgenvProjectReadyState] = useState<{ path: string; ready: boolean } | null>(null);
+  const vgenvProjectReady = Boolean(vgenvProjectReadyState?.path === currentProjectPath && vgenvProjectReadyState.ready);
+  const projectEpoch = useRef({ path: currentProjectPath, value: 0 });
+  projectEpoch.current = advanceVgenvProjectEpoch(projectEpoch.current, currentProjectPath);
+  const [vgenvJobState, setVgenvJobState] = useState<{ path: string; job: VgenvJob } | null>(null);
+  const vgenvJob = jobForVgenvProject(vgenvJobState, currentProjectPath);
+  type SavedVgenvJob = { id: string; status: string; localPath?: string };
+  const [vgenvJobsState, setVgenvJobsState] = useState<{ path: string; jobs: SavedVgenvJob[] } | null>(null);
+  const vgenvJobs = vgenvJobsState?.path === currentProjectPath ? vgenvJobsState.jobs : [];
   const vgenvKeyInput = useRef<HTMLInputElement>(null);
-  const vgenvBusy = useRef(false);
+  const vgenvBusy = useRef<symbol | null>(null);
   const vgenvPoll = useRef<AbortController | null>(null);
+  const isCurrentVgenvProject = (path: string, epoch: number) =>
+    isCurrentProjectEpoch(projectEpoch.current, path, epoch);
+  const updateVgenvJobs = (path: string, epoch: number, update: (jobs: SavedVgenvJob[]) => SavedVgenvJob[]) => {
+    if (!isCurrentVgenvProject(path, epoch)) return;
+    setVgenvJobsState((previous) => ({ path, jobs: update(previous?.path === path ? previous.jobs : []) }));
+  };
   useEffect(() => {
+    const path = currentProjectPath;
+    const epoch = projectEpoch.current.value;
+    vgenvPoll.current?.abort();
+    vgenvPoll.current = null;
+    if (vgenvBusy.current) setIsGenerating(false);
+    vgenvBusy.current = null;
+    setVgenvJobState(null);
+    setVgenvJobsState(null);
+    setVgenvProjectReadyState(null);
     if (!window.electron?.vgenv) return;
-    window.electron.vgenv.ready().then(setVgenvReady).catch(() => setVgenvReady(false));
-    if (currentProjectPath) window.electron.vgenv.list(currentProjectPath).then(setVgenvJobs).catch(() => undefined);
+    window.electron.vgenv.ready().then((ready) => {
+      if (projectEpoch.current.value === epoch) setVgenvReady(ready);
+    }).catch(() => { if (projectEpoch.current.value === epoch) setVgenvReady(false); });
+    if (path) window.electron.vgenv.projectReady(path).then(async (ready) => {
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      setVgenvProjectReadyState({ path, ready });
+      if (!ready) return;
+      const jobs = await vgenvApi().list(path);
+      updateVgenvJobs(path, epoch, (current) => [...current, ...jobs.filter((job) => !current.some((entry) => entry.id === job.id))]);
+    }).catch(() => undefined);
     return () => vgenvPoll.current?.abort();
   }, [currentProjectPath]);
   const [prompt, setPrompt] = useState('');
@@ -556,7 +587,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   });
 
   const modelOption = useMemo(() => MODEL_OPTIONS.find((option) => option.id === modelId), [modelId]);
-  const readyForGeneration = modelId === 'vgenv-h3' ? Boolean(window.electron?.vgenv && currentProjectPath && vgenvReady) : apiKeyReady !== false;
+  const readyForGeneration = modelId === 'vgenv-h3' ? Boolean(window.electron?.vgenv && currentProjectPath && vgenvReady && vgenvProjectReady) : apiKeyReady !== false;
   const availableAspectRatios = MODEL_ASPECT_RATIOS[modelId] || ASPECT_RATIOS;
   const supportsVeoElements = modelId === 'veo-fast' || modelId === 'veo';
   const supportsKlingAdvanced = modelId === 'kling-o3-pro-fal' || modelId === 'kling-v3-pro-i2v-fal' || modelId === 'kling-v3-pro-t2v-fal';
@@ -867,9 +898,12 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   }, [seedImage, onConsumeSeed]);
 
   const runVgenvJob = async (existingId?: string) => {
+    const path = currentProjectPath;
+    const epoch = projectEpoch.current.value;
     if (vgenvBusy.current) return;
-    if (!currentProjectPath) { setStatus('Open a local project folder before using vgenv.'); return; }
+    if (!path) { setStatus('Open a local project folder before using vgenv.'); return; }
     if (!vgenvReady) { setStatus('Enter a vgenv API key for this desktop session.'); return; }
+    if (!vgenvProjectReady) { setStatus('Authorize the currently open project folder for vgenv.'); return; }
     if (!existingId && vgenvJobs.some((job) => !job.localPath && !['failed', 'cancelled'].includes(job.status))) {
       setStatus('Resume the saved vgenv job or retry its download before starting another paid generation.'); return;
     }
@@ -877,7 +911,8 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     if (!existingId && (endFrameFile || endFrameUrl) && !(referenceFile || referenceUrl)) {
       setStatus('An end frame requires a start frame.'); return;
     }
-    vgenvBusy.current = true;
+    const operation = Symbol('vgenv operation');
+    vgenvBusy.current = operation;
     setIsGenerating(true);
     const controller = new AbortController();
     vgenvPoll.current = controller;
@@ -892,26 +927,32 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         return `data:${data.mimeType};base64,${data.base64}`;
       };
       setStatus(existingId ? 'Checking existing vgenv job...' : 'Submitting to vgenv...');
+      const firstFrame = existingId ? undefined : await frameUrl(referenceFile, referenceUrl);
+      const lastFrame = existingId ? undefined : await frameUrl(endFrameFile, endFrameUrl);
+      if (!isCurrentVgenvProject(path, epoch)) return;
       const job = existingId
-        ? await vgenvApi().get({ projectPath: currentProjectPath, id: existingId })
+        ? await vgenvApi().get({ projectPath: path, id: existingId })
         : await vgenvApi().create({
-          projectPath: currentProjectPath,
+          projectPath: path,
           input: {
             prompt: prompt.trim(), duration: normalizedDurationSeconds, resolution: vgenvResolution,
             aspectRatio, promptMode: vgenvPromptMode,
-            firstFrame: await frameUrl(referenceFile, referenceUrl),
-            lastFrame: await frameUrl(endFrameFile, endFrameUrl),
+            firstFrame, lastFrame,
           },
         });
-      setVgenvJob(job);
-      setVgenvJobs((prev) => prev.some((entry) => entry.id === job.id) ? prev : [{ id: job.id, status: job.status }, ...prev]);
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      setVgenvJobState({ path, job });
+      updateVgenvJobs(path, epoch, (prev) => prev.some((entry) => entry.id === job.id) ? prev : [{ id: job.id, status: job.status }, ...prev]);
       if (job.status === 'failed' || job.status === 'cancelled') throw new Error(`vgenv job ${job.status}.`);
-      const finished = job.status === 'succeeded' ? job : await waitForVgenvJob(currentProjectPath, job.id, (next) => {
-        setVgenvJob(next);
-        setVgenvJobs((prev) => prev.map((entry) => entry.id === next.id ? { ...entry, status: next.status } : entry));
+      const finished = job.status === 'succeeded' ? job : await waitForVgenvJob(path, job.id, (next) => {
+        if (!isCurrentVgenvProject(path, epoch)) return;
+        setVgenvJobState({ path, job: next });
+        updateVgenvJobs(path, epoch, (prev) => prev.map((entry) => entry.id === next.id ? { ...entry, status: next.status } : entry));
       }, controller.signal);
+      if (!isCurrentVgenvProject(path, epoch)) return;
       setStatus('Downloading the completed video to the project folder...');
-      const saved = await vgenvApi().download({ projectPath: currentProjectPath, id: job.id });
+      const saved = await vgenvApi().download({ projectPath: path, id: job.id });
+      if (!isCurrentVgenvProject(path, epoch)) return;
       const mediaId = `vgenv-${job.id}`;
       if (!mediaItems.some((item) => item.id === mediaId)) {
         const item: MediaItem = {
@@ -922,25 +963,30 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         onAddGeneratedMedia(item);
         setGenerated((prev) => [item, ...prev].slice(0, 12));
       }
-      setVgenvJobs((prev) => prev.map((entry) => entry.id === job.id ? { ...entry, status: 'succeeded', localPath: saved.url } : entry));
+      updateVgenvJobs(path, epoch, (prev) => prev.map((entry) => entry.id === job.id ? { ...entry, status: 'succeeded', localPath: saved.url } : entry));
       setStatus(`Video saved in your project${saved.attached ? ' and added to its index' : '; save the project to add it to its index'}. Server price: ${formatVgenvPrice(saved.price || finished.price)}.`);
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      if (isCurrentVgenvProject(path, epoch) && !(error instanceof DOMException && error.name === 'AbortError')) {
         setStatus(error instanceof Error ? error.message : 'vgenv job failed. Retry the saved job or download; do not generate again.');
       }
     } finally {
-      vgenvBusy.current = false;
-      setIsGenerating(false);
-      vgenvPoll.current = null;
+      if (vgenvBusy.current === operation) {
+        vgenvBusy.current = null;
+        if (isCurrentVgenvProject(path, epoch)) setIsGenerating(false);
+      }
+      if (vgenvPoll.current === controller) vgenvPoll.current = null;
     }
   };
 
   const cancelVgenvJob = async () => {
-    if (!currentProjectPath || !vgenvJob) return;
+    const active = vgenvJobState;
+    const epoch = projectEpoch.current.value;
+    if (!active || active.path !== currentProjectPath) return;
     try {
-      const confirmed = await vgenvApi().cancel({ projectPath: currentProjectPath, id: vgenvJob.id });
-      setVgenvJob(confirmed);
-      setVgenvJobs((prev) => prev.map((entry) => entry.id === confirmed.id ? { ...entry, status: confirmed.status } : entry));
+      const confirmed = await vgenvApi().cancel({ projectPath: active.path, id: active.job.id });
+      if (!isCurrentVgenvProject(active.path, epoch)) return;
+      setVgenvJobState({ path: active.path, job: confirmed });
+      updateVgenvJobs(active.path, epoch, (prev) => prev.map((entry) => entry.id === confirmed.id ? { ...entry, status: confirmed.status } : entry));
       if (confirmed.status === 'cancelled') {
         vgenvPoll.current?.abort('remote-cancelled');
         setStatus('vgenv confirmed cancellation.');
@@ -948,7 +994,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         setStatus(`vgenv reports ${confirmed.status}; cancellation was not confirmed.`);
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Cancellation failed; job status is unconfirmed.');
+      if (isCurrentVgenvProject(active.path, epoch)) setStatus(error instanceof Error ? error.message : 'Cancellation failed; job status is unconfirmed.');
     }
   };
 
@@ -1633,6 +1679,23 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                         </label>
                       </div>
                       {!currentProjectPath && <p className="text-xs text-amber-300">Open a local project folder before generating.</p>}
+                      {currentProjectPath && !vgenvProjectReady && (
+                        <button type="button" className="app-button app-secondary" onClick={async () => {
+                          const path = currentProjectPath;
+                          const epoch = projectEpoch.current.value;
+                          try {
+                            const ready = await vgenvApi().selectProject(path);
+                            if (!isCurrentVgenvProject(path, epoch)) return;
+                            setVgenvProjectReadyState({ path, ready });
+                            if (ready) {
+                              const jobs = await vgenvApi().list(path);
+                              updateVgenvJobs(path, epoch, (current) => [...current, ...jobs.filter((job) => !current.some((entry) => entry.id === job.id))]);
+                            }
+                          } catch (error) {
+                            if (isCurrentVgenvProject(path, epoch)) setStatus(error instanceof Error ? error.message : 'Project folder authorization failed.');
+                          }
+                        }}>Authorize this project folder</button>
+                      )}
                       {vgenvJob && <p className="text-xs text-gray-300">Job {vgenvJob.id}: {vgenvJob.status} · {formatVgenvPrice(vgenvJob.price)}</p>}
                       {vgenvJob && ['preparing', 'queued'].includes(vgenvJob.status) && (
                         <button type="button" className="app-button app-secondary" onClick={cancelVgenvJob}>Request cancellation</button>

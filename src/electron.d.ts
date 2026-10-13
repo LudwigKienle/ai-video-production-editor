@@ -7,6 +7,8 @@ declare global {
     interface Window {
         electron: {
             vgenv?: {
+                projectReady: (projectPath: string) => Promise<boolean>;
+                selectProject: (projectPath: string) => Promise<boolean>;
                 configure: (key: string) => Promise<{ ready: boolean }>;
                 ready: () => Promise<boolean>;
                 list: (projectPath: string) => Promise<Array<{ id: string; status: string; price?: { currency: 'CNY' | 'USD'; amount_micros: number } | null; localPath?: string }>>;

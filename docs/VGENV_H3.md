@@ -2,7 +2,7 @@
 
 The **MiniMax H3 (vgenv)** option in Create Videos is an independent desktop provider. It does not use the MiniMax H3 entry in the FAL catalog, hosted credits, or Auto routing.
 
-Open a local project folder, select the vgenv option, and enter a vgenv Project API key. The key stays in Electron main-process memory for this app session. It is cleared when the app quits. The web build disables this option because it has no trusted key transport.
+Open a local project folder, select the vgenv option, and enter a vgenv Project API key. If you reopened a recent project without the system folder picker, use **Authorize this project folder** and select that same folder. The key stays in Electron main-process memory for this app session. It is cleared when the app quits. The web build disables this option because it has no trusted key transport.
 
 This first adapter supports text prompts and optional first/last image frames, 480p or 768p, 4–15 seconds, and the aspect ratios listed in the model selector. A last frame requires a first frame. **Raw** sends the prompt as written; **Enhance** asks vgenv to optimize it. vgenv supplies the final job price and currency, which may be CNY or USD.
 
