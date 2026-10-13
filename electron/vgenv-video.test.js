@@ -261,6 +261,17 @@ test('production HTTPS transport reaches a local controlled socket with pinned l
   }
 });
 
+test('production HTTPS transport catches immediate connection refusal', async () => {
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  await assert.rejects(
+    defaultDownloadRequest(new URL(`https://cdn.example:${port}/video.mp4`), '127.0.0.1', 4),
+    (error) => { assert.equal(error.code, 'ECONNREFUSED'); return true; },
+  );
+});
+
 test('video output refuses symlinked project folders and final files', async () => {
   for (const location of ['media', 'videos', 'file']) {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'vgenv-outside-'));

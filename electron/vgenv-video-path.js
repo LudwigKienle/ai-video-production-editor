@@ -28,6 +28,24 @@ async function assertSafeSavedVideo(projectPath, id, filePath) {
   return dest;
 }
 
+async function matchesExistingVideo(dest, bytes) {
+  const handle = await fs.open(dest, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.size !== bytes.length) return false;
+    const chunk = Buffer.allocUnsafe(Math.min(1024 * 1024, bytes.length));
+    for (let offset = 0; offset < bytes.length;) {
+      const size = Math.min(chunk.length, bytes.length - offset);
+      const { bytesRead } = await handle.read(chunk, 0, size, offset);
+      if (bytesRead !== size || !chunk.subarray(0, size).equals(bytes.subarray(offset, offset + size))) return false;
+      offset += size;
+    }
+    return true;
+  } finally {
+    await handle.close();
+  }
+}
+
 async function writeProjectVideo(projectPath, id, bytes) {
   const { dest } = await safeVideoDestination(projectPath, id);
   try {
@@ -45,14 +63,19 @@ async function writeProjectVideo(projectPath, id, bytes) {
     await handle.sync();
     await handle.close();
     handle = null;
-    // Recheck the directory and temporary file before the atomic replacement.
+    // Recheck the directory and temporary file before publishing the new video.
     const current = await safeVideoDestination(projectPath, id);
     if (current.dest !== dest || await fs.realpath(temp) !== temp) unsafe();
-    try {
-      const existing = await fs.lstat(dest);
-      if (!existing.isFile() || existing.isSymbolicLink()) unsafe();
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    await fs.rename(temp, dest);
+    // A hard link is an atomic create-if-absent. rename() would overwrite a file
+    // that appeared after the earlier lstat, including one written by another job.
+    try { await fs.link(temp, dest); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      await assertSafeSavedVideo(projectPath, id, dest);
+      if (!await matchesExistingVideo(dest, bytes)) {
+        throw new Error('An existing vgenv video has different content; it was not overwritten.');
+      }
+    }
     await assertSafeSavedVideo(projectPath, id, dest);
     return dest;
   } finally {

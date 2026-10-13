@@ -49,8 +49,11 @@ function defaultDownloadRequest(url, address, family) {
       method: 'GET',
       // Pin the address that passed the public-IP check; TLS still checks the URL hostname.
       lookup: (_host, options, callback) => {
-        if (options.all) callback(null, [{ address, family }]);
-        else callback(null, address, family);
+        // A synchronous callback can emit a socket error before request.on('error') is installed.
+        queueMicrotask(() => {
+          if (options.all) callback(null, [{ address, family }]);
+          else callback(null, address, family);
+        });
       },
       timeout: 120_000,
     }, (response) => {
