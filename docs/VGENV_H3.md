@@ -8,4 +8,6 @@ This first adapter supports text prompts and optional first/last image frames, 4
 
 The app saves job IDs in `.vgenv-jobs.json` inside the project folder. Completed videos are downloaded to `media/videos` and added to the project index. A failed download can be retried using **Resume / retry download** without creating a second paid job. Enter the key again after restarting the desktop app to resume an unfinished job. Cancellation is only displayed as confirmed after the remote API reports `cancelled`; a running job may continue.
 
+For local output safety, `media` and `media/videos` must be ordinary directories. The adapter rejects symbolic links for these directories and for a generated video file.
+
 API contract: [vgenv OpenAPI](https://api.vgenv.com/docs-json), [MiniMax H3 documentation](https://vgenv.com/en/minimax-h3-api).

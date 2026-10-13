@@ -3,7 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { createVgenvVideo } = require('./vgenv-video');
+const net = require('node:net');
+const { fileURLToPath } = require('node:url');
+const { createVgenvVideo, defaultDownloadRequest } = require('./vgenv-video');
+const { assertSafeSavedVideo } = require('./vgenv-video-path');
 
 const input = { prompt: 'A dog runs across a field', duration: 5, resolution: '480p', aspectRatio: '16:9', promptMode: 'raw' };
 const job = (status, extra = {}) => ({ id: 'job_test', status, price: { currency: 'CNY', amount_micros: 123456 }, ...extra });
@@ -112,6 +115,7 @@ test('expired signed URL refreshes; retry download does not POST or send API key
   await assert.rejects(api.download({ projectPath, id: 'job_test' }), /retry download/);
   const saved = await api.download({ projectPath, id: 'job_test' });
   assert.ok(saved.url.startsWith('file://'));
+  assert.equal(await assertSafeSavedVideo(projectPath, 'job_test', fileURLToPath(saved.url)), fileURLToPath(saved.url));
   assert.equal(saved.price.currency, 'CNY');
   assert.ok(calls.every((call) => call.options.method !== 'POST'));
   assert.equal(destinations.length, 2);
@@ -239,4 +243,51 @@ test('concurrent retries for one completed job share one signed download', async
   const results = await Promise.all([first, second]);
   assert.equal(downloads, 1);
   assert.equal(results[0].url, results[1].url);
+});
+
+test('production HTTPS transport reaches a local controlled socket with pinned lookup', async () => {
+  let accepted = 0;
+  const server = net.createServer((socket) => { accepted++; socket.destroy(); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    await assert.rejects(
+      defaultDownloadRequest(new URL(`https://cdn.example:${port}/video.mp4`), '127.0.0.1', 4),
+      (error) => { assert.notEqual(error.code, 'ERR_INVALID_IP_ADDRESS'); return true; },
+    );
+    assert.equal(accepted, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('video output refuses symlinked project folders and final files', async () => {
+  for (const location of ['media', 'videos', 'file']) {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'vgenv-outside-'));
+    const { api, projectPath } = await setup(async () => json(job('succeeded', {
+      output: { url: 'https://cdn.example/video.mp4', expires_at: '2999-01-01T00:00:00Z' },
+    })), {
+      lookupImpl: async () => [{ address: '8.8.8.8', family: 4 }],
+      downloadRequestImpl: async () => ({ status: 200, bytes: Buffer.from('video bytes') }),
+    });
+    const media = path.join(projectPath, 'media');
+    const videos = path.join(media, 'videos');
+    const dest = path.join(videos, 'vgenv-job_test.mp4');
+    if (location === 'media') await fs.symlink(outside, media, 'dir');
+    if (location === 'videos') {
+      await fs.mkdir(media);
+      await fs.symlink(outside, videos, 'dir');
+    }
+    let externalFile;
+    if (location === 'file') {
+      await fs.mkdir(videos, { recursive: true });
+      externalFile = path.join(outside, 'private.mp4');
+      await fs.writeFile(externalFile, 'original');
+      await fs.symlink(externalFile, dest);
+    }
+    await assert.rejects(api.download({ projectPath, id: 'job_test' }), /escapes the selected project/);
+    await assert.rejects(assertSafeSavedVideo(projectPath, 'job_test', dest), /escapes the selected project/);
+    if (externalFile) assert.equal(await fs.readFile(externalFile, 'utf8'), 'original');
+    else assert.deepEqual(await fs.readdir(outside), []);
+  }
 });

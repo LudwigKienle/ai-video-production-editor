@@ -6,6 +6,7 @@ const dns = require('dns/promises');
 const https = require('https');
 const net = require('net');
 const { pathToFileURL } = require('url');
+const { assertSafeSavedVideo, writeProjectVideo } = require('./vgenv-video-path');
 
 const API = 'https://api.vgenv.com/v2/videos';
 const STATES = new Set(['preparing', 'queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -47,7 +48,10 @@ function defaultDownloadRequest(url, address, family) {
     const request = https.request(url, {
       method: 'GET',
       // Pin the address that passed the public-IP check; TLS still checks the URL hostname.
-      lookup: (_host, _options, callback) => callback(null, address, family),
+      lookup: (_host, options, callback) => {
+        if (options.all) callback(null, [{ address, family }]);
+        else callback(null, address, family);
+      },
       timeout: 120_000,
     }, (response) => {
       const chunks = [];
@@ -229,7 +233,10 @@ function createVgenvVideo({ fetchImpl = fetch, lookupImpl = dns.lookup, download
       const operation = (async () => {
         const jobs = await read(projectPath);
         if (jobs[id]?.localPath) {
-          try { await fs.access(jobs[id].localPath); return { url: pathToFileURL(jobs[id].localPath).href, price: jobs[id].price }; } catch {}
+          try {
+            const savedPath = await assertSafeSavedVideo(projectPath, id, jobs[id].localPath);
+            return { url: pathToFileURL(savedPath).href, price: jobs[id].price };
+          } catch (error) { if (error.code !== 'ENOENT') throw error; }
         }
         let job = await request('GET', `${API}/${encodeURIComponent(id)}`);
         if (job.status !== 'succeeded') fail(`Video is ${job.status}; it is not ready to download.`);
@@ -245,15 +252,7 @@ function createVgenvVideo({ fetchImpl = fetch, lookupImpl = dns.lookup, download
         if (response.status !== 200) fail(`Video download failed (${response.status}); retry download without regenerating.`);
         const bytes = response.bytes;
         if (!bytes.length || bytes.length > 500_000_000) fail('Video download is empty or exceeds 500 MB.');
-        const dest = path.join(folder(projectPath), 'media', 'videos', `vgenv-${id.replace(/[^a-zA-Z0-9_-]/g, '')}.mp4`);
-        await fs.mkdir(path.dirname(dest), { recursive: true });
-        const temp = `${dest}.${crypto.randomUUID()}.tmp`;
-        try {
-          await fs.writeFile(temp, bytes);
-          await fs.rename(temp, dest);
-        } finally {
-          await fs.unlink(temp).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-        }
+        const dest = await writeProjectVideo(projectPath, id, bytes);
         await updateJobs(projectPath, (jobs) => {
           jobs[id] = {
             id, status: job.status, price: job.price || null,
@@ -268,4 +267,4 @@ function createVgenvVideo({ fetchImpl = fetch, lookupImpl = dns.lookup, download
   };
 }
 
-module.exports = { createVgenvVideo, isPublicAddress, publicDownloadUrl };
+module.exports = { createVgenvVideo, isPublicAddress, publicDownloadUrl, defaultDownloadRequest };

@@ -30,6 +30,7 @@ const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
 const localAgents = require('./local-agents');
 const vgenvVideo = require('./vgenv-video').createVgenvVideo();
+const { assertSafeSavedVideo } = require('./vgenv-video-path');
 const { createVgenvIpcSecurity, registerVgenvIpc, isTrustedStudioUrl, protectStudioNavigation } = require('./vgenv-ipc');
 const packagedStudioPath = path.join(__dirname, '../dist/studio.html');
 const vgenvIpcSecurity = createVgenvIpcSecurity(packagedStudioPath);
@@ -37,10 +38,8 @@ const vgenvIpcSecurity = createVgenvIpcSecurity(packagedStudioPath);
 registerVgenvIpc(ipcMain, vgenvVideo, vgenvIpcSecurity, async (payload) => {
   const saved = await vgenvVideo.download(payload);
   // Keep the project index in sync immediately, so a restart finds the saved clip.
-  const relativePath = `media/videos/vgenv-${payload.id.replace(/[^a-zA-Z0-9_-]/g, '')}.mp4`;
-  if (path.resolve(payload.projectPath, relativePath) !== fileURLToPath(saved.url)) {
-    throw new Error('Saved vgenv video path did not match this project.');
-  }
+  await assertSafeSavedVideo(payload.projectPath, payload.id, fileURLToPath(saved.url));
+  const relativePath = `media/videos/vgenv-${payload.id}.mp4`;
   try {
     const project = parseProjectJson(await fs.readFile(projectFilePath(payload.projectPath), 'utf8'));
     const id = `vgenv-${payload.id}`;
