@@ -3,6 +3,9 @@
 This guide is for people who just found the repository and want to understand
 what the app is before reading the full codebase.
 
+Prefer to watch? The [video version](https://youtu.be/p99IG1m5ybU) covers install, the welcome guide,
+the studio layout, a project folder and the Project Hub in under four minutes.
+
 ## 1. Run the App
 
 ```bash

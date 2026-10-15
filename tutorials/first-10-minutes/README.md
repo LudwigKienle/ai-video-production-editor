@@ -1,5 +1,7 @@
 # Tutorial video: Your first 10 minutes
 
+**Published:** https://youtu.be/p99IG1m5ybU
+
 YouTube tutorial (English, about 4 minutes) for new users: install, welcome guide,
 connecting a provider, the studio layout, a project folder, the Project Hub with the
 Rainline demo script, the seven production steps, the generators, edit and export.
@@ -104,6 +106,8 @@ them). Motion scenes follow the new timings automatically.
   the narration covers this.
 
 ## Status
+
+- Published on YouTube on 15 October 2026: https://youtu.be/p99IG1m5ybU
 
 - Narration: ElevenLabs v4 via the connector, word timings from Scribe (done).
 - 4K screen recording on the real timings, edit, click/whoosh sound design (done).

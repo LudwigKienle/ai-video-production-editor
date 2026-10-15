@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20DMG%20%7C%20Windows%20EXE-238636?style=for-the-badge&logo=github&logoColor=white" alt="Download the desktop app" /></a>
+  <a href="https://youtu.be/p99IG1m5ybU"><img src="https://img.shields.io/badge/Watch-Getting%20started%20%284%20min%29-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch the getting-started tutorial" /></a>
   <a href="https://youtu.be/-6jo636vRSw?si=v5XSwSIz4WfLtE9z"><img src="https://img.shields.io/badge/Watch-Launch%20trailer-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch the launch trailer" /></a>
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/stargazers"><img src="https://img.shields.io/badge/%E2%AD%90-Star%20the%20repo-0969DA?style=for-the-badge" alt="Star the repository" /></a>
 </p>
@@ -123,6 +124,8 @@ adapters are maintained integration points rather than permanent contracts.
 
 ## Quick start
 
+**New here?** Watch the [4-minute setup video](https://youtu.be/p99IG1m5ybU) first.
+
 **Just want the app?** Download the newest installer from
 [GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest)
 (signed macOS `.dmg`, Windows `.exe`), open it, add at least one provider key
@@ -157,6 +160,14 @@ Screenshots in this README are generated with
 ## Video tutorials
 
 Official channel: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIVideoProductionEditor)
+
+<a href="https://youtu.be/p99IG1m5ybU"><img src="https://img.youtube.com/vi/p99IG1m5ybU/maxresdefault.jpg" alt="Free Open-Source AI Video Editor – Setup & First Project in 10 Minutes" width="560" /></a>
+
+- **[Setup & first project in 10 minutes](https://youtu.be/p99IG1m5ybU)** (start here): install, the
+  welcome guide and a provider key, the studio layout, a project folder, the
+  Project Hub with the Rainline demo script, the seven production steps, edit and
+  export. Made with the scripted pipeline in
+  [`tutorials/first-10-minutes`](tutorials/first-10-minutes/README.md).
 
 - Short product overview for a fast first impression.
 - Full Mac walkthrough: keys, script, storyboards, video generation, editing,
