@@ -79,9 +79,11 @@ sessions), the narration can come from the ElevenLabs connector instead:
 4. `python3 script/align_timings.py` maps those word times onto the script words and
    writes `build/timings/<scene>.json`.
 
-Sound effects (`build/audio/sfx/`): a single soft click (first 90 ms of the generated
-file) on every recorded mouse click, and a quiet whoosh on scene changes, both from
-`eleven_text_to_sound_v2`. The restricted connector cannot generate music.
+Sound effects (`build/audio/sfx/`, all from `eleven_text_to_sound_v2`): a single soft
+click on every recorded mouse click, a quiet whoosh on scene changes, and foley placed
+on the narration in `remotion/src/foley.ts` (logo shimmer, UI pops, keyboard typing, a
+paste, a star twinkle). The restricted connector cannot generate music; the track came
+from Magnific music generation and is fitted to the video length as `build/audio/music.wav`.
 
 Changing a sentence: edit `script/scenes.json`, re-run the voice for that scene, then
 re-record that scene (`record.mjs <scene>` replays the earlier scenes without filming
@@ -105,5 +107,5 @@ them). Motion scenes follow the new timings automatically.
 
 - Narration: ElevenLabs v4 via the connector, word timings from Scribe (done).
 - 4K screen recording on the real timings, edit, click/whoosh sound design (done).
-- Music: not yet (needs the full ElevenLabs connector or another music source);
-  drop a track at `build/audio/music.mp3` and re-render, it is ducked automatically.
+- Music bed (ducked under the voice) and foley (done). Master: −16.6 LUFS, −1.4 dBTP,
+  3:43. To swap the track, replace `build/audio/music.wav` (or `music.mp3`) and re-render.
