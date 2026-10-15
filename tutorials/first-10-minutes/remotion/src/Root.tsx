@@ -4,6 +4,7 @@ import { Background } from './components/Background';
 import { Captions } from './components/Captions';
 import { ScreenScene } from './components/ScreenScene';
 import { directions } from './direction';
+import { foley } from './foley';
 import { Install, Intro, Outro } from './scenes/Motion';
 import { FPS, HEIGHT, LEAD, SceneData, WIDTH, XFADE, music, sceneFrames, sfx, timeline, totalFrames } from './timeline';
 
@@ -28,6 +29,11 @@ const SceneClip: React.FC<{ scene: SceneData }> = ({ scene }) => {
       {sfx.click && scene.events.filter((e) => e.type === 'click').map((e, i) => (
         <Sequence key={i} from={Math.max(0, Math.round(e.t * FPS) - 1)} durationInFrames={6} layout="none">
           <Audio src={staticFile(sfx.click as string)} volume={0.55} />
+        </Sequence>
+      ))}
+      {(foley[scene.id]?.(scene) ?? []).map((cue, i) => (
+        <Sequence key={`f-${i}`} from={Math.max(0, cue.at)} durationInFrames={cue.frames ?? 90} layout="none">
+          <Audio src={staticFile(cue.src)} volume={(f) => cue.volume * (cue.frames ? Math.min(1, (cue.frames - f) / 4) : 1)} />
         </Sequence>
       ))}
       {scene.audio && (

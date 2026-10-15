@@ -27,6 +27,6 @@ const out = scenes.map((scene) => {
 });
 const asset = (rel) => (existsSync(resolve(root, 'build', rel)) ? rel : null);
 const sfx = { click: asset('audio/sfx/click-one.wav'), whoosh: asset('audio/sfx/whoosh-one.wav') };
-const music = existsSync(resolve(root, 'build/audio/music.mp3')) ? 'audio/music.mp3' : null;
+const music = asset('audio/music.wav') ?? asset('audio/music.mp3');
 writeFileSync(resolve(import.meta.dirname, '../src/data.generated.json'), JSON.stringify({ music, sfx, scenes: out }, null, 1));
 console.log(out.map((s) => `${s.id}: ${s.duration.toFixed(1)} s${s.estimated ? ' (estimated)' : ''}${s.hasScreen ? ', screen' : ''}`).join('\n'));
