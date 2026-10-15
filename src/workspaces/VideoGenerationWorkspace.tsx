@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CostRate, MediaItem, RecentProject, ReferenceItem, ShotPrompt } from '../types';
 import { UploadIcon, SparklesIcon, DownloadIcon, VideoIcon } from '../components/icons';
 import { generateVideoWithVeo } from '../services/geminiService';
@@ -42,6 +42,8 @@ import { pickVideoModel } from '../utils/modelAutoSelect';
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
+import { formatVgenvPrice, vgenvApi, waitForVgenvJob, type VgenvJob } from '../services/vgenvVideoService';
+import { advanceVgenvProjectEpoch, isCurrentVgenvProject as isCurrentProjectEpoch, jobForVgenvProject } from '../services/vgenvProjectScope';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -68,6 +70,7 @@ interface VideoGenerationWorkspaceProps {
 
 type VideoModelId =
   | 'auto'
+  | 'vgenv-h3'
   | 'veo-fast'
   | 'veo'
   | 'grok-video'
@@ -120,6 +123,7 @@ const REQUIRED_GUIDE_READINESS_LABELS = new Set(['Start frame', 'Reference', 'Mo
 
 const MODEL_OPTIONS: ModelOption[] = [
   { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', supportsImage: true, supportsAudio: true, supportsEndFrame: true },
+  { id: 'vgenv-h3', label: 'MiniMax H3 (vgenv)', provider: 'vgenv', supportsImage: true, supportsEndFrame: true },
   { id: 'veo-fast', label: 'Veo 3.1 Fast', provider: 'Google/Replicate', supportsImage: true },
   { id: 'veo', label: 'Veo 3.1', provider: 'Google/Replicate', supportsImage: true },
   { id: 'grok-video', label: 'Grok Imagine Video', provider: 'xAI', supportsImage: false },
@@ -203,6 +207,7 @@ const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'
 type AspectRatioOption = (typeof ASPECT_RATIOS)[number];
 const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
   auto: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  'vgenv-h3': ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'],
   'veo-fast': ['16:9', '9:16'],
   veo: ['16:9', '9:16'],
   'grok-video': ['16:9', '9:16', '1:1'],
@@ -241,7 +246,8 @@ type VideoModelPricing = {
   model?: string;
 };
 
-const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
+// vgenv reports a server price in its own currency; it is not part of hosted credits.
+const VIDEO_MODEL_PRICING: Partial<Record<VideoModelId, VideoModelPricing>> = {
   auto: { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/image-to-video' },
   'veo-fast': { provider: 'gemini', kind: 'video', model: 'veo-3.1-fast-generate-preview' },
   veo: { provider: 'gemini', kind: 'video', model: 'veo-3.1-generate-preview' },
@@ -276,6 +282,7 @@ const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
 };
 
 const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options: number[]; fallback: number }> = {
+  'vgenv-h3': { supported: true, options: Array.from({ length: 12 }, (_, index) => index + 4), fallback: 5 },
   auto: { supported: true, options: [4, 5, 6, 8, 10, 12, 15], fallback: 5 },
   'veo-fast': { supported: false, options: [5], fallback: 5 },
   veo: { supported: false, options: [5], fallback: 5 },
@@ -478,6 +485,50 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   );
   const storedUiPrefs = useMemo(() => readVideoWorkspaceUiPrefs(uiPrefsScope), [uiPrefsScope]);
   const [modelId, setModelId] = useState<VideoModelId>(() => storedUiPrefs.modelId || 'veo-fast');
+  const [vgenvResolution, setVgenvResolution] = useState<'480p' | '768p'>('480p');
+  const [vgenvPromptMode, setVgenvPromptMode] = useState<'raw' | 'enhance'>('raw');
+  const [vgenvReady, setVgenvReady] = useState(false);
+  const [vgenvProjectReadyState, setVgenvProjectReadyState] = useState<{ path: string; ready: boolean } | null>(null);
+  const vgenvProjectReady = Boolean(vgenvProjectReadyState?.path === currentProjectPath && vgenvProjectReadyState.ready);
+  const projectEpoch = useRef({ path: currentProjectPath, value: 0 });
+  projectEpoch.current = advanceVgenvProjectEpoch(projectEpoch.current, currentProjectPath);
+  const [vgenvJobState, setVgenvJobState] = useState<{ path: string; job: VgenvJob } | null>(null);
+  const vgenvJob = jobForVgenvProject(vgenvJobState, currentProjectPath);
+  type SavedVgenvJob = { id: string; status: string; localPath?: string };
+  const [vgenvJobsState, setVgenvJobsState] = useState<{ path: string; jobs: SavedVgenvJob[] } | null>(null);
+  const vgenvJobs = vgenvJobsState?.path === currentProjectPath ? vgenvJobsState.jobs : [];
+  const vgenvKeyInput = useRef<HTMLInputElement>(null);
+  const vgenvBusy = useRef<symbol | null>(null);
+  const vgenvPoll = useRef<AbortController | null>(null);
+  const isCurrentVgenvProject = (path: string, epoch: number) =>
+    isCurrentProjectEpoch(projectEpoch.current, path, epoch);
+  const updateVgenvJobs = (path: string, epoch: number, update: (jobs: SavedVgenvJob[]) => SavedVgenvJob[]) => {
+    if (!isCurrentVgenvProject(path, epoch)) return;
+    setVgenvJobsState((previous) => ({ path, jobs: update(previous?.path === path ? previous.jobs : []) }));
+  };
+  useEffect(() => {
+    const path = currentProjectPath;
+    const epoch = projectEpoch.current.value;
+    vgenvPoll.current?.abort();
+    vgenvPoll.current = null;
+    if (vgenvBusy.current) setIsGenerating(false);
+    vgenvBusy.current = null;
+    setVgenvJobState(null);
+    setVgenvJobsState(null);
+    setVgenvProjectReadyState(null);
+    if (!window.electron?.vgenv) return;
+    window.electron.vgenv.ready().then((ready) => {
+      if (projectEpoch.current.value === epoch) setVgenvReady(ready);
+    }).catch(() => { if (projectEpoch.current.value === epoch) setVgenvReady(false); });
+    if (path) window.electron.vgenv.projectReady(path).then(async (ready) => {
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      setVgenvProjectReadyState({ path, ready });
+      if (!ready) return;
+      const jobs = await vgenvApi().list(path);
+      updateVgenvJobs(path, epoch, (current) => [...current, ...jobs.filter((job) => !current.some((entry) => entry.id === job.id))]);
+    }).catch(() => undefined);
+    return () => vgenvPoll.current?.abort();
+  }, [currentProjectPath]);
   const [prompt, setPrompt] = useState('');
   const [smartPromptStructure, setSmartPromptStructure] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>('16:9');
@@ -536,7 +587,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   });
 
   const modelOption = useMemo(() => MODEL_OPTIONS.find((option) => option.id === modelId), [modelId]);
-  const readyForGeneration = apiKeyReady !== false;
+  const readyForGeneration = modelId === 'vgenv-h3' ? Boolean(window.electron?.vgenv && currentProjectPath && vgenvReady && vgenvProjectReady) : apiKeyReady !== false;
   const availableAspectRatios = MODEL_ASPECT_RATIOS[modelId] || ASPECT_RATIOS;
   const supportsVeoElements = modelId === 'veo-fast' || modelId === 'veo';
   const supportsKlingAdvanced = modelId === 'kling-o3-pro-fal' || modelId === 'kling-v3-pro-i2v-fal' || modelId === 'kling-v3-pro-t2v-fal';
@@ -575,6 +626,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     });
   }, [costRates, estimatedDurationSeconds, modelId]);
   const generationCostDetail = useMemo(() => {
+    if (modelId === 'vgenv-h3') return 'The completed job reports its final price and currency from vgenv.';
     if (!generationCostEstimate) return 'No price mapping found for the selected model.';
     const base = `Based on ${formatUnitSummary(generationCostEstimate.units, generationCostEstimate.unitLabel)}.`;
     if (needsAudio) return `${base} Final cost can vary with uploaded audio length.`;
@@ -608,6 +660,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   }, [durationConfig, modelId, modelOption, needsAudio, supportsAudioInput, supportsEndFrame]);
   const selectedModelGuidance = useMemo(() => {
     if (!modelOption) return 'Select a model to see required inputs before you generate.';
+    if (modelId === 'vgenv-h3') return 'Desktop BYOK: text or start/end frames, 4–15 s. Raw sends your prompt as written; Enhance lets vgenv optimize it. The server sets the final price.';
     if (modelId === 'wan-30-t2v-fal') {
       return 'Wan 3.0 renders 2–30 s in one pass at up to 1080p with native audio; describe the shot beat by beat for long takes.';
     }
@@ -710,7 +763,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     } else {
       items.push({
         label: 'Cost',
-        detail: 'Estimate unavailable',
+        detail: modelId === 'vgenv-h3' ? 'Final server price after generation' : 'Estimate unavailable',
         state: 'optional',
       });
     }
@@ -844,7 +897,109 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     onConsumeSeed?.();
   }, [seedImage, onConsumeSeed]);
 
+  const runVgenvJob = async (existingId?: string) => {
+    const path = currentProjectPath;
+    const epoch = projectEpoch.current.value;
+    if (vgenvBusy.current) return;
+    if (!path) { setStatus('Open a local project folder before using vgenv.'); return; }
+    if (!vgenvReady) { setStatus('Enter a vgenv API key for this desktop session.'); return; }
+    if (!vgenvProjectReady) { setStatus('Authorize the currently open project folder for vgenv.'); return; }
+    if (!existingId && vgenvJobs.some((job) => !job.localPath && !['failed', 'cancelled'].includes(job.status))) {
+      setStatus('Resume the saved vgenv job or retry its download before starting another paid generation.'); return;
+    }
+    if (!existingId && prompt.trim().length < 5) { setStatus('vgenv needs at least 5 prompt characters.'); return; }
+    if (!existingId && (endFrameFile || endFrameUrl) && !(referenceFile || referenceUrl)) {
+      setStatus('An end frame requires a start frame.'); return;
+    }
+    const operation = Symbol('vgenv operation');
+    vgenvBusy.current = operation;
+    setIsGenerating(true);
+    const controller = new AbortController();
+    vgenvPoll.current = controller;
+    try {
+      const frameUrl = async (file: File | null, url: string | null) => {
+        if (file) {
+          const data = await fileToBase64(file);
+          return `data:${file.type || 'image/png'};base64,${data}`;
+        }
+        if (!url) return undefined;
+        const data = await getBase64FromUrl(url);
+        return `data:${data.mimeType};base64,${data.base64}`;
+      };
+      setStatus(existingId ? 'Checking existing vgenv job...' : 'Submitting to vgenv...');
+      const firstFrame = existingId ? undefined : await frameUrl(referenceFile, referenceUrl);
+      const lastFrame = existingId ? undefined : await frameUrl(endFrameFile, endFrameUrl);
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      const job = existingId
+        ? await vgenvApi().get({ projectPath: path, id: existingId })
+        : await vgenvApi().create({
+          projectPath: path,
+          input: {
+            prompt: prompt.trim(), duration: normalizedDurationSeconds, resolution: vgenvResolution,
+            aspectRatio, promptMode: vgenvPromptMode,
+            firstFrame, lastFrame,
+          },
+        });
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      setVgenvJobState({ path, job });
+      updateVgenvJobs(path, epoch, (prev) => prev.some((entry) => entry.id === job.id) ? prev : [{ id: job.id, status: job.status }, ...prev]);
+      if (job.status === 'failed' || job.status === 'cancelled') throw new Error(`vgenv job ${job.status}.`);
+      const finished = job.status === 'succeeded' ? job : await waitForVgenvJob(path, job.id, (next) => {
+        if (!isCurrentVgenvProject(path, epoch)) return;
+        setVgenvJobState({ path, job: next });
+        updateVgenvJobs(path, epoch, (prev) => prev.map((entry) => entry.id === next.id ? { ...entry, status: next.status } : entry));
+      }, controller.signal);
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      setStatus('Downloading the completed video to the project folder...');
+      const saved = await vgenvApi().download({ projectPath: path, id: job.id });
+      if (!isCurrentVgenvProject(path, epoch)) return;
+      const mediaId = `vgenv-${job.id}`;
+      if (!mediaItems.some((item) => item.id === mediaId)) {
+        const item: MediaItem = {
+          id: mediaId, name: `MiniMax H3 ${job.id}.mp4`, type: 'video', source: 'generated',
+          url: saved.url, generatedBy: 'MiniMax H3 (vgenv)', prompt: existingId ? undefined : prompt.trim(),
+          duration: finished.duration || normalizedDurationSeconds,
+        };
+        onAddGeneratedMedia(item);
+        setGenerated((prev) => [item, ...prev].slice(0, 12));
+      }
+      updateVgenvJobs(path, epoch, (prev) => prev.map((entry) => entry.id === job.id ? { ...entry, status: 'succeeded', localPath: saved.url } : entry));
+      setStatus(`Video saved in your project${saved.attached ? ' and added to its index' : '; save the project to add it to its index'}. Server price: ${formatVgenvPrice(saved.price || finished.price)}.`);
+    } catch (error) {
+      if (isCurrentVgenvProject(path, epoch) && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setStatus(error instanceof Error ? error.message : 'vgenv job failed. Retry the saved job or download; do not generate again.');
+      }
+    } finally {
+      if (vgenvBusy.current === operation) {
+        vgenvBusy.current = null;
+        if (isCurrentVgenvProject(path, epoch)) setIsGenerating(false);
+      }
+      if (vgenvPoll.current === controller) vgenvPoll.current = null;
+    }
+  };
+
+  const cancelVgenvJob = async () => {
+    const active = vgenvJobState;
+    const epoch = projectEpoch.current.value;
+    if (!active || active.path !== currentProjectPath) return;
+    try {
+      const confirmed = await vgenvApi().cancel({ projectPath: active.path, id: active.job.id });
+      if (!isCurrentVgenvProject(active.path, epoch)) return;
+      setVgenvJobState({ path: active.path, job: confirmed });
+      updateVgenvJobs(active.path, epoch, (prev) => prev.map((entry) => entry.id === confirmed.id ? { ...entry, status: confirmed.status } : entry));
+      if (confirmed.status === 'cancelled') {
+        vgenvPoll.current?.abort('remote-cancelled');
+        setStatus('vgenv confirmed cancellation.');
+      } else {
+        setStatus(`vgenv reports ${confirmed.status}; cancellation was not confirmed.`);
+      }
+    } catch (error) {
+      if (isCurrentVgenvProject(active.path, epoch)) setStatus(error instanceof Error ? error.message : 'Cancellation failed; job status is unconfirmed.');
+    }
+  };
+
   const handleGenerate = async () => {
+    if (modelId === 'vgenv-h3') { await runVgenvJob(); return; }
     const parseKlingMultiPrompt = (value: string): Array<{ prompt: string; duration?: number }> => {
       const lines = (value || '')
         .split('\n')
@@ -1029,7 +1184,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           hasStartFrame: Boolean(reference || seedanceStoryboardReference),
           referenceCount: storyboardReferencePayloads.length,
           durationSeconds: normalizedDurationSeconds,
-        }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedance-25-i2v-fal')
+        }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'vgenv-h3'), 'seedance-25-i2v-fal')
         : null;
       const resolvedModelId: VideoModelId = autoPick ? autoPick.model : modelId;
       // Per-model shaping happens last, once the model is known (see PromptPreview under the prompt box).
@@ -1452,6 +1607,9 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                   className="app-select mt-2"
                 >
                   <option value="auto">✨ Auto (best for the shot)</option>
+                  <optgroup label="vgenv">
+                    <option value="vgenv-h3">MiniMax H3 (vgenv)</option>
+                  </optgroup>
                   <optgroup label="Google">
                     <option value="veo-fast">Veo 3.1 Fast</option>
                     <option value="veo">Veo 3.1 (HQ)</option>
@@ -1492,6 +1650,65 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                   </optgroup>
                 </select>
               </div>
+              {modelId === 'vgenv-h3' && (
+                <div className="app-card p-4 space-y-3">
+                  {!window.electron?.vgenv ? (
+                    <p className="text-sm text-amber-300">vgenv requires the desktop app. This web build has no trusted key transport.</p>
+                  ) : (
+                    <>
+                      <label className="text-xs text-gray-400">vgenv API key (session only; held by the desktop process)</label>
+                      <div className="flex gap-2">
+                        <input ref={vgenvKeyInput} type="password" autoComplete="off" className="app-input flex-1" placeholder={vgenvReady ? 'Key active for this session' : 'Paste vgenv key'} />
+                        <button type="button" className="app-button app-secondary" onClick={async () => {
+                          const key = vgenvKeyInput.current?.value || '';
+                          if (!key) return;
+                          try { const result = await vgenvApi().configure(key); setVgenvReady(result.ready); setStatus(result.ready ? 'vgenv key ready for this session.' : 'Enter a key.'); }
+                          finally { if (vgenvKeyInput.current) vgenvKeyInput.current.value = ''; }
+                        }}>Use key</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-xs text-gray-400">Resolution
+                          <select className="app-select mt-1" value={vgenvResolution} onChange={(event) => setVgenvResolution(event.target.value as '480p' | '768p')}>
+                            <option value="480p">480p</option><option value="768p">768p</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-gray-400">Prompt handling
+                          <select className="app-select mt-1" value={vgenvPromptMode} onChange={(event) => setVgenvPromptMode(event.target.value as 'raw' | 'enhance')}>
+                            <option value="raw">Raw (as written)</option><option value="enhance">Enhance (vgenv optimizes)</option>
+                          </select>
+                        </label>
+                      </div>
+                      {!currentProjectPath && <p className="text-xs text-amber-300">Open a local project folder before generating.</p>}
+                      {currentProjectPath && !vgenvProjectReady && (
+                        <button type="button" className="app-button app-secondary" onClick={async () => {
+                          const path = currentProjectPath;
+                          const epoch = projectEpoch.current.value;
+                          try {
+                            const ready = await vgenvApi().selectProject(path);
+                            if (!isCurrentVgenvProject(path, epoch)) return;
+                            setVgenvProjectReadyState({ path, ready });
+                            if (ready) {
+                              const jobs = await vgenvApi().list(path);
+                              updateVgenvJobs(path, epoch, (current) => [...current, ...jobs.filter((job) => !current.some((entry) => entry.id === job.id))]);
+                            }
+                          } catch (error) {
+                            if (isCurrentVgenvProject(path, epoch)) setStatus(error instanceof Error ? error.message : 'Project folder authorization failed.');
+                          }
+                        }}>Authorize this project folder</button>
+                      )}
+                      {vgenvJob && <p className="text-xs text-gray-300">Job {vgenvJob.id}: {vgenvJob.status} · {formatVgenvPrice(vgenvJob.price)}</p>}
+                      {vgenvJob && ['preparing', 'queued'].includes(vgenvJob.status) && (
+                        <button type="button" className="app-button app-secondary" onClick={cancelVgenvJob}>Request cancellation</button>
+                      )}
+                      {vgenvJobs.filter((job) => !job.localPath && job.status !== 'cancelled' && job.status !== 'failed').slice(0, 5).map((job) => (
+                        <button key={job.id} type="button" className="app-button app-secondary text-xs mr-2" disabled={isGenerating} onClick={() => runVgenvJob(job.id)}>
+                          Resume / retry download: {job.id}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
               <div className="video-model-summary">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -2192,8 +2409,8 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                 </button>
                 <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-100">
                   <div className="flex items-center justify-between text-[10px] uppercase tracking-wide">
-                    <span>Estimated Cost</span>
-                    <span>{billingMode === 'byok' ? 'BYOK' : 'Hosted'}</span>
+                    <span>{modelId === 'vgenv-h3' ? 'Provider Cost' : 'Estimated Cost'}</span>
+                    <span>{modelId === 'vgenv-h3' ? 'vgenv BYOK' : billingMode === 'byok' ? 'BYOK' : 'Hosted'}</span>
                   </div>
                   {generationCostEstimate ? (
                     <>
@@ -2208,7 +2425,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                       )}
                     </>
                   ) : (
-                    <div className="mt-2 text-sm text-white">Price estimate unavailable for this model.</div>
+                    <div className="mt-2 text-sm text-white">{modelId === 'vgenv-h3' ? 'Final price and currency reported by vgenv after generation.' : 'Price estimate unavailable for this model.'}</div>
                   )}
                   <div className="text-[11px] app-muted mt-1">{generationCostDetail}</div>
                 </div>
