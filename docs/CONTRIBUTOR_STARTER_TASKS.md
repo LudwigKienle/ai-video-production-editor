@@ -19,7 +19,11 @@ choose a lane in [Contributor Paths](CONTRIBUTOR_PATHS.md).
 
 ## Node Space
 
-- Document one real Node Space graph with screenshots.
+- **Done, as a worked example:**
+  [Node Space: Text to Image](node-space-text-to-image-workflow.md) documents one
+  real graph node by node — the Prompt to Image Model to Sampler to Output chain
+  that the workspace opens with — including its ports, its troubleshooting cases,
+  and a screenshot of the running app.
 - Add a small example graph for image-to-video generation.
 - Improve template names and descriptions so non-technical creators understand
   what each graph does.
