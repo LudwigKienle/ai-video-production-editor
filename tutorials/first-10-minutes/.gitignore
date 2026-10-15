@@ -1,0 +1,6 @@
+# Generated: recordings, narration, renders, caches
+build/
+.cache/
+remotion/node_modules/
+remotion/src/data.generated.json
+remotion/out/
