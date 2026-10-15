@@ -66,6 +66,23 @@ npx remotion render src/index.ts Tutorial ../build/tutorial.mp4 --browser-execut
 cd .. && script/master.sh build/tutorial.mp4 build/tutorial-master.mp4
 ```
 
+### Narration through the ElevenLabs connector (used for the published version)
+
+When `api.elevenlabs.io` is not reachable from the machine (Claude Code cloud
+sessions), the narration can come from the ElevenLabs connector instead:
+
+1. One `eleven_v4` speech generation per scene with the text from `script/scenes.json`
+   (voice used: *Vino – Warm Leadership Narrator*), one variation each.
+2. Download each result (signed `storage.googleapis.com` URL) to `build/audio/<scene>.mp3`.
+3. Transcribe each clip with `eleven_scribe_v1` (connect it to the speech node) and
+   save the words list as `build/transcripts/<scene>.json`.
+4. `python3 script/align_timings.py` maps those word times onto the script words and
+   writes `build/timings/<scene>.json`.
+
+Sound effects (`build/audio/sfx/`): a single soft click (first 90 ms of the generated
+file) on every recorded mouse click, and a quiet whoosh on scene changes, both from
+`eleven_text_to_sound_v2`. The restricted connector cannot generate music.
+
 Changing a sentence: edit `script/scenes.json`, re-run the voice for that scene, then
 re-record that scene (`record.mjs <scene>` replays the earlier scenes without filming
 them). Motion scenes follow the new timings automatically.
@@ -86,9 +103,7 @@ them). Motion scenes follow the new timings automatically.
 
 ## Status
 
-- Narration text, recording directions, edit and sound scripts: done.
-- Draft recording and silent animatic on *estimated* timings: done (`build/`, not
-  committed).
-- Real ElevenLabs v4 narration, final 4K recording, music, final render: pending.
-  The Claude Code cloud environment blocks `api.elevenlabs.io` until it is added under
-  *Network access → Allowed domains*.
+- Narration: ElevenLabs v4 via the connector, word timings from Scribe (done).
+- 4K screen recording on the real timings, edit, click/whoosh sound design (done).
+- Music: not yet (needs the full ElevenLabs connector or another music source);
+  drop a track at `build/audio/music.mp3` and re-render, it is ducked automatically.

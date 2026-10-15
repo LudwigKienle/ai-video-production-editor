@@ -27,6 +27,7 @@ export type SceneData = {
 
 export const scenes = data.scenes as SceneData[];
 export const music = data.music as string | null;
+export const sfx = (data as { sfx?: { click: string | null; whoosh: string | null } }).sfx ?? { click: null, whoosh: null };
 
 export const sceneFrames = (s: SceneData) => Math.ceil((LEAD + s.duration + TAIL) * FPS);
 
