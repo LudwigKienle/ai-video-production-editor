@@ -5400,6 +5400,44 @@ body[data-theme="studio"] .studio-workspace textarea {
 .plugin-help code { padding: 0 0.25rem; border-radius: 0.25rem; background: rgb(var(--app-muted-rgb) / 0.14); font-size: 0.72rem; }
 .plugin-empty { margin: 0; padding: 0.5rem 0.75rem; color: var(--app-muted); font-size: 0.76rem; }
 
+/* Local AI (local LLMs, open-weights models, Draw Things) ------------------- */
+
+.local-ai-section { display: grid; gap: 1rem; max-width: 60rem; margin: 0 auto; }
+.local-ai-card { display: grid; gap: 0.6rem; padding: 0.9rem 1rem; border: 1px solid var(--shell-hairline); border-radius: 0.8rem; background: rgb(var(--app-panel-rgb) / 0.55); }
+.local-ai-card h3 { margin: 0; font-size: 0.9rem; font-weight: 650; }
+.local-ai-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem; }
+.local-ai-field { display: grid; gap: 0.25rem; min-width: 10rem; color: var(--app-muted); font-size: 0.72rem; }
+.local-ai-field--grow { flex: 1 1 16rem; }
+.local-ai-status { margin: 0; color: var(--app-muted); font-size: 0.78rem; }
+.local-ai-status--ok { color: rgb(34 197 94); }
+.local-ai-status a, .local-ai-hint a { color: var(--app-accent-strong); }
+.local-ai-hint { margin: 0; color: var(--app-muted); font-size: 0.74rem; line-height: 1.45; }
+.local-ai-message { margin: 0; padding: 0.55rem 0.7rem; border-radius: 0.55rem; background: rgb(var(--app-muted-rgb) / 0.1); font-size: 0.78rem; line-height: 1.45; white-space: pre-wrap; }
+.local-ai-error { margin: 0; color: rgb(248 113 113); font-size: 0.75rem; }
+.local-ai-choice { display: grid; gap: 0.35rem; font-size: 0.8rem; }
+.local-ai-choice label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.local-ai-list { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+.local-ai-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.8rem; align-items: center; padding: 0.7rem 0.8rem; border: 1px solid var(--shell-hairline); border-radius: 0.65rem; }
+.local-ai-item__text { display: grid; gap: 0.2rem; min-width: 0; font-size: 0.82rem; }
+.local-ai-item__meta { color: var(--app-muted); font-size: 0.72rem; font-weight: 400; }
+.local-ai-item__note { color: var(--app-muted); font-size: 0.75rem; line-height: 1.4; }
+.local-ai-item__actions { display: flex; align-items: center; gap: 0.4rem; }
+.local-ai-model { display: grid; gap: 0.6rem; padding: 0.9rem 1rem; border: 1px solid var(--shell-hairline); border-radius: 0.8rem; background: rgb(var(--app-panel-rgb) / 0.55); }
+.local-ai-model__head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.9rem; align-items: center; }
+.local-ai-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.2rem; }
+.local-ai-license { text-decoration: none; }
+.local-ai-license--no { color: rgb(248 113 113); }
+.local-ai-license--limited { color: rgb(251 191 36); }
+.local-ai-license--yes { color: rgb(34 197 94); }
+.local-ai-installed { color: rgb(34 197 94); font-size: 0.78rem; font-weight: 600; }
+.local-ai-optional { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--app-muted); font-size: 0.75rem; line-height: 1.4; cursor: pointer; }
+.local-ai-progress { position: relative; height: 1.35rem; overflow: hidden; border-radius: 0.45rem; background: rgb(var(--app-muted-rgb) / 0.14); }
+.local-ai-progress__bar { position: absolute; inset: 0 auto 0 0; background: rgb(var(--app-accent-rgb) / 0.45); transition: width 0.3s ease; }
+.local-ai-progress__label { position: relative; display: block; padding: 0 0.55rem; overflow: hidden; font-size: 0.7rem; line-height: 1.35rem; white-space: nowrap; text-overflow: ellipsis; }
+@media (max-width: 640px) {
+  .local-ai-item, .local-ai-model__head { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Post page bar (Resolve-style) ------------------------------------------- */
 
 .post-pagebar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; min-height: 2.6rem; padding: 0.25rem 0.75rem; border-top: 1px solid var(--shell-hairline); background: rgb(var(--app-panel-rgb) / 0.85); backdrop-filter: blur(16px); }

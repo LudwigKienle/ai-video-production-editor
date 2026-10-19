@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { withModelFallback } from './geminiModelFallback';
+import { isLocalLlmReady, withLocalLlm } from './localLlmService';
 import {
     EditPlan,
     EditPlanFinding,
@@ -36,10 +37,10 @@ const getAiClient = () => {
     const storageKey = localStorage.getItem('gemini_api_key');
     const apiKey = envKey || storageKey;
 
-    if (!apiKey) {
+    if (!apiKey && !isLocalLlmReady()) {
         return null;
     }
-    return withModelFallback(new GoogleGenAI({ apiKey }));
+    return withLocalLlm(withModelFallback(new GoogleGenAI({ apiKey: apiKey || 'local-llm' })), Boolean(apiKey));
 };
 
 const extractJsonFromText = (text: string) => {

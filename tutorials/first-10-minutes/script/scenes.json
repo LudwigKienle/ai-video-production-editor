@@ -1,0 +1,61 @@
+{
+  "title": "Your first 10 minutes with AI Video Production Editor",
+  "language": "en",
+  "voice": {
+    "model_id": "eleven_v4",
+    "language_code": "en",
+    "voice_name": "to be chosen in the voice session; warm, calm, expressive narrator"
+  },
+  "scenes": [
+    {
+      "id": "s01_intro",
+      "kind": "motion",
+      "text": "This is AI Video Production Editor: a free, open-source film studio for AI video. It takes a project from script to storyboard, from storyboard to generated shots, and from there to the edit and the export. Everything lives in one project folder on your own machine, and you bring your own API keys. In the next few minutes, you'll install it, connect a provider, and set up your first project."
+    },
+    {
+      "id": "s02_install",
+      "kind": "motion",
+      "text": "The quickest way in is the desktop app for macOS or Windows, on the releases page of the GitHub repository. If you'd rather run it from source, you need Node twenty-two or newer. Clone the repository, run npm install, then npm run electron dev. That starts the dev server and opens the desktop app."
+    },
+    {
+      "id": "s03_onboarding",
+      "kind": "screen",
+      "text": "On first launch, a short welcome guide walks you through four steps. First, how you want to work. Just getting started gives you a simple, guided studio. I'm a filmmaker opens the full suite. Next, pick a dark or a light look. Then connect AI. You only need one key to get started, and Google Gemini has a free tier. Keys are stored on your machine and only go to the provider. You can also skip this and add keys later. The last step shows what you can do. With no key connected yet, the studio then opens Settings, where all thirteen providers live. Close it for now, and you're in."
+    },
+    {
+      "id": "s04_interface",
+      "kind": "screen",
+      "text": "Here's the studio. The sidebar holds every workspace, grouped into Project, Create, Edit, Review and Deliver. At the top, Simple, Standard and Pro switch how much of the studio you see. Simple keeps just the essentials. Pro shows everything, from Set Design and Scene Map to Color and Analysis. Activity keeps track of running jobs, and AI Tools opens the assistant."
+    },
+    {
+      "id": "s05_folder",
+      "kind": "screen",
+      "text": "Before you create anything, choose a project folder. Open the project menu and pick Choose Project Folder. The studio writes the project file, a backup and a media folder into it, and saves as you work. The badge switches from No folder to Saved."
+    },
+    {
+      "id": "s06_script",
+      "kind": "screen",
+      "text": "The Project Hub is the heart of the app. First, pick a format: a feature, a short film, a microdrama or a commercial. The seven steps on the left are your production path, and step one is the script. We'll paste in Rainline, the demo script from the examples folder, and give it a title in the story bible. With a key connected, Analyze Script breaks the story down into characters and locations for the next steps."
+    },
+    {
+      "id": "s07_phases",
+      "kind": "screen",
+      "text": "From there, each step builds on the last. World is optional lore and rules. Concept is where you cast characters and design environments and props. Storyboard turns scenes into shots and frames, with camera, lens and aspect ratio. Filming sends approved frames to video models like Veo, Kling or Seedance. Review checks continuity across your shots, and Marketing makes posters and thumbnails."
+    },
+    {
+      "id": "s08_create",
+      "kind": "screen",
+      "text": "You don't have to use the full pipeline. Images and Video are standalone generators. Each one shows what the selected model still needs before you generate, and an estimated cost on your own key. And in Node Space, you can build the same work as a graph."
+    },
+    {
+      "id": "s09_edit_export",
+      "kind": "screen",
+      "text": "Your clips land in the project's media. The Timeline works like an editing suite, with pages for cut, color and sound. And Export renders the result, with presets for YouTube, TikTok and Instagram."
+    },
+    {
+      "id": "s10_outro",
+      "kind": "motion",
+      "text": "That's your first ten minutes. Next, open First Ten Minutes in the docs folder, and run the Rainline demo with a key connected. The project is open source under the GPL, so issues, ideas and pull requests are welcome. And if it helps you make something, a star on GitHub helps other filmmakers find it."
+    }
+  ]
+}

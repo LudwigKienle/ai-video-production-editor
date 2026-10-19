@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20DMG%20%7C%20Windows%20EXE-238636?style=for-the-badge&logo=github&logoColor=white" alt="Download the desktop app" /></a>
+  <a href="https://youtu.be/p99IG1m5ybU"><img src="https://img.shields.io/badge/Watch-Getting%20started%20%284%20min%29-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch the getting-started tutorial" /></a>
   <a href="https://youtu.be/-6jo636vRSw?si=v5XSwSIz4WfLtE9z"><img src="https://img.shields.io/badge/Watch-Launch%20trailer-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch the launch trailer" /></a>
   <a href="https://github.com/LudwigKienle/ai-video-production-editor/stargazers"><img src="https://img.shields.io/badge/%E2%AD%90-Star%20the%20repo-0969DA?style=for-the-badge" alt="Star the repository" /></a>
 </p>
@@ -92,7 +93,21 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
 [UI production workflow guide](docs/ui-production-workflow-guide.md), and the
 [demo project](examples/demo-project/README.md).
 
-## What is new (September 2026)
+## What is new (October 2026)
+
+- **Local AI** workspace: run everything on your own computer, free and offline.
+  - Local LLMs (Ollama, LM Studio or any OpenAI-compatible server) answer the
+    script, breakdown, prompt and assistant features; one-click model downloads.
+  - Open-weights image and video models in ComfyUI with one-click, resumable
+    downloads: FLUX.3 Klein, Qwen Image 2.1 / Turbo, Z-Image Turbo, FLUX.2 Klein
+    4B, Wan 2.2 5B, LTX-2.3 and LTX-2.5. Pick them in Images and Video like any
+    other model.
+  - Draw Things on Apple silicon through its API server.
+- New cloud models: FLUX.3 (text-to-image, multi-reference edit, Klein, video
+  with native audio) and Krea 3 (text-to-image and reference edit).
+- Assistant agents use the maintained ACP adapters (Claude Agent, Codex 2.x).
+
+## Earlier (September 2026)
 
 - macOS-style shell: source-list sidebar, slim toolbar, activity center with
   progress for every running job, dark and light themes.
@@ -111,17 +126,22 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
 
 | Task | Engines |
 | --- | --- |
-| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, Qwen Image, WAN 2.7, Z-Image, Grok Imagine |
-| Video | Seedance 2.5 / 2.0 / 1.5, Veo 3.1, Kling v3 Pro / O3 / 2.6, WAN 2.7 / 2.2, LTX 2.3, PixVerse C1, Happy Horse, Creatify Aurora, Grok Imagine |
+| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, FLUX.3 / FLUX.3 Klein, Krea 3, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, Qwen Image, WAN 2.7, Z-Image, Grok Imagine |
+| Video | Seedance 2.5 / 2.0 / 1.5, Veo 3.1, Kling v3 Pro / O3 / 2.6, FLUX.3 Video, WAN 2.7 / 2.2, LTX 2.3, PixVerse C1, Happy Horse, Creatify Aurora, Grok Imagine |
+| Local (your GPU) | FLUX.3 Klein, Qwen Image 2.1 / Turbo, Z-Image Turbo, FLUX.2 Klein 4B, Wan 2.2 5B, LTX-2.3, LTX-2.5 via ComfyUI; any model in Draw Things; LLMs via Ollama / LM Studio |
 | 3D | Hunyuan3D v3, Trellis 2, Rodin 2.5 / Gen-2, World Labs Marble worlds |
 | Audio | ElevenLabs, Sonauto, Sonilo, Gemini TTS, local mastering tools |
 | Post | Runway Ruby (SDR→HDR), LTX ACES HDR upscale, colour wheels + LUTs, Auto Cut |
-| Providers | fal.ai, Replicate, Google Gemini, xAI, ElevenLabs, Runway, LTX, World Labs, Brave Search, Unsplash, Supabase, Stripe |
+| Providers | fal.ai, Replicate, Google Gemini, xAI, ElevenLabs, Runway, LTX, World Labs, Brave Search, Unsplash, Supabase, Stripe; local: ComfyUI, Draw Things, Ollama, LM Studio |
 
 Bring your own keys; the app stores them locally. Model APIs move quickly, so
 adapters are maintained integration points rather than permanent contracts.
+No keys at all? See [Local AI](docs/local-ai.md): local LLMs for the text steps and
+open-weights models for images and video.
 
 ## Quick start
+
+**New here?** Watch the [4-minute setup video](https://youtu.be/p99IG1m5ybU) first.
 
 **Just want the app?** Download the newest installer from
 [GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest)
@@ -157,6 +177,14 @@ Screenshots in this README are generated with
 ## Video tutorials
 
 Official channel: [youtube.com/@AIVideoProductionEditor](https://www.youtube.com/@AIVideoProductionEditor)
+
+<a href="https://youtu.be/p99IG1m5ybU"><img src="https://img.youtube.com/vi/p99IG1m5ybU/maxresdefault.jpg" alt="Free Open-Source AI Video Editor – Setup & First Project in 10 Minutes" width="560" /></a>
+
+- **[Setup & first project in 10 minutes](https://youtu.be/p99IG1m5ybU)** (start here): install, the
+  welcome guide and a provider key, the studio layout, a project folder, the
+  Project Hub with the Rainline demo script, the seven production steps, edit and
+  export. Made with the scripted pipeline in
+  [`tutorials/first-10-minutes`](tutorials/first-10-minutes/README.md).
 
 - Short product overview for a fast first impression.
 - Full Mac walkthrough: keys, script, storyboards, video generation, editing,

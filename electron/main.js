@@ -29,6 +29,7 @@ const {
 const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
 const localAgents = require('./local-agents');
+const localAi = require('./local-ai');
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
@@ -564,6 +565,7 @@ ipcMain.handle('corridorKey:process', async (_event, payload) => {
 });
 
 // Local coding agents over ACP (see local-agents.js); the editor's tools reach them through studio-mcp-server.js
+localAi.register(ipcMain);
 ipcMain.handle('localAgents:list', async () => localAgents.list());
 ipcMain.handle('localAgents:prompt', async (_event, payload) => localAgents.prompt(payload));
 ipcMain.handle('localAgents:cancel', async (_event, payload) => localAgents.cancel(payload));
@@ -762,6 +764,7 @@ app.on('before-quit', () => {
   app.isQuittingForReal = true;
   midjourneyAgent.dispose();
   localAgents.dispose();
+  localAi.dispose();
 });
 
 app.on('will-quit', () => {

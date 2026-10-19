@@ -64,6 +64,14 @@ const MODEL_PROVIDER_RATES = {
   // FAL
   'fal:fal-ai/qwen-image-max/text-to-image:image': { unitCost: 0.075 },
   'fal:fal-ai/qwen-image-max/edit:edit': { unitCost: 0.075 },
+  'fal:krea/v3/text-to-image:image': { unitCost: 0.1 }, // Krea 3: $0.025/MP, auto size is about 4 MP.
+  'fal:krea/v3/edit:edit': { unitCost: 0.2 }, // Output plus one same-size reference.
+  'fal:blackforestlabs/flux-3/text-to-image:image': { unitCost: 0.048 }, // 1K tier.
+  'fal:blackforestlabs/flux-3/edit-image:edit': { unitCost: 0.048 },
+  'fal:blackforestlabs/flux-3/klein/text-to-image:image': { unitCost: 0.009 },
+  'fal:blackforestlabs/flux-3/klein/edit-image:edit': { unitCost: 0.009 },
+  'fal:blackforestlabs/flux-3/text-to-video:video': { unitCost: 0.29 }, // 1080p, per second.
+  'fal:blackforestlabs/flux-3/image-to-video:video': { unitCost: 0.29 },
   'fal:fal-ai/nano-banana-2:image': { unitCost: 0.08 },
   'fal:fal-ai/nano-banana-2/edit:edit': { unitCost: 0.08 },
   'fal:fal-ai/bytedance/seedream/v5/lite/text-to-image:image': { unitCost: 0.035 },

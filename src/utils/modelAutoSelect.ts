@@ -96,16 +96,16 @@ export const classifyShot = (context: ShotContext): ShotSubjectCategory => {
 
 const IMAGE_RANKINGS: Record<ShotSubjectCategory, string[]> = {
   human: ['nano-banana-2-fal', 'nano', 'nano-banana-pro', 'gpt-image-25-flare-fal', 'gpt-image-2-fal-t2i', 'gpt-image-2-fal', 'seedream-v5-pro-fal', 'imagen', 'seedream'],
-  creature: ['krea-2-large-fal', 'seedream-v5-pro-fal', 'flux', 'flux-pro', 'gpt-image-2-fal-t2i', 'seedream'],
-  animal: ['seedream-v5-pro-fal', 'nano-banana-2-fal', 'nano', 'krea-2-large-fal', 'imagen'],
-  product: ['gpt-image-25-flare-fal', 'gpt-image-2-fal-t2i', 'gpt-image-2-fal', 'seedream-v5-pro-fal', 'flux', 'flux-pro', 'seedream'],
+  creature: ['krea-2-large-fal', 'krea-3-fal', 'seedream-v5-pro-fal', 'flux-3-fal', 'flux', 'flux-pro', 'gpt-image-2-fal-t2i', 'seedream'],
+  animal: ['seedream-v5-pro-fal', 'nano-banana-2-fal', 'nano', 'krea-2-large-fal', 'krea-3-fal', 'imagen'],
+  product: ['gpt-image-25-flare-fal', 'gpt-image-2-fal-t2i', 'gpt-image-2-fal', 'seedream-v5-pro-fal', 'flux-3-fal', 'flux', 'flux-pro', 'seedream'],
   typography: ['ideogram-v4-fal', 'gpt-image-25-flare-fal', 'gpt-image-2-fal-t2i', 'gpt-image-2-fal', 'seedream-v5-pro-fal', 'seedream'],
-  environment: ['seedream-v5-pro-fal', 'imagen', 'krea-2-large-fal', 'flux', 'flux-pro', 'seedream'],
-  architecture: ['flux', 'flux-pro', 'seedream-v5-pro-fal', 'gpt-image-2-fal-t2i', 'imagen'],
-  vehicle: ['flux', 'flux-pro', 'seedream-v5-pro-fal', 'gpt-image-2-fal-t2i'],
+  environment: ['seedream-v5-pro-fal', 'imagen', 'krea-2-large-fal', 'krea-3-fal', 'flux-3-fal', 'flux', 'flux-pro', 'seedream'],
+  architecture: ['flux-3-fal', 'flux', 'flux-pro', 'seedream-v5-pro-fal', 'gpt-image-2-fal-t2i', 'imagen'],
+  vehicle: ['flux-3-fal', 'flux', 'flux-pro', 'seedream-v5-pro-fal', 'gpt-image-2-fal-t2i'],
   food: ['gpt-image-25-flare-fal', 'gpt-image-2-fal-t2i', 'gpt-image-2-fal', 'seedream-v5-pro-fal', 'nano-banana-2-fal', 'nano'],
-  illustration: ['krea-2-large-fal', 'imagen', 'flux', 'flux-pro', 'seedream-v5-pro-fal'],
-  vfx: ['krea-2-large-fal', 'seedream-v5-pro-fal', 'flux', 'flux-pro'],
+  illustration: ['krea-2-large-fal', 'krea-3-fal', 'imagen', 'flux-3-fal', 'flux', 'flux-pro', 'seedream-v5-pro-fal'],
+  vfx: ['krea-2-large-fal', 'krea-3-fal', 'seedream-v5-pro-fal', 'flux-3-fal', 'flux', 'flux-pro'],
   dialogue: ['nano-banana-2-fal', 'nano', 'gpt-image-2-fal-t2i', 'seedream-v5-pro-fal'],
   performance: ['nano-banana-2-fal', 'nano', 'seedream-v5-pro-fal', 'gpt-image-2-fal-t2i'],
   action: ['seedream-v5-pro-fal', 'nano-banana-2-fal', 'nano', 'gpt-image-2-fal-t2i'],
@@ -113,7 +113,7 @@ const IMAGE_RANKINGS: Record<ShotSubjectCategory, string[]> = {
 };
 
 /** Edit-capable models preferred when references must be honoured. */
-const IMAGE_EDIT_RANKINGS: string[] = ['seedream-v5-pro-edit-fal', 'gpt-image-25-flare-fal-edit', 'gpt-image-2-fal', 'nano-banana-2-fal', 'nano', 'gpt-image-2-fal-edit', 'nano-banana-2-fal-edit', 'wan-2.7-pro-fal', 'qwen-multiangle-fal'];
+const IMAGE_EDIT_RANKINGS: string[] = ['seedream-v5-pro-edit-fal', 'flux-3-fal-edit', 'krea-3-fal-edit', 'gpt-image-25-flare-fal-edit', 'gpt-image-2-fal', 'nano-banana-2-fal', 'nano', 'gpt-image-2-fal-edit', 'nano-banana-2-fal-edit', 'wan-2.7-pro-fal', 'qwen-multiangle-fal'];
 
 const CATEGORY_LABELS: Record<ShotSubjectCategory, string> = {
   human: 'people and faces',

@@ -45,6 +45,13 @@ import {
   editImageWithFalSeedreamV5Pro,
   generateImageWithFalKrea2,
   generateImageWithFalIdeogramV4,
+  generateImageWithFalKrea3,
+  editImageWithFalKrea3,
+  generateImageWithFalFlux3,
+  editImageWithFalFlux3,
+  generateImageWithFalFlux3Klein,
+  editImageWithFalFlux3Klein,
+  toFlux3Options,
   generateImageWithFalWanV27Pro
 } from '../services/falAiService';
 import { generateImageWithGrok } from '../services/xaiService';
@@ -77,6 +84,8 @@ import {
   testComfyUiConnection,
   uploadComfyImage,
 } from '../services/comfyUiService';
+import { runLocalModel, sizeForAspect } from '../services/localModelService';
+import { generateImageWithDrawThings } from '../services/drawThingsService';
 
 import logoGemini from '../assets/logos/logo_gemini_1772276093848.png';
 import logoNanabanana from '../assets/logos/logo_nanabanana_1772276159682.png';
@@ -127,6 +136,12 @@ type ImageModelId =
   | 'krea-2-large-fal'
   | 'krea-2-turbo-fal'
   | 'ideogram-v4-fal'
+  | 'krea-3-fal'
+  | 'krea-3-fal-edit'
+  | 'flux-3-fal'
+  | 'flux-3-fal-edit'
+  | 'flux-3-klein-fal'
+  | 'flux-3-klein-fal-edit'
   | 'wan-v27-pro-fal'
   | 'wan-v27-pro-edit-fal'
   | 'nano-banana-2-fal'
@@ -145,7 +160,13 @@ type ImageModelId =
   | 'z-image'
   | 'z-turbo'
   | 'z-turbo-img2img'
-  | 'comfyui';
+  | 'comfyui'
+  | 'flux-3-klein-local'
+  | 'qwen-image-21-local'
+  | 'qwen-image-21-turbo-local'
+  | 'z-image-turbo-local'
+  | 'flux-2-klein-4b-local'
+  | 'draw-things';
 
 const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; icon?: string; goodFor?: string }> = [
   { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'People → Nano Banana / GPT Image 2, creatures and stylised art → Krea 2, environments → Seedream 5 Pro, typography → Ideogram 4' },
@@ -165,6 +186,12 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Painterly, aesthetic-first generation with optional style references' },
   { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick exploration and variations' },
   { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters, and design-heavy frames with clean text rendering' },
+  { id: 'krea-3-fal', label: 'Krea 3 (FAL)', provider: 'FAL', goodFor: 'Krea\'s newest model: polished, art-directed stills with a quality (berry) look' },
+  { id: 'krea-3-fal-edit', label: 'Krea 3 Edit (FAL)', provider: 'FAL', goodFor: 'Reference-driven edits: restage products, swap materials, keep characters consistent (up to 8 refs)' },
+  { id: 'flux-3-fal', label: 'FLUX.3 (FAL)', provider: 'FAL', goodFor: 'Black Forest Labs\' flagship: photoreal detail and strong prompt adherence, up to 4K' },
+  { id: 'flux-3-fal-edit', label: 'FLUX.3 Edit (FAL)', provider: 'FAL', goodFor: 'Precise local edits and multi-reference composition (up to 10 refs), rest of the frame untouched' },
+  { id: 'flux-3-klein-fal', label: 'FLUX.3 Klein (FAL)', provider: 'FAL', goodFor: 'Small open-weights FLUX.3: fast, cheap drafts with prompt expansion' },
+  { id: 'flux-3-klein-fal-edit', label: 'FLUX.3 Klein Edit (FAL)', provider: 'FAL', goodFor: 'Cheap multi-reference edits (up to 10 refs) with the open-weights FLUX.3' },
   { id: 'wan-v27-pro-fal', label: 'WAN 2.7 Pro (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'High-detail cinematic image generation with strong composition' },
   { id: 'wan-v27-pro-edit-fal', label: 'WAN 2.7 Pro Edit (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Precise multi-reference image editing and transformations' },
   { id: 'nano-banana-2-fal', label: 'Nano Banana 2 (FAL)', provider: 'FAL', icon: logoNanabanana, goodFor: 'Speed, photorealism, and accurate character generation' },
@@ -184,7 +211,15 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'z-turbo', label: 'Z-Image Turbo', provider: 'Replicate', goodFor: 'Maximum speed lightweight generation' },
   { id: 'z-turbo-img2img', label: 'Z-Image Turbo Img2Img', provider: 'Replicate', goodFor: 'Fast style transfer and image-to-image workflows' },
   { id: 'comfyui', label: 'ComfyUI (Local)', provider: 'Local', goodFor: 'Unlimited control and advanced node-based local workflows' },
+  { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', provider: 'Local', goodFor: 'Open-weights FLUX.3 on your GPU via ComfyUI: text-to-image and reference edits, no per-image cost' },
+  { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Open-weights Qwen on your GPU: typography, 2K, multi-reference edits (non-commercial license)' },
+  { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Fast 8-step local Qwen drafts and edits (non-commercial license)' },
+  { id: 'z-image-turbo-local', label: 'Z-Image Turbo (Local)', provider: 'Local', goodFor: 'Fast 8-step photoreal images on 8 GB GPUs; Apache 2.0' },
+  { id: 'flux-2-klein-4b-local', label: 'FLUX.2 Klein 4B (Local)', provider: 'Local', goodFor: 'Small 4-step FLUX.2 for drafts and single-reference edits on 8 GB GPUs; Apache 2.0' },
+  { id: 'draw-things', label: 'Draw Things (Local, Mac)', provider: 'Local', goodFor: 'Whatever model is loaded in Draw Things on Apple silicon; optional start image' },
 ];
+
+const LOCAL_IMAGE_MODEL_IDS = new Set<ImageModelId>(['flux-3-klein-local', 'qwen-image-21-local', 'qwen-image-21-turbo-local', 'z-image-turbo-local', 'flux-2-klein-4b-local', 'draw-things']);
 
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100', '239:100'] as const;
 const IMAGE_SIZES = ['1K', '2K', '4K'] as const;
@@ -208,6 +243,12 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'krea-2-large-fal': ['16:9', '9:16', '1:1', '4:3', '235:100'],
   'krea-2-turbo-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'ideogram-v4-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'krea-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'krea-3-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'flux-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100'],
+  'flux-3-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100'],
+  'flux-3-klein-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'flux-3-klein-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-edit-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'nano-banana-2-fal': ['21:9', '16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -227,6 +268,12 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'z-turbo': [...ASPECT_RATIOS],
   'z-turbo-img2img': [...ASPECT_RATIOS],
   comfyui: [...ASPECT_RATIOS],
+  'flux-3-klein-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'qwen-image-21-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'qwen-image-21-turbo-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'z-image-turbo-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'flux-2-klein-4b-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'draw-things': ['16:9', '9:16', '1:1', '4:3', '3:4'],
 };
 
 // Camera/Lens data moved to ../data/cameraData.ts
@@ -248,6 +295,12 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'krea-2-large-fal': 3,
   'krea-2-turbo-fal': 0,
   'ideogram-v4-fal': 0,
+  'krea-3-fal': 0,
+  'krea-3-fal-edit': 8,
+  'flux-3-fal': 0,
+  'flux-3-fal-edit': 10,
+  'flux-3-klein-fal': 0,
+  'flux-3-klein-fal-edit': 10,
   'wan-v27-pro-fal': 0,
   'wan-v27-pro-edit-fal': 4,
   'nano-banana-2-fal': 0,
@@ -267,6 +320,13 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'z-turbo': 0,
   'z-turbo-img2img': 1,
   comfyui: 1,
+  // As many references as the model's edit workflow has image inputs.
+  'flux-3-klein-local': 1,
+  'qwen-image-21-local': 2,
+  'qwen-image-21-turbo-local': 1,
+  'z-image-turbo-local': 0,
+  'flux-2-klein-4b-local': 1,
+  'draw-things': 1,
 };
 type ImageModelPricing = {
   provider: CostRate['provider'];
@@ -292,6 +352,12 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   'krea-2-large-fal': { provider: 'fal', kind: 'image', model: 'krea/v2/large/text-to-image' },
   'krea-2-turbo-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/krea-2/turbo' },
   'ideogram-v4-fal': { provider: 'fal', kind: 'image', model: 'ideogram/v4' },
+  'krea-3-fal': { provider: 'fal', kind: 'image', model: 'krea/v3/text-to-image' },
+  'krea-3-fal-edit': { provider: 'fal', kind: 'edit', model: 'krea/v3/edit' },
+  'flux-3-fal': { provider: 'fal', kind: 'image', model: 'blackforestlabs/flux-3/text-to-image' },
+  'flux-3-fal-edit': { provider: 'fal', kind: 'edit', model: 'blackforestlabs/flux-3/edit-image' },
+  'flux-3-klein-fal': { provider: 'fal', kind: 'image', model: 'blackforestlabs/flux-3/klein/text-to-image' },
+  'flux-3-klein-fal-edit': { provider: 'fal', kind: 'edit', model: 'blackforestlabs/flux-3/klein/edit-image' },
   'wan-v27-pro-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/wan/v2.7/pro/text-to-image' },
   'wan-v27-pro-edit-fal': { provider: 'fal', kind: 'edit', model: 'fal-ai/wan/v2.7/pro/edit' },
   'nano-banana-2-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/nano-banana-2' },
@@ -1046,6 +1112,11 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       units = imageSize === '4K' ? 1.5 : 1;
     } else if (modelId === 'wan-v27-image-pro-replicate') {
       units = imageSize === '4K' ? 1.8 : imageSize === '2K' ? 1.25 : 1;
+    } else if (modelId === 'flux-3-fal' || modelId === 'flux-3-fal-edit') {
+      // $0.048 at 1K, $0.10 at 2K, $0.607 at 4K (per image).
+      units = imageSize === '4K' ? 12.6 : imageSize === '2K' ? 2.1 : 1;
+    } else if (modelId === 'flux-3-klein-fal' || modelId === 'flux-3-klein-fal-edit') {
+      units = imageSize === '4K' ? 4 : imageSize === '2K' ? 1.55 : 1;
     }
     return estimateGenerationCost({
       rates: costRates,
@@ -1056,7 +1127,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
     });
   }, [modelId, imageSize, costRates]);
   const generationCostDetail = useMemo(() => {
-    if (modelId === 'comfyui') return 'Local ComfyUI generation is not billed by hosted credits.';
+    if (modelId === 'comfyui' || LOCAL_IMAGE_MODEL_IDS.has(modelId)) return 'Runs on your computer; not billed. Download the model in Local AI first.';
     if (!generationCostEstimate) return 'No price mapping found for the selected model.';
     if (modelId === 'firered') return 'FireRed is a reference-first edit model and needs at least one context or moodboard image.';
     if (modelId === 'gemini-flash' && imageSize !== '1K') return `${imageSize} render applies a large output-token multiplier for Nano Banana 2.`;
@@ -2237,7 +2308,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       setStatus('Add a prompt before generating.');
       return;
     }
-    if (billingMode === 'hosted' && modelId !== 'comfyui' && onValidateHostedGeneration) {
+    if (billingMode === 'hosted' && modelId !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(modelId) && onValidateHostedGeneration) {
       const pricing = IMAGE_MODEL_PRICING[modelId];
       if (pricing) {
         const validation = await onValidateHostedGeneration({
@@ -2305,7 +2376,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           : '16:9'
       ) as '21:9' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
       const autoPick = modelId === 'auto'
-        ? pickImageModel({ prompt: finalPrompt, hasReferences: referenceImages.length > 0 }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'comfyui'), 'seedream-v5-pro-fal')
+        ? pickImageModel({ prompt: finalPrompt, hasReferences: referenceImages.length > 0 }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(id)), 'seedream-v5-pro-fal')
         : null;
       const resolvedModelId: ImageModelId = autoPick ? autoPick.model : modelId;
       if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
@@ -2428,6 +2499,40 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             aspectRatio: qwenMaxAspectRatio,
             renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY',
           });
+          break;
+        case 'krea-3-fal':
+          item = await generateImageWithFalKrea3(shapedPrompt, {
+            aspectRatio: qwenMaxAspectRatio,
+            variant: imageSize === '1K' ? 'jam' : 'berry',
+            negativePrompt: negativePrompt.trim() || undefined,
+          });
+          break;
+        case 'krea-3-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('Krea 3 Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalKrea3(shapedPrompt, referenceImages.slice(0, 8), {
+            aspectRatio: qwenMaxAspectRatio,
+            variant: imageSize === '1K' ? 'jam' : 'berry',
+          }))[0];
+          break;
+        case 'flux-3-fal':
+          item = await generateImageWithFalFlux3(shapedPrompt, toFlux3Options(effectiveAspectRatio, imageSize));
+          break;
+        case 'flux-3-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('FLUX.3 Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalFlux3(shapedPrompt, referenceImages.slice(0, 10), toFlux3Options(effectiveAspectRatio, imageSize)))[0];
+          break;
+        case 'flux-3-klein-fal':
+          item = await generateImageWithFalFlux3Klein(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
+          break;
+        case 'flux-3-klein-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('FLUX.3 Klein Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalFlux3Klein(shapedPrompt, referenceImages.slice(0, 10), { aspectRatio: qwenMaxAspectRatio }))[0];
           break;
         case 'wan-v27-pro-fal':
           item = await generateImageWithFalWanV27Pro(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
@@ -2562,6 +2667,35 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           item = await generateImageWithZTurboImg2Img(shapedPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
           break;
+        case 'flux-3-klein-local':
+        case 'qwen-image-21-local':
+        case 'qwen-image-21-turbo-local':
+        case 'z-image-turbo-local':
+        case 'flux-2-klein-4b-local': {
+          const [width, height] = sizeForAspect(effectiveAspectRatio, imageSize);
+          const localModelId = resolvedModelId;
+          item = await runLocalModel(localModelId, referenceImages.length > 0 ? 'edit' : 't2i', {
+            prompt: shapedPrompt,
+            negativePrompt: negativePrompt.trim() || undefined,
+            width,
+            height,
+            images: referenceImages,
+            // Used when the optional enhancer file is installed.
+            enhance: true,
+          }, (message) => setStatus(message));
+          break;
+        }
+        case 'draw-things': {
+          const [width, height] = sizeForAspect(effectiveAspectRatio, imageSize);
+          item = await generateImageWithDrawThings({
+            prompt: shapedPrompt,
+            negativePrompt: negativePrompt.trim() || undefined,
+            width,
+            height,
+            image: referenceImages[0],
+          });
+          break;
+        }
         case 'comfyui': {
           const baseUrl = normalizeComfyUrl(comfyUrl);
           if (!baseUrl) {

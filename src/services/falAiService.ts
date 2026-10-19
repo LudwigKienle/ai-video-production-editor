@@ -44,6 +44,14 @@ const MODELS = {
     SEEDREAM_V5_PRO_EDIT: 'bytedance/seedream/v5/pro/edit',
     KREA_2_LARGE_T2I: 'krea/v2/large/text-to-image',
     KREA_2_TURBO_T2I: 'fal-ai/krea-2/turbo',
+    KREA_3_T2I: 'krea/v3/text-to-image',
+    KREA_3_EDIT: 'krea/v3/edit',
+    FLUX_3_T2I: 'blackforestlabs/flux-3/text-to-image',
+    FLUX_3_EDIT: 'blackforestlabs/flux-3/edit-image',
+    FLUX_3_KLEIN_T2I: 'blackforestlabs/flux-3/klein/text-to-image',
+    FLUX_3_KLEIN_EDIT: 'blackforestlabs/flux-3/klein/edit-image',
+    FLUX_3_T2V: 'blackforestlabs/flux-3/text-to-video',
+    FLUX_3_I2V: 'blackforestlabs/flux-3/image-to-video',
     IDEOGRAM_V4_T2I: 'ideogram/v4',
     HUNYUAN3D_V3_IMAGE_TO_3D: 'fal-ai/hunyuan3d-v3/image-to-3d',
     TRELLIS_2_IMAGE_TO_3D: 'fal-ai/trellis-2',
@@ -2313,6 +2321,142 @@ export const generateImageWithFalIdeogramV4 = async (
 };
 
 // ---------------------------------------------------------------------------
+// Image models: Krea 3, FLUX.3 (Black Forest Labs)
+// ---------------------------------------------------------------------------
+
+export type FalKrea3Variant = 'berry' | 'jam';
+
+/** Krea 3 bills per megapixel of output plus every reference, so the size is explicit. */
+export const generateImageWithFalKrea3 = async (
+    prompt: string,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; variant?: FalKrea3Variant; negativePrompt?: string; seed?: number }
+): Promise<MediaItem> => {
+    const input: Record<string, any> = {
+        prompt,
+        model: opts?.variant || 'berry',
+        image_size: opts?.aspectRatio ? mapStandardImageSizePreset(opts.aspectRatio) : 'auto',
+        output_format: 'png',
+    };
+    if (opts?.negativePrompt) input.negative_prompt = opts.negativePrompt;
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.KREA_3_T2I, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, MODELS.KREA_3_T2I, prompt, 'Krea 3 text-to-image', 'fal-krea-3-t2i')[0];
+};
+
+/** References are numbered in the prompt as <image-1> … <image-8>, in the order passed. */
+export const editImageWithFalKrea3 = async (
+    prompt: string,
+    images: Array<{ base64: string; mimeType: string }>,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; variant?: FalKrea3Variant; reasoning?: 'low' | 'medium' | 'high'; seed?: number }
+): Promise<MediaItem[]> => {
+    const refs = images.slice(0, 8);
+    if (refs.length === 0) {
+        throw new Error('Krea 3 Edit needs at least one reference image.');
+    }
+    const input: Record<string, any> = {
+        prompt,
+        image_urls: refs.map((image) => toDataUri(image)),
+        model: opts?.variant || 'berry',
+        image_size: opts?.aspectRatio ? mapStandardImageSizePreset(opts.aspectRatio) : 'auto',
+        reasoning_level: opts?.reasoning || 'medium',
+        output_format: 'png',
+    };
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.KREA_3_EDIT, input, { pollIntervalMs: 2500, maxChecks: 180 });
+    return finalizeFalImages(output, MODELS.KREA_3_EDIT, prompt, 'Krea 3 edit', 'fal-krea-3-edit');
+};
+
+export type FalFlux3AspectRatio = 'auto' | '21:9' | '2:1' | '16:9' | '3:2' | '7:5' | '4:3' | '5:4' | '1:1' | '4:5' | '3:4' | '5:7' | '2:3' | '9:16' | '1:2';
+export type FalFlux3Resolution = '512sq' | '768sq' | '1k' | '2k' | '4k';
+
+const FLUX_3_ASPECT_RATIOS = new Set<string>(['auto', '21:9', '2:1', '16:9', '3:2', '7:5', '4:3', '5:4', '1:1', '4:5', '3:4', '5:7', '2:3', '9:16', '1:2']);
+
+/** The workspaces speak in 1K/2K/4K and ratios like 235:100; FLUX.3 takes its own tiers and a fixed ratio list. */
+export const toFlux3Options = (aspectRatio?: string, imageSize?: '1K' | '2K' | '4K'): { aspectRatio: FalFlux3AspectRatio; resolution: FalFlux3Resolution } => {
+    const ratio = aspectRatio === '235:100' || aspectRatio === '2.35:1' ? '21:9' : aspectRatio;
+    return {
+        aspectRatio: (ratio && FLUX_3_ASPECT_RATIOS.has(ratio) ? ratio : 'auto') as FalFlux3AspectRatio,
+        resolution: imageSize === '4K' ? '4k' : imageSize === '2K' ? '2k' : '1k',
+    };
+};
+
+type FalFlux3ImageOptions = {
+    aspectRatio?: FalFlux3AspectRatio;
+    resolution?: FalFlux3Resolution;
+    promptExpansion?: boolean;
+    safetyTolerance?: number;
+};
+
+const buildFlux3ImageInput = (prompt: string, opts?: FalFlux3ImageOptions) => ({
+    prompt,
+    aspect_ratio: opts?.aspectRatio || 'auto',
+    resolution: opts?.resolution || '1k',
+    enable_prompt_expansion: opts?.promptExpansion === true,
+    safety_tolerance: typeof opts?.safetyTolerance === 'number' ? opts.safetyTolerance : 2,
+    output_format: 'png',
+});
+
+export const generateImageWithFalFlux3 = async (prompt: string, opts?: FalFlux3ImageOptions): Promise<MediaItem> => {
+    const input = buildFlux3ImageInput(prompt, opts);
+    // 4k renders can take several minutes.
+    const output = await runFalQueue(MODELS.FLUX_3_T2I, input, { pollIntervalMs: 3000, maxChecks: input.resolution === '4k' ? 200 : 120 });
+    return finalizeFalImages(output, MODELS.FLUX_3_T2I, prompt, 'FLUX.3 text-to-image', 'fal-flux-3-t2i')[0];
+};
+
+/** Up to 10 references; the first one sets the aspect ratio when it is left on auto. */
+export const editImageWithFalFlux3 = async (
+    prompt: string,
+    images: Array<{ base64: string; mimeType: string }>,
+    opts?: FalFlux3ImageOptions
+): Promise<MediaItem[]> => {
+    const refs = images.slice(0, 10);
+    if (refs.length === 0) {
+        throw new Error('FLUX.3 Edit needs at least one reference image.');
+    }
+    const input = { ...buildFlux3ImageInput(prompt, opts), image_urls: refs.map((image) => toDataUri(image)) };
+    const output = await runFalQueue(MODELS.FLUX_3_EDIT, input, { pollIntervalMs: 3000, maxChecks: input.resolution === '4k' ? 200 : 120 });
+    return finalizeFalImages(output, MODELS.FLUX_3_EDIT, prompt, 'FLUX.3 edit', 'fal-flux-3-edit');
+};
+
+/** FLUX.3 Klein: the small open-weights model, cheap and fast; prompt expansion is on by default. */
+export const generateImageWithFalFlux3Klein = async (
+    prompt: string,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; promptExpansion?: boolean; numOutputs?: number; seed?: number }
+): Promise<MediaItem> => {
+    const input: Record<string, any> = {
+        prompt,
+        image_size: mapStandardImageSizePreset(opts?.aspectRatio),
+        enable_prompt_expansion: opts?.promptExpansion !== false,
+        num_images: Math.min(4, Math.max(1, opts?.numOutputs || 1)),
+        output_format: 'png',
+    };
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.FLUX_3_KLEIN_T2I, input, { pollIntervalMs: 2000, maxChecks: 90 });
+    return finalizeFalImages(output, MODELS.FLUX_3_KLEIN_T2I, prompt, 'FLUX.3 Klein text-to-image', 'fal-flux-3-klein-t2i')[0];
+};
+
+export const editImageWithFalFlux3Klein = async (
+    prompt: string,
+    images: Array<{ base64: string; mimeType: string }>,
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; promptExpansion?: boolean; seed?: number }
+): Promise<MediaItem[]> => {
+    const refs = images.slice(0, 10);
+    if (refs.length === 0) {
+        throw new Error('FLUX.3 Klein Edit needs at least one reference image.');
+    }
+    const input: Record<string, any> = {
+        prompt,
+        image_urls: refs.map((image) => toDataUri(image)),
+        enable_prompt_expansion: opts?.promptExpansion !== false,
+        output_format: 'png',
+    };
+    if (opts?.aspectRatio) input.image_size = mapStandardImageSizePreset(opts.aspectRatio);
+    if (typeof opts?.seed === 'number') input.seed = opts.seed;
+    const output = await runFalQueue(MODELS.FLUX_3_KLEIN_EDIT, input, { pollIntervalMs: 2000, maxChecks: 90 });
+    return finalizeFalImages(output, MODELS.FLUX_3_KLEIN_EDIT, prompt, 'FLUX.3 Klein edit', 'fal-flux-3-klein-edit');
+};
+
+// ---------------------------------------------------------------------------
 // Image-to-3D (blockouts): Hunyuan3D v3, Trellis 2, Rodin 2.5
 // ---------------------------------------------------------------------------
 
@@ -2633,6 +2777,82 @@ export const generateVideoWithFalWan30Image = async (
     if (opts?.endImage?.base64) input.end_image_url = toDataUri(opts.endImage);
     const output = await runFalQueue(MODELS.WAN_30_I2V, input, { pollIntervalMs: 5000, maxChecks: 360 });
     return finishWan30Video(MODELS.WAN_30_I2V, output, prompt, input.duration, 'image-to-video', 'fal-wan-30-i2v');
+};
+
+// ---------------------------------------------------------------------------
+// FLUX.3 video (Black Forest Labs): 5-20 s with native audio, upsampled to 4K
+// ---------------------------------------------------------------------------
+
+export type FalFlux3VideoAspectRatio = 'auto' | '21:9' | '2:1' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
+export type FalFlux3VideoResolution = '720p' | '1080p' | '1440p' | '2160p';
+
+export type FalFlux3VideoOptions = {
+    duration?: number;
+    aspectRatio?: FalFlux3VideoAspectRatio;
+    resolution?: FalFlux3VideoResolution;
+    audio?: boolean;
+};
+
+const FLUX_3_VIDEO_ASPECT_RATIOS = new Set<string>(['auto', '21:9', '2:1', '16:9', '4:3', '1:1', '3:4', '9:16']);
+
+const buildFlux3VideoInput = (prompt: string, opts?: FalFlux3VideoOptions) => {
+    const input: Record<string, any> = {
+        prompt,
+        aspect_ratio: opts?.aspectRatio && FLUX_3_VIDEO_ASPECT_RATIOS.has(opts.aspectRatio) ? opts.aspectRatio : 'auto',
+        resolution: opts?.resolution || '1080p',
+        generate_audio: opts?.audio !== false,
+        duration: typeof opts?.duration === 'number' ? Math.round(clampDurationRange(opts.duration, 5, 5, 20)) : 'auto',
+    };
+    return input;
+};
+
+const finishFlux3Video = async (endpoint: string, output: any, prompt: string, requestedDuration: unknown, label: string, idPrefix: string): Promise<MediaItem> => {
+    const urls = Array.from(new Set(collectFalVideoUrls(output)));
+    if (urls.length === 0) {
+        throw new Error(`FAL FLUX.3 ${label} returned no video.`);
+    }
+    const videoUrl = urls[0];
+    let resolvedDuration = typeof requestedDuration === 'number' ? requestedDuration : 8;
+    try {
+        resolvedDuration = await getVideoDuration(videoUrl);
+    } catch {
+        /* keep the requested duration */
+    }
+    recordUsage({
+        provider: 'fal',
+        model: endpoint,
+        kind: 'video',
+        units: resolvedDuration,
+        unitLabel: 'second',
+        note: `FAL FLUX.3 ${label}`,
+    });
+    return {
+        id: `${idPrefix}-${Date.now()}`,
+        name: `${idPrefix.replace(/-/g, '_')}_${prompt.slice(0, 15) || 'clip'}.mp4`,
+        type: 'video',
+        url: videoUrl,
+        source: 'generated',
+        duration: resolvedDuration,
+    };
+};
+
+export const generateVideoWithFalFlux3Text = async (prompt: string, opts?: FalFlux3VideoOptions): Promise<MediaItem> => {
+    const input = buildFlux3VideoInput(prompt, opts);
+    const output = await runFalQueue(MODELS.FLUX_3_T2V, input, { pollIntervalMs: 5000, maxChecks: 480 });
+    return finishFlux3Video(MODELS.FLUX_3_T2V, output, prompt, input.duration, 'text-to-video', 'fal-flux-3-t2v');
+};
+
+export const generateVideoWithFalFlux3Image = async (
+    prompt: string,
+    image: { base64: string; mimeType: string },
+    opts?: FalFlux3VideoOptions
+): Promise<MediaItem> => {
+    if (!image?.base64) {
+        throw new Error('FAL FLUX.3 Image-to-Video requires a start image.');
+    }
+    const input: Record<string, any> = { ...buildFlux3VideoInput(prompt, opts), image_url: toDataUri(image) };
+    const output = await runFalQueue(MODELS.FLUX_3_I2V, input, { pollIntervalMs: 5000, maxChecks: 480 });
+    return finishFlux3Video(MODELS.FLUX_3_I2V, output, prompt, input.duration, 'image-to-video', 'fal-flux-3-i2v');
 };
 
 // ---------------------------------------------------------------------------

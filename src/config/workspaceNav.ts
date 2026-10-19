@@ -61,6 +61,7 @@ export const WORKSPACE_NAV_GROUPS: WorkspaceNavGroup[] = [
       { id: 'NOTEBOOKLM', name: 'Research', description: 'Source notes and context', icon: BrainIcon },
       { id: 'TEAM', name: 'Team', description: 'Collaboration, shared spaces, chat', icon: UserCircleIcon },
       { id: 'PLUGINS', name: 'Plugins', description: 'Install packs, LUTs and host plugins', icon: LayersIcon },
+      { id: 'LOCAL_AI', name: 'Local AI', description: 'Run open-weights models and LLMs on your computer', icon: BrainCircuitIcon },
     ],
   },
   {

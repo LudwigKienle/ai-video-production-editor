@@ -5,6 +5,7 @@
 
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { withModelFallback } from './geminiModelFallback';
+import { isLocalLlmReady, withLocalLlm } from './localLlmService';
 import { recordUsage } from '../utils/usageTracker';
 import { prepareVideoFileDataForGemini } from './geminiService';
 
@@ -137,10 +138,11 @@ const getAiClient = () => {
     const storageKey = localStorage.getItem('gemini_api_key');
     const apiKey = envKey || storageKey;
 
-    if (!apiKey) {
-        throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings.");
+    if (!apiKey && !isLocalLlmReady()) {
+        throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings, or choose a local model in Local AI.");
     }
-    return withModelFallback(new GoogleGenAI({ apiKey }));
+    // Without a key, text requests go to the local model and the rest explain what is missing.
+    return withLocalLlm(withModelFallback(new GoogleGenAI({ apiKey: apiKey || 'local-llm' })), Boolean(apiKey));
 };
 
 const withRetry = async <T>(

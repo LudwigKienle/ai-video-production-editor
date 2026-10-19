@@ -1,0 +1,291 @@
+1
+00:00:00,500 --> 00:00:02,960
+This is AI Video Production Editor:
+
+2
+00:00:02,980 --> 00:00:06,560
+a free, open-source film studio for AI video.
+
+3
+00:00:06,580 --> 00:00:09,280
+It takes a project from script to storyboard,
+
+4
+00:00:09,300 --> 00:00:14,160
+from storyboard to generated shots, and from there to the edit and the export.
+
+5
+00:00:14,180 --> 00:00:17,600
+Everything lives in one project folder on your own machine,
+
+6
+00:00:17,620 --> 00:00:20,000
+and you bring your own API keys.
+
+7
+00:00:20,020 --> 00:00:22,240
+In the next few minutes, you'll install it,
+
+8
+00:00:22,260 --> 00:00:25,540
+connect a provider, and set up your first project.
+
+9
+00:00:26,300 --> 00:00:30,280
+The quickest way in is the desktop app for macOS or Windows,
+
+10
+00:00:30,300 --> 00:00:33,320
+on the releases page of the GitHub repository.
+
+11
+00:00:33,340 --> 00:00:37,240
+If you'd rather run it from source, you need Node twenty-two or newer.
+
+12
+00:00:37,260 --> 00:00:42,520
+Clone the repository, run npm install, then npm run electron dev.
+
+13
+00:00:42,540 --> 00:00:45,820
+That starts the dev server and opens the desktop app.
+
+14
+00:00:46,567 --> 00:00:50,407
+On first launch, a short welcome guide walks you through four steps.
+
+15
+00:00:50,487 --> 00:00:52,647
+First, how you want to work.
+
+16
+00:00:52,727 --> 00:00:56,147
+Just getting started gives you a simple, guided studio.
+
+17
+00:00:56,167 --> 00:00:58,627
+I'm a filmmaker opens the full suite.
+
+18
+00:00:58,647 --> 00:01:01,287
+Next, pick a dark or a light look.
+
+19
+00:01:01,367 --> 00:01:03,027
+Then connect AI.
+
+20
+00:01:03,047 --> 00:01:07,187
+You only need one key to get started, and Google Gemini has a free tier.
+
+21
+00:01:07,207 --> 00:01:10,467
+Keys are stored on your machine and only go to the provider.
+
+22
+00:01:10,487 --> 00:01:13,187
+You can also skip this and add keys later.
+
+23
+00:01:13,207 --> 00:01:15,507
+The last step shows what you can do.
+
+24
+00:01:15,527 --> 00:01:19,027
+With no key connected yet, the studio then opens Settings,
+
+25
+00:01:19,047 --> 00:01:21,267
+where all thirteen providers live.
+
+26
+00:01:21,287 --> 00:01:23,527
+Close it for now, and you're in.
+
+27
+00:01:24,267 --> 00:01:25,447
+Here's the studio.
+
+28
+00:01:25,467 --> 00:01:28,647
+The sidebar holds every workspace, grouped into Project,
+
+29
+00:01:28,667 --> 00:01:31,047
+Create, Edit, Review and Deliver.
+
+30
+00:01:31,067 --> 00:01:35,547
+At the top, Simple, Standard and Pro switch how much of the studio you see.
+
+31
+00:01:35,707 --> 00:01:37,847
+Simple keeps just the essentials.
+
+32
+00:01:37,867 --> 00:01:42,427
+Pro shows everything, from Set Design and Scene Map to Color and Analysis.
+
+33
+00:01:42,507 --> 00:01:47,147
+Activity keeps track of running jobs, and AI Tools opens the assistant.
+
+34
+00:01:47,900 --> 00:01:51,080
+Before you create anything, choose a project folder.
+
+35
+00:01:51,100 --> 00:01:54,280
+Open the project menu and pick Choose Project Folder.
+
+36
+00:01:54,300 --> 00:01:58,520
+The studio writes the project file, a backup and a media folder into it,
+
+37
+00:01:58,540 --> 00:02:00,040
+and saves as you work.
+
+38
+00:02:00,060 --> 00:02:03,020
+The badge switches from No folder to Saved.
+
+39
+00:02:03,767 --> 00:02:06,147
+The Project Hub is the heart of the app.
+
+40
+00:02:06,167 --> 00:02:07,347
+First, pick a format:
+
+41
+00:02:07,367 --> 00:02:11,347
+a feature, a short film, a microdrama or a commercial.
+
+42
+00:02:11,367 --> 00:02:14,147
+The seven steps on the left are your production path,
+
+43
+00:02:14,167 --> 00:02:16,147
+and step one is the script.
+
+44
+00:02:16,167 --> 00:02:19,827
+We'll paste in Rainline, the demo script from the examples folder,
+
+45
+00:02:19,847 --> 00:02:22,307
+and give it a title in the story bible.
+
+46
+00:02:22,327 --> 00:02:26,547
+With a key connected, Analyze Script breaks the story down into characters
+
+47
+00:02:26,567 --> 00:02:28,887
+and locations for the next steps.
+
+48
+00:02:29,633 --> 00:02:32,253
+From there, each step builds on the last.
+
+49
+00:02:32,273 --> 00:02:34,653
+World is optional lore and rules.
+
+50
+00:02:34,673 --> 00:02:38,893
+Concept is where you cast characters and design environments and props.
+
+51
+00:02:38,913 --> 00:02:41,800
+Storyboard turns scenes into shots and frames,
+
+52
+00:02:41,820 --> 00:02:44,493
+with camera, lens and aspect ratio.
+
+53
+00:02:44,513 --> 00:02:47,693
+Filming sends approved frames to video models like Veo,
+
+54
+00:02:47,713 --> 00:02:49,213
+Kling or Seedance.
+
+55
+00:02:49,233 --> 00:02:51,666
+Review checks continuity across your shots,
+
+56
+00:02:51,686 --> 00:02:54,433
+and Marketing makes posters and thumbnails.
+
+57
+00:02:55,167 --> 00:02:57,147
+You don't have to use the full pipeline.
+
+58
+00:02:57,167 --> 00:02:59,947
+Images and Video are standalone generators.
+
+59
+00:02:59,967 --> 00:03:04,267
+Each one shows what the selected model still needs before you generate,
+
+60
+00:03:04,287 --> 00:03:06,907
+and an estimated cost on your own key.
+
+61
+00:03:06,927 --> 00:03:10,607
+And in Node Space, you can build the same work as a graph.
+
+62
+00:03:11,367 --> 00:03:13,987
+Your clips land in the project's media.
+
+63
+00:03:14,007 --> 00:03:16,227
+The Timeline works like an editing suite,
+
+64
+00:03:16,247 --> 00:03:18,787
+with pages for cut, color and sound.
+
+65
+00:03:18,807 --> 00:03:21,907
+And Export renders the result, with presets for YouTube,
+
+66
+00:03:21,927 --> 00:03:23,767
+TikTok and Instagram.
+
+67
+00:03:24,500 --> 00:03:26,400
+That's your first ten minutes.
+
+68
+00:03:26,420 --> 00:03:29,280
+Next, open First Ten Minutes in the docs folder,
+
+69
+00:03:29,300 --> 00:03:32,080
+and run the Rainline demo with a key connected.
+
+70
+00:03:32,100 --> 00:03:34,560
+The project is open source under the GPL,
+
+71
+00:03:34,580 --> 00:03:37,760
+so issues, ideas and pull requests are welcome.
+
+72
+00:03:37,780 --> 00:03:41,600
+And if it helps you make something, a star on GitHub helps other filmmakers
+
+73
+00:03:41,620 --> 00:03:42,580
+find it.

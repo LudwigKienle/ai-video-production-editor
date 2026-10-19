@@ -22,6 +22,9 @@ test('resolves families for the app\'s model ids', () => {
   assert.equal(resolvePromptFamily('seedream-v5-pro-fal', 'image'), 'seedream');
   assert.equal(resolvePromptFamily('gpt-image-2-fal', 'image'), 'gpt-image');
   assert.equal(resolvePromptFamily('ideogram-v4-fal', 'image'), 'ideogram');
+  assert.equal(resolvePromptFamily('flux-3-fal', 'image'), 'flux');
+  assert.equal(resolvePromptFamily('flux-3-klein-fal-edit', 'image'), 'flux');
+  assert.equal(resolvePromptFamily('krea-3-fal-edit', 'image'), 'krea');
   assert.equal(resolvePromptFamily('veo-3.1-fast-generate-preview', 'video'), 'veo');
   assert.equal(resolvePromptFamily('kling-v3-pro-i2v-fal', 'video'), 'kling');
   assert.equal(resolvePromptFamily('seedance-2.5-omni-fal', 'video'), 'seedance');
