@@ -129,3 +129,18 @@ export const buildSetDesignAssetForEnvironmentBlockout = (
   ...buildSetDesignAssetForEnvironmentWorld(reference, meshUrl),
   name: `${reference.name || 'Environment'} Blockout (${engineLabel})`,
 });
+
+/** The reference image for a camera yaw: the eye-level angle within 45° of it, else the base image. */
+export const pickReferenceImageForYaw = (
+  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta'>,
+  yaw?: number | null,
+): string | null => {
+  if (typeof yaw !== 'number' || yaw === 0) return reference.imageUrl || null;
+  let best: { url: string; distance: number } | null = null;
+  for (const angle of reference.multiAngleMeta || []) {
+    if (!angle.url || typeof angle.yaw !== 'number' || Math.abs(angle.pitch ?? 0) > 25) continue;
+    const distance = yawDistance(angle.yaw, yaw);
+    if (distance <= 45 && (!best || distance < best.distance)) best = { url: angle.url, distance };
+  }
+  return best?.url || reference.imageUrl || null;
+};

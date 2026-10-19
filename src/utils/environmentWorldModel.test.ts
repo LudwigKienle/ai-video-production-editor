@@ -7,6 +7,7 @@ import {
   buildSetDesignAssetForEnvironmentWorld,
   buildSetDesignAssetForEnvironmentBlockout,
   pickEnvironmentViews,
+  pickReferenceImageForYaw,
 } from './environmentWorldModel.ts';
 import type { ReferenceItem } from '../types.ts';
 
@@ -95,4 +96,20 @@ test('names a blockout asset after its engine', () => {
   assert.equal(asset.name, 'Rainy rooftop market Blockout (Hunyuan3D v3)');
   assert.equal(asset.format, 'glb');
   assert.equal(asset.kind, 'model');
+});
+
+test('uses the angle nearest to the shot yaw and falls back to the base image', () => {
+  const reference = {
+    imageUrl: 'base.png',
+    multiAngleMeta: [
+      { id: 'l', url: 'left.png', yaw: -90, pitch: 0 },
+      { id: 'r', url: 'right.png', yaw: 90, pitch: 0 },
+      { id: 't', url: 'top.png', yaw: 170, pitch: 40 },
+    ],
+  };
+  assert.equal(pickReferenceImageForYaw(reference, 80), 'right.png');
+  assert.equal(pickReferenceImageForYaw(reference, -100), 'left.png');
+  assert.equal(pickReferenceImageForYaw(reference, 180), 'base.png');
+  assert.equal(pickReferenceImageForYaw(reference, 0), 'base.png');
+  assert.equal(pickReferenceImageForYaw(reference, undefined), 'base.png');
 });

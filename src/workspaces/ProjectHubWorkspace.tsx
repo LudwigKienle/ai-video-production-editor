@@ -94,7 +94,7 @@ import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingServ
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes as splitScriptIntoSceneBlocks } from '../utils/directorScenes';
-import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews } from '../utils/environmentWorldModel';
+import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews, pickReferenceImageForYaw } from '../utils/environmentWorldModel';
 import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
@@ -5017,13 +5017,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             ...(shot.characters || []),
             ...(shot.products || []),
         ].filter(Boolean).join(' ');
-        const findTextMatches = (type: ReferenceItem['type']) =>
-            refs.filter(ref => ref.type === type && matchesReferenceInText(shotText, ref));
-        const resolveMatches = (names: string[], type: ReferenceItem['type']) => {
+        const findTextMatches = (type: ReferenceItem['type'] | ReferenceItem['type'][]) =>
+            refs.filter(ref => (Array.isArray(type) ? type.includes(ref.type) : ref.type === type) && matchesReferenceInText(shotText, ref));
+        const resolveMatches = (names: string[], type: ReferenceItem['type'] | ReferenceItem['type'][]) => {
             const matched: string[] = [];
             const seen = new Set<string>();
             for (const name of names) {
-                const ref = refs.find(r => r.type === type && matchesRefName(r.name, name));
+                const ref = refs.find(r => (Array.isArray(type) ? type.includes(r.type) : r.type === type) && matchesRefName(r.name, name));
                 if (!ref?.name) continue;
                 const key = normalizeRefName(ref.name);
                 if (seen.has(key)) continue;
@@ -5033,9 +5033,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return matched;
         };
         const resolvedCharacters = resolveMatches(shot.characters || [], 'character');
-        const resolvedProducts = resolveMatches(shot.products || [], 'product');
+        const resolvedProducts = resolveMatches(shot.products || [], ['product', 'prop']);
         const textCharacters = resolvedCharacters.length > 0 ? [] : findTextMatches('character').map(ref => ref.name.trim());
-        const textProducts = resolvedProducts.length > 0 ? [] : findTextMatches('product').map(ref => ref.name.trim());
+        const textProducts = resolvedProducts.length > 0 ? [] : findTextMatches(['product', 'prop']).map(ref => ref.name.trim());
         let resolvedEnvironment: string | null = null;
         if (shot.environment) {
             const env = refs.find(r => r.type === 'environment' && matchesRefName(r.name, shot.environment || ''));
@@ -5099,11 +5099,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
         const productNames = shot.products || [];
         const productMatches = [
-            ...refs.filter(ref => ref.type === 'product' && productNames.some(name => matchesRefName(ref.name, name))),
+            ...refs.filter(ref => (ref.type === 'product' || ref.type === 'prop') && productNames.some(name => matchesRefName(ref.name, name))),
             // Only use text matching fallback if NO explicit products are defined
-            ...(productNames.length === 0 ? refs.filter(ref => ref.type === 'product' && matchesReferenceInText(shotText, ref)) : []),
+            ...(productNames.length === 0 ? refs.filter(ref => (ref.type === 'product' || ref.type === 'prop') && matchesReferenceInText(shotText, ref)) : []),
         ];
-        productMatches.forEach(ref => addReference(ref, 'props', 'Match product/branding details.'));
+        productMatches.forEach(ref => addReference(ref, 'props', ref.type === 'prop' ? 'Match this prop exactly.' : 'Match product/branding details.'));
 
         return merged;
     };
@@ -6367,6 +6367,37 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     };
     const pickOutfitForShot = (shot: ShotPrompt, character: ReferenceItem) =>
         getAutoOutfitDecisionForShot(shot, character).outfit;
+    /**
+     * The concept images a shot is generated with, most important first: each character, then their
+     * chosen outfit, the location (the angle nearest the shot's camera yaw), then props and products.
+     */
+    const resolveShotReferenceImages = (
+        shot: ShotPrompt,
+        alignedShot: ShotPrompt,
+        outfitSelections?: Record<string, string>,
+    ) => {
+        const items: Array<{ url: string; label: string; kind: 'character' | 'outfit' | 'environment' | 'prop' }> = [];
+        const add = (url: string | null | undefined, label: string, kind: 'character' | 'outfit' | 'environment' | 'prop') => {
+            if (url && !items.some((item) => item.url === url)) items.push({ url, label, kind });
+        };
+        (alignedShot.characters || []).forEach((name) => {
+            const ref = references.find((r) => r.type === 'character' && r.imageUrl && matchesRefName(r.name, name));
+            if (!ref) return;
+            add(ref.imageUrl, ref.name, 'character');
+            const outfit = ref.outfits?.find((item) => item.id === outfitSelections?.[ref.id]);
+            if (outfit?.imageUrl) add(outfit.imageUrl, `${ref.name} · ${outfit.name}`, 'outfit');
+        });
+        if (alignedShot.environment) {
+            const env = references.find((r) => r.type === 'environment' && r.imageUrl && matchesRefName(r.name, alignedShot.environment || ''));
+            if (env) add(pickReferenceImageForYaw(env, shot.cameraYaw), env.name, 'environment');
+        }
+        (alignedShot.products || []).forEach((name) => {
+            const ref = references.find((r) => (r.type === 'product' || r.type === 'prop') && r.imageUrl && matchesRefName(r.name, name));
+            if (ref) add(ref.imageUrl, ref.name, 'prop');
+        });
+        return items;
+    };
+
     const resolveOutfitSelectionsForShot = (shot: ShotPrompt, alignedShot: ShotPrompt) => {
         const shotForSelection = {
             ...shot,
@@ -10484,9 +10515,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         .filter(Boolean);
                     return Array.from(new Set(names));
                 };
-                const characters = uniqueNames(match.characterIds || []);
-                const products = uniqueNames([...(match.productIds || []), ...(match.propIds || [])]);
-                const environment = match.environmentId ? (refById.get(match.environmentId)?.name?.trim() || null) : null;
+                const matchedCharacters = uniqueNames(match.characterIds || []);
+                const matchedProducts = uniqueNames([...(match.productIds || []), ...(match.propIds || [])]);
+                const characters = matchedCharacters.length > 0 ? matchedCharacters : shot.characters;
+                const products = matchedProducts.length > 0 ? matchedProducts : (shot.products || []);
+                const environment = match.environmentId ? (refById.get(match.environmentId)?.name?.trim() || shot.environment || null) : shot.environment;
                 const alignedShot = {
                     ...shot,
                     characters,
@@ -10498,7 +10531,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     characters,
                     products,
                     environment,
-                    contextReferences: buildContextReferencesFromConcept({ ...alignedShot, contextReferences: [] }, references),
+                    contextReferences: buildContextReferencesFromConcept(alignedShot, references),
                 };
             }));
             setError('AI context sync complete.');
@@ -10866,12 +10899,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const contextReferences = mergedReferences;
 
             // We do NOT update setShotPrompts here to avoid populating the manual list automatically
-            const refsData: { [key: string]: { base64: string; mimeType: string; } } = {};
             const activeRefs: ReferenceItem[] = [];
             const findRefByName = (type: ReferenceItem['type'], name: string) =>
                 references.find(r => r.imageUrl && r.type === type && matchesRefName(r.name, name));
             const wardrobeLabels: string[] = [];
-            const wardrobeImageUrls: string[] = [];
 
             // Match Characters
             alignedShot.characters.forEach(charName => {
@@ -10883,9 +10914,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     if (selectedOutfit) {
                         const description = selectedOutfit.description ? ` - ${selectedOutfit.description}` : '';
                         wardrobeLabels.push(`${ref.name}: ${selectedOutfit.name}${description}`);
-                        if (selectedOutfit.imageUrl) {
-                            wardrobeImageUrls.push(selectedOutfit.imageUrl);
-                        }
                     }
                 }
             });
@@ -10896,29 +10924,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 if (envRef && !activeRefs.some(r => r.id === envRef.id)) activeRefs.push(envRef);
             }
 
-            // Match Products (Commercial Context)
+            // Match Products and Props
             if (alignedShot.products) {
                 alignedShot.products.forEach(prodName => {
-                    const prodRef = findRefByName('product', prodName);
+                    const prodRef = findRefByName('product', prodName) || findRefByName('prop', prodName);
                     if (prodRef && !activeRefs.some(r => r.id === prodRef.id)) activeRefs.push(prodRef);
                 });
             }
 
-            await Promise.all(activeRefs.map(async r => { refsData[r.name] = await getBase64FromUrl(r.imageUrl!); }));
-            const wardrobeImages = await Promise.all(
-                wardrobeImageUrls.map(async (url) => {
-                    try {
-                        return await getBase64FromUrl(url);
-                    } catch {
-                        return null;
-                    }
-                })
-            );
-            const contextImages: { base64: string; mimeType: string }[] = wardrobeImages.filter(Boolean) as { base64: string; mimeType: string }[];
+            // Identity references go first so models that take only a few images keep the cast and the location.
+            const orderedReferenceUrls = resolveShotReferenceImages(shot, alignedShot, outfitSelections).map((item) => item.url);
+            const pushReferenceUrl = (url?: string | null) => {
+                if (url && !orderedReferenceUrls.includes(url)) orderedReferenceUrls.push(url);
+            };
             const contextPromptBits: string[] = [];
 
             if (usePreviousShotContext && previousShot?.imageUrl) {
-                contextImages.push(await getBase64FromUrl(previousShot.imageUrl));
+                pushReferenceUrl(previousShot.imageUrl);
                 contextPromptBits.push('Maintain continuity with the previous shot: match lighting, time of day, and camera placement.');
             }
 
@@ -10943,14 +10965,18 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 if (!tagBuckets[tag]) tagBuckets.other = tagBuckets.other || [];
                 tagBuckets[tag]?.push(formatContextLabel(ref));
                 if (ref.imageUrl) {
-                    contextImages.push(await getBase64FromUrl(ref.imageUrl));
+                    pushReferenceUrl(ref.imageUrl);
                 } else if (ref.name) {
-                    const fallback = references.find(r => r.imageUrl && matchesRefName(r.name, ref.name));
-                    if (fallback?.imageUrl) {
-                        contextImages.push(await getBase64FromUrl(fallback.imageUrl));
-                    }
+                    pushReferenceUrl(references.find(r => r.imageUrl && matchesRefName(r.name, ref.name))?.imageUrl);
                 }
             }
+            const contextImages = (await Promise.all(orderedReferenceUrls.map(async (url) => {
+                try {
+                    return await getBase64FromUrl(url);
+                } catch {
+                    return null;
+                }
+            }))).filter(Boolean) as { base64: string; mimeType: string }[];
 
             const tagOrder: Array<'lighting' | 'wardrobe' | 'props' | 'other'> = ['lighting', 'wardrobe', 'props', 'other'];
             const tagLabels: Record<'lighting' | 'wardrobe' | 'props' | 'other', string> = {
@@ -11001,7 +11027,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 : '';
             const basePrompt = shot.continuityRefinedPrompt?.trim() || shot.prompt || shot.description || '';
             const modelToUse = referenceImageModel === 'gemini-pro' ? 'gemini-3-pro-image-preview' : 'gemini-3.1-flash-image-preview';
-            const referenceImages = [...contextImages, ...Object.values(refsData)];
+            const referenceImages = contextImages;
             const compositionData = poseData || sketchData;
             const supplementalReferences = poseData && sketchData
                 ? [sketchData, ...referenceImages]
@@ -17400,6 +17426,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 />
                                                 Self-refine storyboard continuity
                                             </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleSyncContextWithConceptAI()}
+                                                disabled={references.length === 0 || shotPrompts.length === 0}
+                                                className="rounded-md border border-gray-700 bg-gray-900 px-3 py-1 text-xs font-semibold text-gray-200 hover:bg-gray-800 disabled:opacity-40"
+                                                title="Let AI re-read every shot and attach the matching characters, location and props from Concept"
+                                            >
+                                                Re-match references with AI
+                                            </button>
                                             <span className="text-[10px] text-gray-400">
                                                 {isGeminiEmbedding2Configured()
                                                     ? 'Uses Gemini Embedding 2 to pull the most relevant project images and references into each shot. Optional self-refine retries drifted storyboard frames up to two extra passes.'
@@ -18437,6 +18472,26 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                 </div>
                                                             )}
 
+                                                            {(() => {
+                                                                const alignedPreview = alignShotToConcept(shot, references);
+                                                                const previewRefs = resolveShotReferenceImages(shot, alignedPreview, resolveOutfitSelectionsForShot(shot, alignedPreview).selections);
+                                                                if (previewRefs.length === 0) return null;
+                                                                return (
+                                                                    <div className="mt-3 flex items-center gap-1.5 flex-wrap" title="Concept references sent with this shot, most important first">
+                                                                        <span className="text-[10px] uppercase tracking-wider text-gray-500 mr-0.5">Refs</span>
+                                                                        {previewRefs.map((item, index) => (
+                                                                            <img
+                                                                                key={item.url}
+                                                                                src={item.url}
+                                                                                alt={item.label}
+                                                                                title={`${index + 1}. ${item.label}`}
+                                                                                className="w-8 h-8 rounded object-cover border border-gray-700"
+                                                                                loading="lazy"
+                                                                            />
+                                                                        ))}
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                             <div className="mt-3 pt-2 flex flex-wrap gap-1">
                                                                 {shot.characters.map((char, i) => (
                                                                     <span key={i} className="text-[10px] px-1.5 py-0.5 bg-purple-500/10 text-purple-300 rounded border border-purple-500/20">{char}</span>
