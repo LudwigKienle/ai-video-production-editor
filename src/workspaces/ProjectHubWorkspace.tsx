@@ -45,7 +45,8 @@ import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiSer
 import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
-import { runLocalModel, sizeForAspect } from '../services/localModelService';
+import { getLocalModel, runLocalModel, sizeForAspect } from '../services/localModelService';
+import { generateImageWithDrawThings } from '../services/drawThingsService';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
@@ -225,7 +226,8 @@ type OutfitImageModel =
     | 'flux-3-klein-local'
     | 'qwen-image-21-local'
     | 'qwen-image-21-turbo-local'
-    | 'flux-2-klein-4b-local';
+    | 'flux-2-klein-4b-local'
+    | 'draw-things';
 
 const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 'Cloud' | 'Local' | '' }> = [
     { id: 'same', label: 'Same as image model', group: '' },
@@ -249,6 +251,7 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
     { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', group: 'Local' },
     { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', group: 'Local' },
     { id: 'flux-2-klein-4b-local', label: 'FLUX.2 Klein 4B (Local)', group: 'Local' },
+    { id: 'draw-things', label: 'Draw Things (Local, img2img)', group: 'Local' },
 ];
 
 const OUTFIT_MODEL_STORAGE_KEY = 'outfit_image_model_v1';
@@ -294,6 +297,9 @@ const PROP_VIEW_PRESETS: AnglePresetSelection[] = [
     { id: 'prop-back', label: 'Back', yaw: 180, pitch: 0 },
     { id: 'prop-top', label: 'Top', yaw: 0, pitch: 45 },
 ];
+
+const LOCAL_COMFY_IMAGE_MODELS = new Set<string>(['flux-3-klein-local', 'qwen-image-21-local', 'qwen-image-21-turbo-local', 'z-image-turbo-local', 'flux-2-klein-4b-local']);
+const isLocalImageModel = (model: string) => model === 'draw-things' || LOCAL_COMFY_IMAGE_MODELS.has(model);
 
 type Environment3dEngine = 'hunyuan3d-v3' | 'rodin-v2.5' | 'trellis-2' | 'marble-views';
 const ENVIRONMENT_3D_ENGINES: Array<{ id: Environment3dEngine; label: string; short: string }> = [
@@ -402,6 +408,12 @@ type ReferenceImageModel =
     | 'qwen-multiangle'
     | 'qwen-multiangle-fal'
     | 'midjourney'
+    | 'draw-things'
+    | 'flux-3-klein-local'
+    | 'qwen-image-21-local'
+    | 'qwen-image-21-turbo-local'
+    | 'z-image-turbo-local'
+    | 'flux-2-klein-4b-local'
     | 'soul-standard-hf'
     | 'soul-2-hf'
     | 'soul-cinema-hf';
@@ -783,6 +795,12 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'nano-banana-2-fal': 'Nano Banana 2 (FAL)',
     'nano-21': 'Nano Banana 2.1',
     'nano-banana-21-fal': 'Nano Banana 2.1 (FAL)',
+    'draw-things': 'Draw Things (Local)',
+    'flux-3-klein-local': 'FLUX.3 Klein (Local)',
+    'qwen-image-21-local': 'Qwen Image 2.1 (Local)',
+    'qwen-image-21-turbo-local': 'Qwen Image 2.1 Turbo (Local)',
+    'z-image-turbo-local': 'Z-Image Turbo (Local)',
+    'flux-2-klein-4b-local': 'FLUX.2 Klein 4B (Local)',
     firered: 'FireRed Edit',
     'z-image': 'Z-Image',
     'z-turbo': 'Z-Turbo',
@@ -852,6 +870,12 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'flux-3-edit-fal', label: 'FLUX.3 Edit (FAL)', provider: 'FAL', goodFor: 'Multi-reference continuity (up to 10 refs) that leaves the rest of the frame untouched' },
     { id: 'midjourney', label: 'Midjourney · Jeff', provider: 'Midjourney', goodFor: 'Your own Midjourney account, driven by a background browser agent. Returns the 4-grid as versions; storyboard shots get concept refs as --oref / --sref', badge: '🧭 Agent' },
     ...HIGGSFIELD_IMAGE_MODELS.map((model) => ({ id: model.id as ReferenceImageModel, label: model.label, provider: 'Higgsfield', goodFor: model.goodFor, badge: model.badge })),
+    { id: 'draw-things', label: 'Draw Things (Local)', provider: 'Local', goodFor: 'Whatever model is loaded in Draw Things on this Mac; turn on its API server (Local AI → Draw Things)' },
+    { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', provider: 'Local', goodFor: 'ComfyUI on this machine; edits from a base image or sketch (download in Local AI)' },
+    { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', provider: 'Local', goodFor: 'ComfyUI on this machine; text, layouts and reference edits (download in Local AI)' },
+    { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', provider: 'Local', goodFor: 'Fast local Qwen passes through ComfyUI (download in Local AI)' },
+    { id: 'z-image-turbo-local', label: 'Z-Image Turbo (Local)', provider: 'Local', goodFor: 'Fast local text-to-image through ComfyUI (download in Local AI)' },
+    { id: 'flux-2-klein-4b-local', label: 'FLUX.2 Klein 4B (Local)', provider: 'Local', goodFor: 'Lightweight local FLUX through ComfyUI (download in Local AI)' },
     { id: 'qwen', label: 'Qwen 2511', provider: 'Qwen', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
     { id: 'qwen-2512', label: 'Qwen 2512', provider: 'Qwen', icon: logoQwen, goodFor: 'Improved aesthetic logic and detailed composition' },
     { id: 'qwen-max-fal', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation' },
@@ -6919,6 +6943,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             image = await editImageWithFireRed(prompt, refs, { aspectRatio: modelAspectRatio });
         } else if (selectedReferenceModel === 'z-image') {
             image = await generateImageWithZImage(prompt, modelAspectRatio, loraOptions);
+        } else if (isLocalImageModel(selectedReferenceModel)) {
+            const baseRef = baseImageUrl ? [await getBase64FromUrl(baseImageUrl)] : [];
+            image = await generateWithLocalImageModel(selectedReferenceModel, prompt, modelAspectRatio, baseRef);
         } else if (selectedReferenceModel === 'nano' || selectedReferenceModel === 'nano-21') {
             const nanoModel = selectedReferenceModel === 'nano-21' ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : 'gemini-3.1-flash-image-preview';
             const refs = await buildMoodboardReferences(baseImageUrl);
@@ -7146,6 +7173,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
         if (marketingImageModel === 'z-image') {
             return generateImageWithZImage(enrichedPrompt, modelAspectRatio);
+        }
+
+        if (isLocalImageModel(marketingImageModel)) {
+            const baseRef = baseImageUrl ? [await getBase64FromUrl(baseImageUrl)] : [];
+            return generateWithLocalImageModel(marketingImageModel, enrichedPrompt, modelAspectRatio, baseRef);
         }
 
         if (marketingImageModel === 'nano' || marketingImageModel === 'nano-21') {
@@ -9688,6 +9720,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return generateImageWithWan27ImagePro(prompt, modelAspectRatio, imageSize, refs);
             case 'wan-2.7-pro-fal':
                 return firstEdit(await editImageWithFalWanV27Pro(prompt, refs.slice(0, 4), { aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL WAN 2.7 Pro Edit');
+            case 'draw-things': {
+                const [width, height] = sizeForAspect(modelAspectRatio, imageSize);
+                return generateImageWithDrawThings({ prompt, width, height, image: refs[0], strength: 0.55 });
+            }
             case 'flux-3-klein-local':
             case 'qwen-image-21-local':
             case 'qwen-image-21-turbo-local':
@@ -9714,6 +9750,21 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         refs: Array<{ base64: string; mimeType: string }>,
         modelAspectRatio: ModelAspectRatio,
     ) => renderWithEditModel(resolveOutfitModel(), prompt, refs, modelAspectRatio);
+
+    /** Draw Things (img2img from the first ref) or a ComfyUI catalog model (edit when refs exist and it can edit). */
+    const generateWithLocalImageModel = async (
+        model: string,
+        prompt: string,
+        modelAspectRatio: ModelAspectRatio,
+        refs: Array<{ base64: string; mimeType: string }>,
+    ): Promise<MediaItem> => {
+        const [width, height] = sizeForAspect(modelAspectRatio, imageSize);
+        if (model === 'draw-things') {
+            return generateImageWithDrawThings({ prompt, width, height, image: refs[0], strength: refs[0] ? 0.55 : undefined });
+        }
+        const canEdit = Boolean(getLocalModel(model)?.workflows.edit);
+        return runLocalModel(model, refs.length > 0 && canEdit ? 'edit' : 't2i', { prompt, width, height, images: canEdit ? refs : undefined, enhance: true });
+    };
 
     /** Angles with the chosen angle model; models without a camera parameter run once per output. */
     const editAngleImages = async (
@@ -11206,6 +11257,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             version,
                         });
                     }
+                } else if (isLocalImageModel(activeReferenceModel)) {
+                    // Draw Things only takes a start image, so it gets the sketch/pose; ComfyUI edit models also get the concept refs.
+                    const localInputs = activeReferenceModel === 'draw-things'
+                        ? (compositionData ? [compositionData] : [])
+                        : (compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences);
+                    imageMedia = await generateWithLocalImageModel(activeReferenceModel, fullPrompt, modelAspectRatio, localInputs);
                 } else if (activeReferenceModel === 'firered') {
                     if (qwenInputs.length === 0) {
                         throw new Error('FireRed Edit requires at least one reference, sketch, pose, or previous-shot image for storyboards.');
