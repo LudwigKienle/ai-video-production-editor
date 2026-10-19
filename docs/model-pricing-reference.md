@@ -20,6 +20,7 @@ This document mirrors `api/usage/record.js` billing rates.
   - <https://fal.ai/models/alibaba/happy-horse/image-to-video>
   - <https://fal.ai/models/fal-ai/qwen-image-max/text-to-image>
   - <https://fal.ai/models/fal-ai/qwen-image-max/edit>
+  - <https://fal.ai/models/fal-ai/qwen-image-2.1> (Qwen Image 2.1: $0.02 per output megapixel, text-to-image and edit)
   - <https://fal.ai/models/xai/grok-imagine-video/image-to-video>
   - <https://fal.ai/krea-3> (Krea 3: $0.025 per megapixel, output plus references)
   - <https://fal.ai/flux-video-free> (FLUX.3 video: $0.17/s at 720p, $0.29/s at 1080p)
@@ -53,6 +54,8 @@ Where direct provider list pricing was unavailable, conservative estimates are m
 | `fal:fal-ai/pixverse/c1/reference-to-video:video` | 0.050000 | 0.051000 | 0.000000 | 0.000000 |
 | `fal:fal-ai/qwen-image-max/text-to-image:image` | 0.075000 | 0.076500 | 0.000000 | 0.000000 |
 | `fal:fal-ai/qwen-image-max/edit:edit` | 0.075000 | 0.076500 | 0.000000 | 0.000000 |
+| `fal:fal-ai/qwen-image-2.1:image` | 0.020000 | 0.020400 | 0.000000 | 0.000000 |
+| `fal:fal-ai/qwen-image-2.1/edit:edit` | 0.020000 | 0.020400 | 0.000000 | 0.000000 |
 | `fal:blackforestlabs/flux-3/edit-image:edit` | 0.048000 | 0.048960 | 0.000000 | 0.000000 |
 | `fal:blackforestlabs/flux-3/image-to-video:video` | 0.290000 | 0.295800 | 0.000000 | 0.000000 |
 | `fal:blackforestlabs/flux-3/klein/edit-image:edit` | 0.009000 | 0.009180 | 0.000000 | 0.000000 |

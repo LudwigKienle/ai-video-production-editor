@@ -42,11 +42,12 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalQwenImage21, editImageWithFalQwenImage21, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { getLocalModel, runLocalModel, sizeForAspect } from '../services/localModelService';
-import { generateImageWithDrawThings } from '../services/drawThingsService';
+import { generateImageWithDrawThings, isDrawThingsEditModel, probeDrawThings } from '../services/drawThingsService';
+import { generateImageWithMachgen } from '../services/machgenService';
 import { getPreferredImageModel } from '../services/localSetupService';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
@@ -225,6 +226,8 @@ type OutfitImageModel =
     | 'wan-2.7-pro-fal'
     | 'firered'
     | 'qwen-multiangle-fal'
+    | 'qwen-image-21-fal'
+    | 'machgen-flux2-dev'
     | 'flux-3-klein-local'
     | 'qwen-image-21-local'
     | 'qwen-image-21-turbo-local'
@@ -249,6 +252,8 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
     { id: 'wan-2.7-pro-fal', label: 'WAN 2.7 Pro Edit (FAL)', group: 'Cloud' },
     { id: 'firered', label: 'FireRed Edit (Replicate)', group: 'Cloud' },
     { id: 'qwen-multiangle-fal', label: 'Qwen Image Max Edit (FAL)', group: 'Cloud' },
+    { id: 'qwen-image-21-fal', label: 'Qwen Image 2.1 Edit (FAL) · up to 10 refs', group: 'Cloud' },
+    { id: 'machgen-flux2-dev', label: 'FLUX.2 dev Edit (MachGen) · up to 4 refs', group: 'Cloud' },
     { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', group: 'Local' },
     { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', group: 'Local' },
     { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', group: 'Local' },
@@ -409,6 +414,9 @@ type ReferenceImageModel =
     | 'qwen-max-fal'
     | 'qwen-multiangle'
     | 'qwen-multiangle-fal'
+    | 'qwen-image-21-fal'
+    | 'machgen-flux2-dev'
+    | 'machgen-hidream-o1'
     | 'midjourney'
     | 'draw-things'
     | 'flux-3-klein-local'
@@ -778,6 +786,9 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'qwen-max-fal': 'Qwen Image Max (FAL)',
     'qwen-multiangle': 'Qwen Multi-Angle',
     'qwen-multiangle-fal': 'Qwen Image Max Edit (FAL)',
+    'qwen-image-21-fal': 'Qwen Image 2.1 (FAL)',
+    'machgen-flux2-dev': 'FLUX.2 dev (MachGen)',
+    'machgen-hidream-o1': 'HiDream O1 (MachGen)',
 };
 const MARKETING_MODEL_LABELS: Record<MarketingImageModel, string> = {
     ...REFERENCE_MODEL_LABELS,
@@ -829,6 +840,9 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'qwen-max-fal', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation' },
     { id: 'qwen-multiangle', label: 'Qwen Multi-Angle', provider: 'Qwen', icon: logoQwen, goodFor: 'Consistent character generation across angles' },
     { id: 'qwen-multiangle-fal', label: 'Qwen Image Max Edit (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'High fidelity and detailed image editing workflows' },
+    { id: 'qwen-image-21-fal', label: 'Qwen Image 2.1 (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Generation and editing in one model: combines up to 10 concept refs, strong text, up to 2K', badge: '🆕 New' },
+    { id: 'machgen-flux2-dev', label: 'FLUX.2 dev (MachGen)', provider: 'MachGen', goodFor: 'Open-weights FLUX.2 on your MachGen key; edits from up to 4 concept refs' },
+    { id: 'machgen-hidream-o1', label: 'HiDream O1 (MachGen)', provider: 'MachGen', goodFor: 'Open-weights HiDream O1 on your MachGen key; text-to-image only' },
 ];
 
 /**
@@ -6912,6 +6926,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             image = await editImageWithFireRed(prompt, refs, { aspectRatio: modelAspectRatio });
         } else if (selectedReferenceModel === 'z-image') {
             image = await generateImageWithZImage(prompt, modelAspectRatio, loraOptions);
+        } else if (selectedReferenceModel === 'qwen-image-21-fal') {
+            image = await renderQwenImage21(prompt, await buildMoodboardReferences(baseImageUrl), modelAspectRatio);
+        } else if (selectedReferenceModel === 'machgen-flux2-dev' || selectedReferenceModel === 'machgen-hidream-o1') {
+            image = await renderMachgenImage(selectedReferenceModel, prompt, await buildMoodboardReferences(baseImageUrl), modelAspectRatio);
         } else if (isLocalImageModel(selectedReferenceModel)) {
             const baseRef = baseImageUrl ? [await getBase64FromUrl(baseImageUrl)] : [];
             image = await generateWithLocalImageModel(selectedReferenceModel, prompt, modelAspectRatio, baseRef);
@@ -7142,6 +7160,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
         if (marketingImageModel === 'z-image') {
             return generateImageWithZImage(enrichedPrompt, modelAspectRatio);
+        }
+
+        if (marketingImageModel === 'qwen-image-21-fal') {
+            return renderQwenImage21(enrichedPrompt, refs, modelAspectRatio);
+        }
+
+        if (marketingImageModel === 'machgen-flux2-dev' || marketingImageModel === 'machgen-hidream-o1') {
+            return renderMachgenImage(marketingImageModel, enrichedPrompt, refs, modelAspectRatio);
         }
 
         if (isLocalImageModel(marketingImageModel)) {
@@ -9674,6 +9700,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return editImageWithFireRed(prompt, refs, { aspectRatio: modelAspectRatio });
             case 'qwen-multiangle-fal':
                 return firstEdit(await editImageWithFalQwenMultiAngle(prompt, refs, { numOutputs: 1 }), 'FAL Qwen Image Max Edit');
+            case 'qwen-image-21-fal':
+                return renderQwenImage21(prompt, refs, modelAspectRatio);
+            case 'machgen-flux2-dev':
+                return renderMachgenImage(model, prompt, refs, modelAspectRatio);
             case 'seedream-v5-pro-edit-fal':
                 return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), 'FAL Seedream 5.0 Pro Edit');
             case 'gpt-image-2-fal':
@@ -9720,16 +9750,42 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         modelAspectRatio: ModelAspectRatio,
     ) => renderWithEditModel(resolveOutfitModel(), prompt, refs, modelAspectRatio);
 
+    /** Qwen Image 2.1 on FAL: edits from up to 10 refs, text-to-image without any. */
+    const renderQwenImage21 = async (
+        prompt: string,
+        refs: Array<{ base64: string; mimeType: string }>,
+        modelAspectRatio: ModelAspectRatio,
+    ): Promise<MediaItem> => {
+        const opts = { aspectRatio: modelAspectRatio, imageSize, numOutputs: 1 };
+        if (refs.length === 0) return generateImageWithFalQwenImage21(prompt, opts);
+        const edited = await editImageWithFalQwenImage21(prompt, refs.slice(0, 10), opts);
+        if (!edited.length) throw new Error('FAL Qwen Image 2.1 Edit returned no images.');
+        return edited[0];
+    };
+
+    /** MachGen on the user's key: FLUX.2 dev edits from up to 4 refs, HiDream O1 is text-to-image only. */
+    const renderMachgenImage = (
+        model: 'machgen-flux2-dev' | 'machgen-hidream-o1',
+        prompt: string,
+        refs: Array<{ base64: string; mimeType: string }>,
+        modelAspectRatio: ModelAspectRatio,
+    ): Promise<MediaItem> => generateImageWithMachgen(model === 'machgen-flux2-dev' ? 'FLUX.2-dev' : 'HiDream-O1-Image', prompt, {
+        aspectRatio: modelAspectRatio,
+        imageSize,
+        references: model === 'machgen-flux2-dev' && refs.length > 0 ? refs.slice(0, 4) : undefined,
+    });
+
     /** Draw Things (img2img from the first ref) or a ComfyUI catalog model (edit when refs exist and it can edit). */
     const generateWithLocalImageModel = async (
         model: string,
         prompt: string,
         modelAspectRatio: ModelAspectRatio,
         refs: Array<{ base64: string; mimeType: string }>,
+        opts?: { asReference?: boolean },
     ): Promise<MediaItem> => {
         const [width, height] = sizeForAspect(modelAspectRatio, imageSize);
         if (model === 'draw-things') {
-            return generateImageWithDrawThings({ prompt, width, height, image: refs[0], strength: refs[0] ? 0.55 : undefined });
+            return generateImageWithDrawThings({ prompt, width, height, image: refs[0], strength: refs[0] ? (opts?.asReference ? 1 : 0.55) : undefined });
         }
         const canEdit = Boolean(getLocalModel(model)?.workflows.edit);
         return runLocalModel(model, refs.length > 0 && canEdit ? 'edit' : 't2i', { prompt, width, height, images: canEdit ? refs : undefined, enhance: true });
@@ -11221,12 +11277,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                             version,
                         });
                     }
+                } else if (activeReferenceModel === 'qwen-image-21-fal') {
+                    // Sketch/pose first, then the shot's concept refs.
+                    imageMedia = await renderQwenImage21(gptImage2Prompt, gptInputs, modelAspectRatio);
+                } else if (activeReferenceModel === 'machgen-flux2-dev' || activeReferenceModel === 'machgen-hidream-o1') {
+                    imageMedia = await renderMachgenImage(activeReferenceModel, activeReferenceModel === 'machgen-flux2-dev' ? gptImage2Prompt : fullPrompt, gptInputs, modelAspectRatio);
                 } else if (isLocalImageModel(activeReferenceModel)) {
-                    // Draw Things only takes a start image, so it gets the sketch/pose; ComfyUI edit models also get the concept refs.
-                    const localInputs = activeReferenceModel === 'draw-things'
-                        ? (compositionData ? [compositionData] : [])
-                        : (compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences);
-                    imageMedia = await generateWithLocalImageModel(activeReferenceModel, fullPrompt, modelAspectRatio, localInputs);
+                    // Draw Things' HTTP API takes one start image: the sketch/pose, or — when an edit model
+                    // (Kontext, Klein, Qwen Edit) is loaded and the shot has no sketch — its first concept ref.
+                    // ComfyUI edit models get the sketch plus every concept ref.
+                    let localInputs = compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences;
+                    let asReference = false;
+                    if (activeReferenceModel === 'draw-things') {
+                        const loaded = compositionData ? undefined : (await probeDrawThings()).model;
+                        asReference = !compositionData && supplementalReferences.length > 0 && isDrawThingsEditModel(loaded);
+                        localInputs = compositionData ? [compositionData] : asReference ? supplementalReferences.slice(0, 1) : [];
+                    }
+                    imageMedia = await generateWithLocalImageModel(activeReferenceModel, asReference ? gptImage2Prompt : fullPrompt, modelAspectRatio, localInputs, { asReference });
                 } else if (activeReferenceModel === 'firered') {
                     if (qwenInputs.length === 0) {
                         throw new Error('FireRed Edit requires at least one reference, sketch, pose, or previous-shot image for storyboards.');
@@ -15658,7 +15725,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     </div>
                                                 )}
                                             </div>
-                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
+                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream' || referenceImageModel === 'qwen-image-21-fal' || referenceImageModel === 'machgen-flux2-dev' || referenceImageModel === 'machgen-hidream-o1') && (
                                                 <select
                                                     value={imageSize}
                                                     onChange={(e) => setImageSize(e.target.value as any)}
@@ -17233,7 +17300,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
                                         {styleRefsButton}
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 mr-2">
-                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
+                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream' || referenceImageModel === 'qwen-image-21-fal' || referenceImageModel === 'machgen-flux2-dev' || referenceImageModel === 'machgen-hidream-o1') && (
                                                 <select
                                                     value={imageSize}
                                                     onChange={(e) => setImageSize(e.target.value as any)}
@@ -19681,7 +19748,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             <h3 className="text-lg font-semibold text-white">Marketing Image Models</h3>
                                             <p className="text-xs text-gray-400">Choose the generator for posters, thumbnails, and promo creatives.</p>
                                         </div>
-                                        {(marketingImageModel === 'gemini-pro' || marketingImageModel === 'seedream' || marketingImageModel === 'nano-21' || marketingImageModel === 'nano-banana-2-fal' || marketingImageModel === 'nano-banana-21-fal' || marketingImageModel === 'wan-2.7-image-pro') && (
+                                        {(marketingImageModel === 'gemini-pro' || marketingImageModel === 'seedream' || marketingImageModel === 'nano-21' || marketingImageModel === 'nano-banana-2-fal' || marketingImageModel === 'nano-banana-21-fal' || marketingImageModel === 'wan-2.7-image-pro' || marketingImageModel === 'qwen-image-21-fal' || marketingImageModel === 'machgen-flux2-dev' || marketingImageModel === 'machgen-hidream-o1') && (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[11px] text-gray-400">Output Size</span>
                                                 <select
@@ -19719,9 +19786,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 'z-image',
                                                 'qwen-2512',
                                                 'qwen-max-fal',
+                                                'qwen-image-21-fal',
                                                 'qwen-multiangle',
                                                 'qwen-multiangle-fal',
                                                 'qwen',
+                                                'machgen-flux2-dev',
+                                                'machgen-hidream-o1',
                                                 'nano',
                                                 'z-turbo',
                                                 'flux',

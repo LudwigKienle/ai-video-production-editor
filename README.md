@@ -129,7 +129,7 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
 
 | Task | Engines |
 | --- | --- |
-| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, FLUX.3 / FLUX.3 Klein, Krea 3, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, FLUX.2 dev, HiDream O1, Qwen Image, WAN 2.7, Z-Image, Grok Imagine |
+| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, FLUX.3 / FLUX.3 Klein, Krea 3, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, FLUX.2 dev, HiDream O1, Qwen Image 2.1 / Max, WAN 2.7, Z-Image, Grok Imagine |
 | Video | Seedance 2.5 / 2.0 / 1.5, Veo 3.1, Kling v3 Pro / O3 / 2.6, MiniMax H3 / H3 Turbo, FLUX.3 Video, Vidu Q3 Turbo, WAN 2.7 / 2.2, LTX 2.3, PixVerse C1, Happy Horse, Creatify Aurora, Grok Imagine |
 | Local (your GPU) | FLUX.3 Klein, Qwen Image 2.1 / Turbo, Z-Image Turbo, FLUX.2 Klein 4B, Wan 2.2 5B, LTX-2.3, LTX-2.5 via ComfyUI; any model in Draw Things; LLMs via Ollama / LM Studio |
 | 3D | Hunyuan3D v3, Trellis 2, Rodin 2.5 / Gen-2, World Labs Marble worlds |

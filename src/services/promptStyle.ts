@@ -76,7 +76,7 @@ export const resolvePromptFamily = (modelId: string | null | undefined, kind: Pr
   if (id === 'midjourney') return 'midjourney';
   if (id === 'nano' || id === 'nano-banana-2-fal' || id.startsWith('gemini') || id.includes('nano-banana')) return 'gemini-image';
   if (id === 'imagen') return 'imagen';
-  if (id.startsWith('flux')) return 'flux';
+  if (id.startsWith('flux') || id.startsWith('machgen-flux')) return 'flux';
   if (id.includes('seedream')) return 'seedream';
   if (id.includes('gpt-image')) return 'gpt-image';
   if (id.includes('ideogram')) return 'ideogram';

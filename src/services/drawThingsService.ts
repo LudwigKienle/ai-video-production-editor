@@ -6,6 +6,9 @@ import { localHttp } from './localLlmService';
  * serve them over HTTP (Settings → API Server, default port 7860). Its API follows the
  * Automatic1111 shape: POST /sdapi/v1/txt2img and /sdapi/v1/img2img return base64 PNGs.
  * The model is whichever one is selected in Draw Things.
+ *
+ * The HTTP server takes exactly one start image, and it must match width × height to the
+ * pixel. Moodboard (several reference images) is only reachable through its gRPC server.
  */
 
 const STORAGE_KEY = 'draw_things_url_v1';
@@ -44,6 +47,34 @@ export const probeDrawThings = async (baseUrl = getDrawThingsUrl()) => {
   }
 };
 
+/**
+ * Models Draw Things runs as reference editors (FLUX.1 Kontext, FLUX.2 Klein, Qwen Image Edit…):
+ * the start image is read as a reference at full strength instead of being re-noised.
+ */
+export const isDrawThingsEditModel = (model?: string) => /kontext|klein|[_-]edit/i.test(model || '');
+
+/** Center-crops and scales an image to exactly width × height (Draw Things rejects any other size). */
+const fitImageToSize = async (image: { base64: string; mimeType: string }, width: number, height: number) => {
+  if (typeof document === 'undefined' || typeof createImageBitmap === 'undefined') return image.base64;
+  const blob = await (await fetch(`data:${image.mimeType || 'image/png'};base64,${image.base64}`)).blob();
+  const bitmap = await createImageBitmap(blob);
+  try {
+    if (bitmap.width === width && bitmap.height === height) return image.base64;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return image.base64;
+    const scale = Math.max(width / bitmap.width, height / bitmap.height);
+    const drawWidth = bitmap.width * scale;
+    const drawHeight = bitmap.height * scale;
+    context.drawImage(bitmap, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+    return canvas.toDataURL('image/png').split(',')[1];
+  } finally {
+    bitmap.close();
+  }
+};
+
 export type DrawThingsOptions = {
   prompt: string;
   negativePrompt?: string;
@@ -59,11 +90,13 @@ export type DrawThingsOptions = {
 
 export const generateImageWithDrawThings = async (options: DrawThingsOptions): Promise<MediaItem> => {
   const baseUrl = getDrawThingsUrl();
+  const width = Math.max(64, Math.round(options.width / 64) * 64);
+  const height = Math.max(64, Math.round(options.height / 64) * 64);
   const body: Record<string, unknown> = {
     prompt: options.prompt,
     negative_prompt: options.negativePrompt || '',
-    width: Math.round(options.width / 64) * 64,
-    height: Math.round(options.height / 64) * 64,
+    width,
+    height,
     seed: typeof options.seed === 'number' ? options.seed : -1,
     batch_size: 1,
   };
@@ -71,7 +104,7 @@ export const generateImageWithDrawThings = async (options: DrawThingsOptions): P
   if (options.guidance) body.guidance_scale = options.guidance;
   const endpoint = options.image ? '/sdapi/v1/img2img' : '/sdapi/v1/txt2img';
   if (options.image) {
-    body.init_images = [options.image.base64];
+    body.init_images = [await fitImageToSize(options.image, width, height)];
     body.strength = typeof options.strength === 'number' ? options.strength : 0.6;
   }
   let result;

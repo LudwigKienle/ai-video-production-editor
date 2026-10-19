@@ -488,6 +488,9 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     // FAL
     { id: 'fal-qwen-max-t2i', provider: 'fal', model: 'fal-ai/qwen-image-max/text-to-image', kind: 'image', unitCost: withMargin(0.075), unitLabel: 'image', label: 'FAL Qwen Image Max T2I' },
     { id: 'fal-qwen-multi', provider: 'fal', model: 'fal-ai/qwen-image-max/edit', kind: 'edit', unitCost: withMargin(0.075), unitLabel: 'request', label: 'FAL Qwen Image Max Edit' },
+    // Qwen Image 2.1 bills $0.02 per output megapixel, rounded up (Oct 2026); usage records one unit per billed MP.
+    { id: 'fal-qwen-21-t2i', provider: 'fal', model: 'fal-ai/qwen-image-2.1', kind: 'image', unitCost: withMargin(0.02), unitLabel: 'image', label: 'FAL Qwen Image 2.1 T2I ($0.02/MP)' },
+    { id: 'fal-qwen-21-edit', provider: 'fal', model: 'fal-ai/qwen-image-2.1/edit', kind: 'edit', unitCost: withMargin(0.02), unitLabel: 'request', label: 'FAL Qwen Image 2.1 Edit ($0.02/MP)' },
     { id: 'fal-gpt-image-2', provider: 'fal', model: 'openai/gpt-image-2', kind: 'image', unitCost: withMargin(0.15), unitLabel: 'image', label: 'FAL GPT Image 2 T2I' },
     { id: 'fal-gpt-image-25-flare', provider: 'fal', model: 'openai/gpt-image-2.5/flare/text-to-image', kind: 'image', unitCost: withMargin(0.08), unitLabel: 'image', label: 'FAL GPT Image 2.5 Flare T2I' },
     { id: 'fal-gpt-image-25-flare-edit', provider: 'fal', model: 'openai/gpt-image-2.5/flare/edit', kind: 'edit', unitCost: withMargin(0.08), unitLabel: 'request', label: 'FAL GPT Image 2.5 Flare Edit' },

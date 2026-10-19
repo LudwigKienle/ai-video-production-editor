@@ -73,6 +73,8 @@ const MODEL_PROVIDER_RATES = {
   // FAL
   'fal:fal-ai/qwen-image-max/text-to-image:image': { unitCost: 0.075 },
   'fal:fal-ai/qwen-image-max/edit:edit': { unitCost: 0.075 },
+  'fal:fal-ai/qwen-image-2.1:image': { unitCost: 0.02 }, // Per output megapixel, rounded up.
+  'fal:fal-ai/qwen-image-2.1/edit:edit': { unitCost: 0.02 }, // Per output megapixel, rounded up.
   'fal:krea/v3/text-to-image:image': { unitCost: 0.1 }, // Krea 3: $0.025/MP, auto size is about 4 MP.
   'fal:krea/v3/edit:edit': { unitCost: 0.2 }, // Output plus one same-size reference.
   'fal:blackforestlabs/flux-3/text-to-image:image': { unitCost: 0.048 }, // 1K tier.

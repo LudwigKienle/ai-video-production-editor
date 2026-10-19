@@ -40,6 +40,8 @@ import {
   editImageWithFalWanV27Pro,
   generateImageWithFalNanoBanana2,
   generateImageWithFalQwenImageMax,
+  generateImageWithFalQwenImage21,
+  editImageWithFalQwenImage21,
   generateImageWithFalSeedreamV5Lite,
   generateImageWithFalSeedreamV5Pro,
   editImageWithFalSeedreamV5Pro,
@@ -154,6 +156,8 @@ type ImageModelId =
   | 'qwen'
   | 'qwen-max-fal-t2i'
   | 'qwen-max-fal-edit'
+  | 'qwen-21-fal'
+  | 'qwen-21-fal-edit'
   | 'gpt-image-2-fal'
   | 'gpt-image-2-fal-edit'
   | 'gpt-image-25-flare-fal'
@@ -206,6 +210,8 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'qwen', label: 'Qwen Image 2512', provider: 'Replicate', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
   { id: 'qwen-max-fal-t2i', label: 'Qwen Image Max (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Maximum quality multilingual generation and nuances' },
   { id: 'qwen-max-fal-edit', label: 'Qwen Image Max Edit (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'High fidelity and detailed image editing workflows' },
+  { id: 'qwen-21-fal', label: 'Qwen Image 2.1 (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Compact Qwen with strong text and layouts, up to 2K, $0.02/MP' },
+  { id: 'qwen-21-fal-edit', label: 'Qwen Image 2.1 Edit (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Edits and combines up to 10 ordered reference images following the prompt' },
   { id: 'gpt-image-2-fal', label: 'GPT Image 2 (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'High-end text rendering, prompt adherence, and detailed photoreal generation' },
   { id: 'gpt-image-2-fal-edit', label: 'GPT Image 2 Edit (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Fine-grained multi-image edits with strong prompt adherence' },
   { id: 'gpt-image-25-flare-fal', label: 'GPT Image 2.5 Flare (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Fast default: natural lighting, rich textures, layouts and transparent backgrounds, up to 3840px' },
@@ -265,6 +271,8 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   qwen: [...ASPECT_RATIOS],
   'qwen-max-fal-t2i': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'qwen-max-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'qwen-21-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'qwen-21-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-2-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-2-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-25-flare-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -319,6 +327,8 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   qwen: 8,
   'qwen-max-fal-t2i': 0,
   'qwen-max-fal-edit': 1,
+  'qwen-21-fal': 0,
+  'qwen-21-fal-edit': 10,
   'gpt-image-2-fal': 0,
   'gpt-image-2-fal-edit': 8,
   'gpt-image-25-flare-fal': 0,
@@ -378,6 +388,8 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   qwen: { provider: 'replicate', kind: 'image', model: 'qwen/qwen-image-2512' },
   'qwen-max-fal-t2i': { provider: 'fal', kind: 'image', model: 'fal-ai/qwen-image-max/text-to-image' },
   'qwen-max-fal-edit': { provider: 'fal', kind: 'edit', model: 'fal-ai/qwen-image-max/edit' },
+  'qwen-21-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/qwen-image-2.1' },
+  'qwen-21-fal-edit': { provider: 'fal', kind: 'edit', model: 'fal-ai/qwen-image-2.1/edit' },
   'gpt-image-2-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2' },
   'gpt-image-2-fal-edit': { provider: 'fal', kind: 'edit', model: 'openai/gpt-image-2/edit' },
   'gpt-image-25-flare-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2.5/flare/text-to-image' },
@@ -1128,6 +1140,9 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       units = imageSize === '4K' ? 1.5 : 1;
     } else if (modelId === 'wan-v27-image-pro-replicate') {
       units = imageSize === '4K' ? 1.8 : imageSize === '2K' ? 1.25 : 1;
+    } else if (modelId === 'qwen-21-fal' || modelId === 'qwen-21-fal-edit') {
+      // $0.02 per output megapixel, rounded up: ~1 MP at 1K, ~2.4 MP (billed 3) at 2K.
+      units = imageSize === '1K' ? 1 : 3;
     } else if (modelId === 'flux-3-fal' || modelId === 'flux-3-fal-edit') {
       // $0.048 at 1K, $0.10 at 2K, $0.607 at 4K (per image).
       units = imageSize === '4K' ? 12.6 : imageSize === '2K' ? 2.1 : 1;
@@ -2622,6 +2637,23 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             }
             item = edited[0];
           }
+          break;
+        case 'qwen-21-fal':
+          item = await generateImageWithFalQwenImage21(shapedPrompt, {
+            aspectRatio: qwenMaxAspectRatio,
+            imageSize: imageSize === '1K' ? '1K' : '2K',
+            negativePrompt: negativePrompt.trim() || undefined,
+          });
+          break;
+        case 'qwen-21-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('Qwen Image 2.1 Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalQwenImage21(shapedPrompt, referenceImages.slice(0, 10), {
+            aspectRatio: qwenMaxAspectRatio,
+            imageSize: imageSize === '1K' ? '1K' : '2K',
+            negativePrompt: negativePrompt.trim() || undefined,
+          }))[0];
           break;
         case 'gpt-image-2-fal':
           item = await generateImageWithFalGptImage2(shapedPrompt, {

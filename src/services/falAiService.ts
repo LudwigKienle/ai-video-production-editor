@@ -9,6 +9,8 @@ const MODELS = {
     GROK_IMAGINE_IMAGE_T2I: 'xai/grok-imagine-image',
     QWEN_IMAGE_MAX_T2I: 'fal-ai/qwen-image-max/text-to-image',
     QWEN_IMAGE_MAX_EDIT: 'fal-ai/qwen-image-max/edit',
+    QWEN_IMAGE_21_T2I: 'fal-ai/qwen-image-2.1',
+    QWEN_IMAGE_21_EDIT: 'fal-ai/qwen-image-2.1/edit',
     GPT_IMAGE_2_T2I: 'openai/gpt-image-2',
     GPT_IMAGE_2_EDIT: 'openai/gpt-image-2/edit',
     GPT_IMAGE_25_FLARE_T2I: 'openai/gpt-image-2.5/flare/text-to-image',
@@ -882,6 +884,103 @@ export const generateImageWithFalQwenImageMax = async (
         url,
         source: 'generated',
     };
+};
+
+type FalQwen21Aspect = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
+export type FalQwenImage21Options = {
+    aspectRatio?: FalQwen21Aspect;
+    /** 1K uses fal's size presets; 2K and 4K ask for a ~2K frame (the model's native ceiling). */
+    imageSize?: '1K' | '2K' | '4K';
+    negativePrompt?: string;
+    numOutputs?: number;
+};
+
+const QWEN_21_2K_SIZES: Record<FalQwen21Aspect, { width: number; height: number }> = {
+    '16:9': { width: 2048, height: 1152 },
+    '9:16': { width: 1152, height: 2048 },
+    '1:1': { width: 1536, height: 1536 },
+    '4:3': { width: 1792, height: 1344 },
+    '3:4': { width: 1344, height: 1792 },
+};
+
+/** Request fields shared by Qwen Image 2.1 text-to-image and edit, plus the billed megapixels (fal: $0.02/MP, rounded up). */
+const qwenImage21Input = (prompt: string, opts?: FalQwenImage21Options) => {
+    const aspect = opts?.aspectRatio || '16:9';
+    const large = opts?.imageSize === '2K' || opts?.imageSize === '4K';
+    const input: Record<string, any> = {
+        prompt,
+        image_size: large ? QWEN_21_2K_SIZES[aspect] : mapQwenMaxImageSize(aspect),
+        output_format: 'png',
+    };
+    if (opts?.negativePrompt) input.negative_prompt = opts.negativePrompt;
+    if (opts?.numOutputs) input.num_images = opts.numOutputs;
+    const size = large ? QWEN_21_2K_SIZES[aspect] : { width: 1024, height: 1024 };
+    return { input, megapixels: Math.max(1, Math.ceil((size.width * size.height) / 1_000_000)) };
+};
+
+export const generateImageWithFalQwenImage21 = async (
+    prompt: string,
+    opts?: FalQwenImage21Options
+): Promise<MediaItem> => {
+    const { input, megapixels } = qwenImage21Input(prompt, opts);
+    const output = await runFalQueue(MODELS.QWEN_IMAGE_21_T2I, input);
+    const urls = Array.from(new Set(collectFalImageUrls(output)));
+    if (urls.length === 0) {
+        throw new Error('FAL Qwen Image 2.1 returned no images.');
+    }
+    recordUsage({
+        provider: 'fal',
+        model: MODELS.QWEN_IMAGE_21_T2I,
+        kind: 'image',
+        units: megapixels * urls.length,
+        unitLabel: 'image',
+        note: 'FAL Qwen Image 2.1 text-to-image (units = billed megapixels)',
+    });
+    return {
+        id: `fal-qwen-21-t2i-${Date.now()}`,
+        name: `fal_qwen_image_2_1_${prompt.slice(0, 16) || 'image'}.png`,
+        type: 'image',
+        url: urls[0],
+        source: 'generated',
+    };
+};
+
+/** Qwen Image 2.1 edit: combines up to 10 ordered reference images following the prompt. */
+export const editImageWithFalQwenImage21 = async (
+    prompt: string,
+    image: { base64: string; mimeType: string } | Array<{ base64: string; mimeType: string }>,
+    opts?: FalQwenImage21Options
+): Promise<MediaItem[]> => {
+    const images = Array.isArray(image) ? image : [image];
+    const imageUrls = images
+        .filter((item) => !!item?.base64)
+        .slice(0, 10)
+        .map((item) => toDataUri(item));
+    if (imageUrls.length === 0) {
+        throw new Error('FAL Qwen Image 2.1 Edit requires at least one reference image.');
+    }
+    const { input, megapixels } = qwenImage21Input(prompt, opts);
+    input.image_urls = imageUrls;
+    const output = await runFalQueue(MODELS.QWEN_IMAGE_21_EDIT, input);
+    const urls = Array.from(new Set(collectFalImageUrls(output)));
+    if (urls.length === 0) {
+        throw new Error('FAL Qwen Image 2.1 Edit returned no images.');
+    }
+    recordUsage({
+        provider: 'fal',
+        model: MODELS.QWEN_IMAGE_21_EDIT,
+        kind: 'edit',
+        units: megapixels * urls.length,
+        unitLabel: 'request',
+        note: 'FAL Qwen Image 2.1 edit (units = billed megapixels)',
+    });
+    return urls.map((url, index) => ({
+        id: `fal-qwen-21-edit-${Date.now()}-${index}`,
+        name: `fal_qwen_image_2_1_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
+        type: 'image',
+        url,
+        source: 'generated',
+    }));
 };
 
 export const generateImageWithFalSeedreamV5Lite = async (
