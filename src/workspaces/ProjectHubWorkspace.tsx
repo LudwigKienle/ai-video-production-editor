@@ -41,9 +41,10 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25 } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
+import { runLocalModel, sizeForAspect } from '../services/localModelService';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
@@ -191,6 +192,49 @@ type ConceptPropSubtab = 'base_ref' | 'angles' | 'state';
 type ConceptBrandingSubtab = 'base_ref' | 'variations';
 type AspectRatioOption = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '2.39:1' | '235:100' | '239:100';
 type ModelAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1';
+
+/** Models that can dress a character from reference images (outfits and garment pieces). */
+type OutfitImageModel =
+    | 'same'
+    | 'seedream'
+    | 'nano'
+    | 'gemini-pro'
+    | 'nano-banana-2-fal'
+    | 'seedream-v5-pro-edit-fal'
+    | 'gpt-image-2-fal'
+    | 'gpt-image-25-flare-fal'
+    | 'gpt-image-25-sunburst-fal'
+    | 'flux-3-edit-fal'
+    | 'krea-3-edit-fal'
+    | 'wan-2.7-image-pro'
+    | 'wan-2.7-pro-fal'
+    | 'flux-3-klein-local'
+    | 'qwen-image-21-local'
+    | 'qwen-image-21-turbo-local'
+    | 'flux-2-klein-4b-local';
+
+const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 'Cloud' | 'Local' | '' }> = [
+    { id: 'same', label: 'Same as image model', group: '' },
+    { id: 'seedream', label: 'Seedream 4.5 (Replicate)', group: 'Cloud' },
+    { id: 'seedream-v5-pro-edit-fal', label: 'Seedream 5.0 Pro Edit (FAL)', group: 'Cloud' },
+    { id: 'nano', label: 'Nano Banana 2 (Gemini)', group: 'Cloud' },
+    { id: 'gemini-pro', label: 'Gemini 3 Pro Image', group: 'Cloud' },
+    { id: 'nano-banana-2-fal', label: 'Nano Banana 2 Edit (FAL)', group: 'Cloud' },
+    { id: 'gpt-image-2-fal', label: 'GPT Image 2 Edit (FAL)', group: 'Cloud' },
+    { id: 'gpt-image-25-flare-fal', label: 'GPT Image 2.5 Flare Edit (FAL)', group: 'Cloud' },
+    { id: 'gpt-image-25-sunburst-fal', label: 'GPT Image 2.5 Sunburst Edit (FAL)', group: 'Cloud' },
+    { id: 'flux-3-edit-fal', label: 'FLUX.3 Edit (FAL)', group: 'Cloud' },
+    { id: 'krea-3-edit-fal', label: 'Krea 3 Edit (FAL)', group: 'Cloud' },
+    { id: 'wan-2.7-image-pro', label: 'WAN 2.7 Image Pro (Replicate)', group: 'Cloud' },
+    { id: 'wan-2.7-pro-fal', label: 'WAN 2.7 Pro Edit (FAL)', group: 'Cloud' },
+    { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', group: 'Local' },
+    { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', group: 'Local' },
+    { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', group: 'Local' },
+    { id: 'flux-2-klein-4b-local', label: 'FLUX.2 Klein 4B (Local)', group: 'Local' },
+];
+
+const OUTFIT_MODEL_STORAGE_KEY = 'outfit_image_model_v1';
+const LEGACY_OUTFIT_MODELS = new Set<string>(['seedream', 'gemini-pro', 'nano', 'nano-banana-2-fal', 'wan-2.7-image-pro', 'wan-2.7-pro-fal']);
 type CameraPreset = { id: string; label: string; prompt: string; image?: string };
 type LensPreset = { id: string; label: string; prompt: string; aspectRatioOverride?: AspectRatioOption; aspectRatioHint?: string; image?: string };
 type ReferenceSuggestion = { type: 'character' | 'environment' | 'product' | 'prop'; name: string; description: string };
@@ -2013,6 +2057,8 @@ const CharacterSheetModal: React.FC<{
     onGenerateOutfitAngles: (characterId: string, outfitId: string) => void;
     onViewFull: (url: string, title?: string) => void;
     showCameraControls: boolean;
+    outfitModel: OutfitImageModel;
+    onOutfitModelChange: (model: OutfitImageModel) => void;
 }> = ({
     character,
     onClose,
@@ -2025,6 +2071,8 @@ const CharacterSheetModal: React.FC<{
     onGenerateOutfitAngles,
     onViewFull,
     showCameraControls,
+    outfitModel,
+    onOutfitModelChange,
 }) => {
         const [activeTab, setActiveTab] = useState<'bio' | 'look' | 'wardrobe' | 'angles' | 'versions'>('bio');
         const [outfitCount, setOutfitCount] = useState(4);
@@ -2725,6 +2773,23 @@ const CharacterSheetModal: React.FC<{
                                         <div className="flex items-center justify-between">
                                             <div className="text-sm font-semibold text-white">Outfit Variations</div>
                                             <div className="flex items-center gap-2">
+                                                <select
+                                                    value={outfitModel}
+                                                    onChange={(e) => onOutfitModelChange(e.target.value as OutfitImageModel)}
+                                                    className="bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 max-w-[13rem]"
+                                                    title="Model used for outfits and garment pieces"
+                                                >
+                                                    {OUTFIT_MODEL_OPTIONS.filter((option) => !option.group).map((option) => (
+                                                        <option key={option.id} value={option.id}>{option.label}</option>
+                                                    ))}
+                                                    {(['Cloud', 'Local'] as const).map((group) => (
+                                                        <optgroup key={group} label={group === 'Local' ? 'Local (download in Local AI)' : 'Cloud'}>
+                                                            {OUTFIT_MODEL_OPTIONS.filter((option) => option.group === group).map((option) => (
+                                                                <option key={option.id} value={option.id}>{option.label}</option>
+                                                            ))}
+                                                        </optgroup>
+                                                    ))}
+                                                </select>
                                                 <select
                                                     value={outfitCount}
                                                     onChange={(e) => setOutfitCount(Number(e.target.value) || 4)}
@@ -9302,6 +9367,82 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         ].filter(Boolean).join('. ');
     };
 
+    const [outfitImageModel, setOutfitImageModelState] = useState<OutfitImageModel>(() => {
+        try {
+            const stored = localStorage.getItem(OUTFIT_MODEL_STORAGE_KEY);
+            return OUTFIT_MODEL_OPTIONS.some((option) => option.id === stored) ? stored as OutfitImageModel : 'same';
+        } catch {
+            return 'same';
+        }
+    });
+    const setOutfitImageModel = (model: OutfitImageModel) => {
+        setOutfitImageModelState(model);
+        try {
+            localStorage.setItem(OUTFIT_MODEL_STORAGE_KEY, model);
+        } catch {
+            /* storage unavailable */
+        }
+    };
+
+    /** "Same as image model" keeps the old behaviour: the concept model if it can edit, else Seedream. */
+    const resolveOutfitModel = (): Exclude<OutfitImageModel, 'same'> => {
+        if (outfitImageModel !== 'same') return outfitImageModel;
+        if (LEGACY_OUTFIT_MODELS.has(referenceImageModel)) return referenceImageModel as Exclude<OutfitImageModel, 'same'>;
+        if (referenceImageModel === 'flux-3-edit-fal' || referenceImageModel === 'krea-3-edit-fal' || referenceImageModel === 'seedream-v5-pro-edit-fal' || referenceImageModel === 'gpt-image-2-fal') return referenceImageModel;
+        return 'seedream';
+    };
+
+    /** One image of a character (or garment) from reference images, with the chosen outfit model. */
+    const renderWithOutfitModel = async (
+        prompt: string,
+        refs: Array<{ base64: string; mimeType: string }>,
+        modelAspectRatio: ModelAspectRatio,
+    ): Promise<MediaItem> => {
+        const model = resolveOutfitModel();
+        const firstEdit = (items: MediaItem[], label: string) => {
+            if (!items.length) throw new Error(`${label} returned no images.`);
+            return items[0];
+        };
+        switch (model) {
+            case 'seedream':
+                return generateImageWithSeedreamReferences(prompt, refs, modelAspectRatio, seedreamSize);
+            case 'nano-banana-2-fal':
+                return firstEdit(await editImageWithFalNanoBanana2(prompt, refs, { aspectRatio: modelAspectRatio, resolution: imageSize, numOutputs: 1 }), 'FAL Nano Banana 2 Edit');
+            case 'seedream-v5-pro-edit-fal':
+                return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), 'FAL Seedream 5.0 Pro Edit');
+            case 'gpt-image-2-fal':
+                return firstEdit(await editImageWithFalGptImage2(prompt, refs.slice(0, 8), { aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL GPT Image 2 Edit');
+            case 'gpt-image-25-flare-fal':
+            case 'gpt-image-25-sunburst-fal':
+                return firstEdit(await editImageWithFalGptImage25(prompt, refs.slice(0, 16), { variant: model === 'gpt-image-25-flare-fal' ? 'flare' : 'sunburst', aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL GPT Image 2.5 Edit');
+            case 'flux-3-edit-fal':
+                return firstEdit(await editImageWithFalFlux3(prompt, refs.slice(0, 10), toFlux3Options(modelAspectRatio, imageSize)), 'FAL FLUX.3 Edit');
+            case 'krea-3-edit-fal':
+                return firstEdit(await editImageWithFalKrea3(prompt, refs.slice(0, 8), { aspectRatio: modelAspectRatio, variant: imageSize === '1K' ? 'jam' : 'berry' }), 'FAL Krea 3 Edit');
+            case 'wan-2.7-image-pro':
+                return generateImageWithWan27ImagePro(prompt, modelAspectRatio, imageSize, refs);
+            case 'wan-2.7-pro-fal':
+                return firstEdit(await editImageWithFalWanV27Pro(prompt, refs.slice(0, 4), { aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL WAN 2.7 Pro Edit');
+            case 'flux-3-klein-local':
+            case 'qwen-image-21-local':
+            case 'qwen-image-21-turbo-local':
+            case 'flux-2-klein-4b-local': {
+                const [width, height] = sizeForAspect(modelAspectRatio, imageSize);
+                return runLocalModel(model, 'edit', { prompt, width, height, images: refs, enhance: true });
+            }
+            case 'nano':
+            case 'gemini-pro':
+            default:
+                return generateImageWithReferences(
+                    prompt,
+                    refs,
+                    undefined,
+                    model === 'gemini-pro' ? 'gemini-3-pro-image-preview' : 'gemini-3.1-flash-image-preview',
+                    { aspectRatio: modelAspectRatio, imageSize }
+                );
+        }
+    };
+
     const handleGenerateOutfitGarmentPiece = async (
         characterId: string,
         outfitId: string,
@@ -9326,48 +9467,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             ].filter(Boolean).join('. ');
             const refs = await resolveImageReferencePayloads(((piece?.referenceUrls || []).filter(Boolean)).slice(0, 4));
             const modelAspectRatio = resolveModelAspectRatio(referenceAspectRatio);
-            const outfitModel = (referenceImageModel === 'seedream' || referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'wan-2.7-pro-fal')
-                ? referenceImageModel
-                : 'seedream';
             let pieceImage: MediaItem;
             if (refs.length > 0) {
-                if (outfitModel === 'seedream') {
-                    pieceImage = await generateImageWithSeedreamReferences(
-                        imagePrompt,
-                        refs,
-                        modelAspectRatio,
-                        seedreamSize
-                    );
-                } else if (outfitModel === 'nano-banana-2-fal') {
-                    const edited = await editImageWithFalNanoBanana2(imagePrompt, refs, {
-                        aspectRatio: modelAspectRatio,
-                        resolution: imageSize,
-                        numOutputs: 1,
-                    });
-                    if (!edited.length) {
-                        throw new Error('FAL Nano Banana 2 Edit returned no images.');
-                    }
-                    pieceImage = edited[0];
-                } else if (outfitModel === 'wan-2.7-image-pro') {
-                    pieceImage = await generateImageWithWan27ImagePro(imagePrompt, modelAspectRatio, imageSize, refs);
-                } else if (outfitModel === 'wan-2.7-pro-fal') {
-                    const edited = await editImageWithFalWanV27Pro(imagePrompt, refs.slice(0, 4), {
-                        aspectRatio: modelAspectRatio,
-                        numOutputs: 1,
-                    });
-                    if (!edited.length) {
-                        throw new Error('FAL WAN 2.7 Pro Edit returned no images.');
-                    }
-                    pieceImage = edited[0];
-                } else {
-                    pieceImage = await generateImageWithReferences(
-                        imagePrompt,
-                        refs,
-                        undefined,
-                        outfitModel === 'gemini-pro' ? 'gemini-3-pro-image-preview' : 'gemini-3.1-flash-image-preview',
-                        { aspectRatio: modelAspectRatio, imageSize }
-                    );
-                }
+                pieceImage = await renderWithOutfitModel(imagePrompt, refs, modelAspectRatio);
             } else {
                 pieceImage = await generateReferenceImage(imagePrompt, referenceAspectRatio);
             }
@@ -9393,48 +9495,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const referencePayloads = await resolveImageReferencePayloads(referenceUrls);
         if (referencePayloads.length === 0) throw new Error('Could not load character/outfit reference images.');
         const modelAspectRatio = resolveModelAspectRatio(referenceAspectRatio);
-        const outfitModel = (referenceImageModel === 'seedream' || referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'wan-2.7-pro-fal')
-            ? referenceImageModel
-            : 'seedream';
-        let imageMedia: MediaItem;
-        if (outfitModel === 'seedream') {
-            imageMedia = await generateImageWithSeedreamReferences(
-                outfitPrompt,
-                referencePayloads,
-                modelAspectRatio,
-                seedreamSize
-            );
-        } else if (outfitModel === 'nano-banana-2-fal') {
-            const edited = await editImageWithFalNanoBanana2(outfitPrompt, referencePayloads, {
-                aspectRatio: modelAspectRatio,
-                resolution: imageSize,
-                numOutputs: 1,
-            });
-            if (!edited.length) {
-                throw new Error('FAL Nano Banana 2 Edit returned no images.');
-            }
-            imageMedia = edited[0];
-        } else if (outfitModel === 'wan-2.7-image-pro') {
-            imageMedia = await generateImageWithWan27ImagePro(outfitPrompt, modelAspectRatio, imageSize, referencePayloads);
-        } else if (outfitModel === 'wan-2.7-pro-fal') {
-            const edited = await editImageWithFalWanV27Pro(outfitPrompt, referencePayloads.slice(0, 4), {
-                aspectRatio: modelAspectRatio,
-                numOutputs: 1,
-            });
-            if (!edited.length) {
-                throw new Error('FAL WAN 2.7 Pro Edit returned no images.');
-            }
-            imageMedia = edited[0];
-        } else {
-            const modelToUse = outfitModel === 'gemini-pro' ? 'gemini-3-pro-image-preview' : 'gemini-3.1-flash-image-preview';
-            imageMedia = await generateImageWithReferences(
-                outfitPrompt,
-                referencePayloads,
-                undefined,
-                modelToUse,
-                { aspectRatio: modelAspectRatio, imageSize }
-            );
-        }
+        const imageMedia = await renderWithOutfitModel(outfitPrompt, referencePayloads, modelAspectRatio);
         return applyCinemascopeCrop(imageMedia, referenceAspectRatio);
     };
 
@@ -19612,6 +19673,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     onGenerateOutfitAngles={handleGenerateOutfitAngles}
                     onViewFull={(url, title) => setFullResView({ url, title })}
                     showCameraControls={isMultiAngleModel}
+                    outfitModel={outfitImageModel}
+                    onOutfitModelChange={setOutfitImageModel}
                 />
             )}
             {fullResView && (
