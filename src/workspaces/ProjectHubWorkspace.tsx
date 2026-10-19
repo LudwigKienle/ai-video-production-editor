@@ -47,6 +47,7 @@ import { getMidjourneyConcurrency, generateImagesWithMidjourney, type Midjourney
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { getLocalModel, runLocalModel, sizeForAspect } from '../services/localModelService';
 import { generateImageWithDrawThings } from '../services/drawThingsService';
+import { getPreferredImageModel } from '../services/localSetupService';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
@@ -4093,7 +4094,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const [scriptLength, setScriptLength] = useState<ScriptLength>(storyBible.projectType || 'trailer');
     const [scriptWritingMode, setScriptWritingMode] = useState<'fast' | 'slow'>('fast');
 
-    const [referenceImageModel, setReferenceImageModel] = useState<ReferenceImageModel>(() => storedUiPrefs.referenceImageModel || 'imagen');
+    const [referenceImageModel, setReferenceImageModel] = useState<ReferenceImageModel>(() => {
+        if (storedUiPrefs.referenceImageModel) return storedUiPrefs.referenceImageModel;
+        const preferred = getPreferredImageModel();
+        return preferred && isReferenceImageModel(preferred) ? preferred : 'imagen';
+    });
     const [environmentWorldModel, setEnvironmentWorldModel] = useState<MarbleModel>(DEFAULT_WORLD_MODEL_ID);
     const environmentWorldModelOptions = useMemo(() => getWorldModelOptionsForProvider('worldlabs'), []);
     const [isReferenceModelDropdownOpen, setIsReferenceModelDropdownOpen] = useState(false);

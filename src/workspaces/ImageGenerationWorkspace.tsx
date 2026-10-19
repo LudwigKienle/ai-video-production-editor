@@ -87,6 +87,7 @@ import {
 import { generateImageWithMachgen } from '../services/machgenService';
 import { runLocalModel, sizeForAspect } from '../services/localModelService';
 import { generateImageWithDrawThings } from '../services/drawThingsService';
+import { getPreferredImageModel } from '../services/localSetupService';
 
 import logoGemini from '../assets/logos/logo_gemini_1772276093848.png';
 import logoNanabanana from '../assets/logos/logo_nanabanana_1772276159682.png';
@@ -872,7 +873,11 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
     if ((ASPECT_RATIOS as readonly string[]).includes(target)) setAspectRatio(target as (typeof ASPECT_RATIOS)[number]);
   }, [productionFormatId]);
   const [imageSize, setImageSize] = useState<(typeof IMAGE_SIZES)[number]>('2K');
-  const [modelId, setModelId] = useState<ImageModelId>(() => storedUiPrefs.modelId || 'gemini-pro');
+  const [modelId, setModelId] = useState<ImageModelId>(() => {
+    if (storedUiPrefs.modelId) return storedUiPrefs.modelId;
+    const preferred = getPreferredImageModel();
+    return preferred && isImageModelId(preferred) ? preferred : 'gemini-pro';
+  });
   const [smartRouterGoal, setSmartRouterGoal] = useState('');
   const [appliedSmartRoute, setAppliedSmartRoute] = useState<SmartModelRoute<ImageModelId> | null>(null);
   const [cameraPresetId, setCameraPresetId] = useState('auto');

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { StudioAgentApprovalMode, StudioAgentControlMode, Theme, Workspace } from '../types';
 import { CheckCircleIcon, LockIcon, MagicWandIcon } from './icons';
 import { UIMode } from '../config/uiModes';
+import { detectLocalServices, getPreferredImageModel, LOCAL_SERVICE_GUIDE, setPreferredImageModel } from '../services/localSetupService';
+import type { LocalServiceStatus } from '../services/localSetupService';
 
 type StartupPreferences = {
   startupWorkspace: Workspace;
@@ -126,7 +128,25 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
   };
   useEffect(() => () => { Object.values(saveTimers.current).forEach((timer) => clearTimeout(timer)); }, []);
   const quickKeyCount = QUICK_KEYS.filter((key) => quickKeys[key.id]?.trim()).length;
-  const connected = hasAnyApiKey || quickKeyCount > 0;
+  const [localStatus, setLocalStatus] = useState<LocalServiceStatus[] | null>(null);
+  const [isCheckingLocal, setIsCheckingLocal] = useState(false);
+  const [preferredImageModel, setPreferredImageModelState] = useState<string | null>(() => getPreferredImageModel());
+  const checkLocal = async () => {
+    setIsCheckingLocal(true);
+    try {
+      setLocalStatus(await detectLocalServices());
+    } finally {
+      setIsCheckingLocal(false);
+    }
+  };
+  const localOnline = (localStatus || []).filter((item) => item.online);
+  const localImagesReady = localOnline.some((item) => LOCAL_SERVICE_GUIDE.find((guide) => guide.id === item.id)?.makesImages);
+  const drawThingsOnline = localOnline.some((item) => item.id === 'draw-things');
+  const useDrawThingsForImages = () => {
+    setPreferredImageModel('draw-things');
+    setPreferredImageModelState('draw-things');
+  };
+  const connected = hasAnyApiKey || quickKeyCount > 0 || localImagesReady;
   const [markCompleted, setMarkCompleted] = useState(true);
   const [selectedMode, setSelectedMode] = useState<UIMode>(uiMode);
   const totalSteps = 4;
@@ -151,6 +171,10 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
     setSelectedMode(mode);
     onSelectUIMode?.(mode);
   };
+
+  useEffect(() => {
+    if (isOpen && step === 2 && localStatus === null && !isCheckingLocal) void checkLocal();
+  }, [isOpen, step]);
 
   useEffect(() => {
     if (isOpen) {
@@ -307,13 +331,56 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <span className={`text-xs font-medium ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {connected
-                    ? `✓ ${quickKeyCount > 0 ? `${quickKeyCount} of ${QUICK_KEYS.length} connected` : 'Connected'} — keys stay on this Mac.`
-                    : '○ No key yet — paste one to unlock generation. Keys stay on this Mac.'}
+                    ? `✓ ${quickKeyCount > 0 ? `${quickKeyCount} of ${QUICK_KEYS.length} connected` : localImagesReady ? 'Local models connected' : 'Connected'} — keys stay on this Mac.`
+                    : '○ No key yet — paste one, or run models on this Mac below. Keys stay on this Mac.'}
                 </span>
                 <button type="button" className="text-xs app-muted hover:text-white underline underline-offset-2" onClick={onOpenApiSettings}>
                   All providers →
                 </button>
               </div>
+
+              <details className="app-card p-3" open={localOnline.length > 0 || undefined}>
+                <summary className="cursor-pointer text-sm font-semibold text-gray-200 flex items-center justify-between gap-2">
+                  <span>Free on this Mac — no key needed</span>
+                  <span className="text-[11px] font-normal app-muted">
+                    {isCheckingLocal ? 'Looking…' : localStatus ? `${localOnline.length} running` : ''}
+                  </span>
+                </summary>
+                <div className="mt-3 space-y-2">
+                  {LOCAL_SERVICE_GUIDE.map((guide) => {
+                    const status = localStatus?.find((item) => item.id === guide.id);
+                    return (
+                      <div key={guide.id} className={`settings-provider ${status?.online ? 'settings-provider--on' : ''}`}>
+                        <div className="settings-provider__head">
+                          <div className="settings-provider__name">
+                            <span className={`settings-provider__dot ${status?.online ? 'settings-provider__dot--on' : ''}`} aria-hidden="true" />
+                            <strong>{guide.label}</strong>
+                            {status?.online && <span className="pk-chip pk-chip--ok"><CheckCircleIcon className="w-3 h-3" />running{status.detail ? ` · ${status.detail}` : ''}</span>}
+                          </div>
+                          {!status?.online && <a className="settings-provider__link" href={guide.href} target="_blank" rel="noreferrer">Get it ↗</a>}
+                        </div>
+                        <p className="pk-hint">{guide.usedFor}</p>
+                        {!status?.online && <p className="pk-hint">{guide.setup}</p>}
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                    <button type="button" className="text-xs app-muted hover:text-white underline underline-offset-2" onClick={() => void checkLocal()} disabled={isCheckingLocal}>
+                      {isCheckingLocal ? 'Checking…' : 'Check again'}
+                    </button>
+                    {drawThingsOnline && (
+                      preferredImageModel === 'draw-things'
+                        ? <span className="text-xs text-emerald-400">✓ New projects make images with Draw Things</span>
+                        : (
+                          <button type="button" className="app-button app-secondary text-xs" onClick={useDrawThingsForImages}>
+                            Use Draw Things for images
+                          </button>
+                        )
+                    )}
+                  </div>
+                  <p className="text-[11px] app-muted">Local models also appear in every model picker under “Local”. Settings live in Local AI.</p>
+                </div>
+              </details>
 
               {selectedMode === 'pro' && (
                 <div className="app-card p-3">
