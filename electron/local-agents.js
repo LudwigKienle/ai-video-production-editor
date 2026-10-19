@@ -23,7 +23,7 @@ const AGENTS = {
   'claude-code': {
     label: 'Claude Code',
     binary: 'claude',
-    adapterPackage: '@zed-industries/claude-code-acp',
+    adapterPackage: '@agentclientprotocol/claude-agent-acp',
     adapterEntry: 'dist/index.js',
     loginCommand: 'claude',
     loginHint: 'Run `claude` in a terminal once and sign in with your Anthropic account.',
@@ -31,8 +31,8 @@ const AGENTS = {
   codex: {
     label: 'Codex',
     binary: 'codex',
-    adapterPackage: '@zed-industries/codex-acp',
-    adapterEntry: 'bin/codex-acp.js',
+    adapterPackage: '@agentclientprotocol/codex-acp',
+    adapterEntry: 'dist/index.js',
     loginCommand: 'codex login',
     loginHint: 'Run `codex login` in a terminal once and sign in with your ChatGPT account.',
   },
@@ -70,6 +70,38 @@ const resolveAdapter = (agent) => {
   } catch {
     return null;
   }
+};
+
+/** "codex-cli 0.163.0" → [0, 163, 0]; null when there is no version number. */
+const parseVersion = (text) => {
+  const match = String(text || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+};
+
+const compareVersions = (a, b) => {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+};
+
+/**
+ * Codex warns "Model metadata for <model> not found" when the model set in
+ * ~/.codex/config.toml is newer than the Codex binary. Run whichever Codex is newer:
+ * the user's CLI on PATH or the one bundled with the ACP adapter (null = bundled).
+ */
+const pickCodexPath = async (userBinary, adapterPath) => {
+  if (!userBinary) return null;
+  let bundled = null;
+  try {
+    const pkg = require.resolve('@openai/codex/package.json', { paths: [path.dirname(adapterPath)] });
+    bundled = parseVersion(JSON.parse(fs.readFileSync(pkg, 'utf8')).version);
+  } catch {
+    return userBinary;
+  }
+  const user = parseVersion(await readVersion(userBinary));
+  if (!user || !bundled) return user ? userBinary : null;
+  return compareVersions(user, bundled) >= 0 ? userBinary : null;
 };
 
 const loginStatus = (id) => {
@@ -112,6 +144,7 @@ class AcpConnection {
     this.agent = agent;
     this.adapterPath = adapterPath;
     this.binaryPath = binaryPath;
+    this.codexPath = null;
     this.proc = null;
     this.seq = 0;
     this.pending = new Map();
@@ -124,6 +157,8 @@ class AcpConnection {
   start(cwd) {
     const env = { ...process.env, PATH: pathWithExtras() };
     if (this.id === 'claude-code' && this.binaryPath) env.CLAUDE_CODE_EXECUTABLE = this.binaryPath;
+    // Unset, the adapter runs the Codex bundled with it; see pickCodexPath.
+    if (this.id === 'codex' && this.codexPath) env.CODEX_PATH = this.codexPath;
     // The adapter needs a node binary; Electron can act as one.
     env.ELECTRON_RUN_AS_NODE = '1';
     this.proc = spawn(process.execPath, [this.adapterPath], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -262,6 +297,7 @@ const ensureSession = async (id, { cwd, permissionPolicy } = {}) => {
   if (!adapter) throw new Error(`The ACP adapter for ${agent.label} is missing (${agent.adapterPackage}).`);
   const { url } = await studioMcp.start();
   connection = new AcpConnection(id, agent, adapter, binary);
+  if (id === 'codex') connection.codexPath = await pickCodexPath(binary, adapter);
   if (permissionPolicy) connection.permissionPolicy = permissionPolicy;
   connection.start(cwd || HOME);
   sessions.set(id, connection);
@@ -319,4 +355,4 @@ const broadcast = (event) => {
 };
 onEvent(broadcast);
 
-module.exports = { list, prompt, cancel, stop, answerPermission, openLogin, dispose, onEvent };
+module.exports = { list, prompt, cancel, stop, answerPermission, openLogin, dispose, onEvent, parseVersion, compareVersions };

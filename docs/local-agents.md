@@ -10,7 +10,7 @@ would in a terminal.
 
 | Where | What |
 |---|---|
-| `electron/local-agents.js` | Detects `claude` / `codex` on PATH (+ `~/.local/bin` etc.), spawns the ACP adapter (`@zed-industries/claude-code-acp`, `@zed-industries/codex-acp`) with Electron as the node runtime, speaks ACP (ndjson JSON-RPC) — `initialize`, `session/new`, `session/prompt`, `session/cancel`; answers `session/request_permission` (forwarded to the UI) and `fs/*`. |
+| `electron/local-agents.js` | Detects `claude` / `codex` on PATH (+ `~/.local/bin` etc.), spawns the ACP adapter (`@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp`) with Electron as the node runtime, speaks ACP (ndjson JSON-RPC) — `initialize`, `session/new`, `session/prompt`, `session/cancel`; answers `session/request_permission` (forwarded to the UI) and `fs/*`. |
 | `electron/studio-mcp-server.js` | Minimal MCP server (Streamable HTTP, JSON responses) on `127.0.0.1:<random>/mcp`. `tools/list` returns the editor's tools, `tools/call` forwards to the renderer over IPC. Passed to every session as `mcpServers: [{ name: 'studio', type: 'http', url }]`. |
 | `src/services/localAgentsService.ts` | Renderer wrapper; `registerStudioTools` converts the Gemini `FunctionDeclaration`s to JSON Schema and serves calls with the same executor the Gemini assistant uses. |
 | `src/components/AIAssistant.tsx` | Agent switch in the header (Gemini · Claude Code · Codex), streamed replies, tool-call lines (`▸` running, `✓` done, `✗` failed), inline permission prompts, Stop. |
@@ -31,6 +31,12 @@ Reject) and answers. Unanswered requests time out after ten minutes as `cancelle
 
 ## Verified
 
-`initialize` + `session/new` against the real `claude-code-acp` 0.16.2 with the user's
-Claude Code 2.1 login: protocol 1, `authMethods: ["claude-login"]`, models listed.
-Codex uses the same path via `codex-acp` (native binary, reads `~/.codex/auth.json`).
+`initialize` against `@agentclientprotocol/claude-agent-acp` 0.93.0 and
+`@agentclientprotocol/codex-acp` 2.2.2: protocol 1 for both. (The earlier
+`@zed-industries/*` adapters are deprecated; codex-acp 0.16 bundled a Codex that did
+not know newer models and warned "Model metadata for `gpt-6.1-sol` not found".)
+
+Codex runs as `codex app-server` behind the adapter. The app passes `CODEX_PATH` with
+the user's Codex CLI when it is at least as new as the Codex bundled with the adapter
+(0.160.1); otherwise the bundled one runs. Either way it reads `~/.codex/auth.json` and
+`~/.codex/config.toml`.
