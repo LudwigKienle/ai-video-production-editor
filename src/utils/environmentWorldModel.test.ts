@@ -5,6 +5,8 @@ import {
   applyGeneratedWorldToEnvironmentReference,
   buildEnvironmentWorldPrompt,
   buildSetDesignAssetForEnvironmentWorld,
+  buildSetDesignAssetForEnvironmentBlockout,
+  pickEnvironmentViews,
 } from './environmentWorldModel.ts';
 import type { ReferenceItem } from '../types.ts';
 
@@ -60,4 +62,37 @@ test('builds a set design asset from a generated world mesh', () => {
   assert.equal(asset.format, 'glb');
   assert.equal(asset.url, 'https://cdn.example/world.glb');
   assert.equal(asset.name, 'Rainy rooftop market World Mesh');
+});
+
+test('picks the base image as front and the nearest eye-level angle for each side', () => {
+  const views = pickEnvironmentViews({
+    imageUrl: 'base.png',
+    multiAngleMeta: [
+      { id: 'a', url: 'master.png', yaw: 0, pitch: 0 },
+      { id: 'b', url: 'left.png', yaw: -90, pitch: 0 },
+      { id: 'c', url: 'right-ish.png', yaw: 70, pitch: 5 },
+      { id: 'd', url: 'right.png', yaw: 95, pitch: 0 },
+      { id: 'e', url: 'reverse.png', yaw: -175, pitch: 0 },
+      { id: 'f', url: 'top.png', yaw: 180, pitch: 40 },
+    ],
+  });
+
+  assert.deepEqual(views, { front: 'base.png', left: 'left.png', right: 'right.png', back: 'reverse.png' });
+});
+
+test('gives a diagonal angle to one side only', () => {
+  const views = pickEnvironmentViews({
+    imageUrl: 'base.png',
+    multiAngleMeta: [{ id: 'a', url: 'diag.png', yaw: 135, pitch: 0 }],
+  });
+
+  assert.deepEqual(views, { front: 'base.png', right: 'diag.png' });
+});
+
+test('names a blockout asset after its engine', () => {
+  const asset = buildSetDesignAssetForEnvironmentBlockout(environmentRef, 'https://cdn.example/mesh.glb', 'Hunyuan3D v3');
+
+  assert.equal(asset.name, 'Rainy rooftop market Blockout (Hunyuan3D v3)');
+  assert.equal(asset.format, 'glb');
+  assert.equal(asset.kind, 'model');
 });

@@ -26,6 +26,8 @@ interface AIAssistantProps {
   toolExecutor: { [key: string]: Function };
   context?: string;
   onUserTurnStart?: (message: string) => void;
+  /** Text placed in the input for the user to review and send (nonce re-applies the same text). */
+  prefill?: { text: string; nonce: number } | null;
 }
 
 type AssistantMode = 'chat' | 'search' | 'maps' | 'thinking';
@@ -192,9 +194,12 @@ const extractGrounding = (response: any): ChatMessage['grounding'] => {
   return links.length > 0 ? links : undefined;
 };
 
-const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecutor, context, onUserTurnStart }) => {
+const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecutor, context, onUserTurnStart, prefill }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  useEffect(() => {
+    if (prefill?.text) setInput(prefill.text);
+  }, [prefill?.nonce, prefill?.text]);
   const [mode, setMode] = useState<AssistantMode>('chat');
   const [isLoading, setIsLoading] = useState(false);
   const [agentChoice, setAgentChoice] = useState<AgentChoice>(() => {

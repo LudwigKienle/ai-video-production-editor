@@ -862,6 +862,8 @@ export type StudioAgentCapabilityId =
   | 'run_director_pass'
   | 'apply_director_treatment'
   | 'generate_project_concepts'
+  | 'generate_environment_angles'
+  | 'build_environment_3d'
   | 'generate_shot_image'
   | 'generate_storyboard_images'
   | 'generate_shot_video'
@@ -1212,6 +1214,10 @@ export type ReferenceItem = {
   worldPanoramaUrl?: string;
   worldThumbnailUrl?: string;
   worldGeneratedAt?: string;
+  blockoutMeshUrl?: string;
+  blockoutEngine?: string;
+  blockoutGeneratedAt?: string;
+  isGeneratingBlockout?: boolean;
   propStatePrompt?: string;
   brandingColorNotes?: string;
   brandingApplicationPrompt?: string;

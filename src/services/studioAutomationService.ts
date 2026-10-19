@@ -219,6 +219,48 @@ export const STUDIO_AGENT_CAPABILITIES: StudioAgentCapability[] = [
     expectedOutcome: 'Concept references exist and the concept phase has fresh generated images.',
   },
   {
+    id: 'generate_environment_angles',
+    title: 'Generate Environment Angles',
+    scope: 'project',
+    risk: 'medium',
+    policy: 'safe_auto',
+    description:
+      'Generate AI-planned camera coverage (left, right, reverse, top and detail angles) for environment references with the selected angle model.',
+    inputs: [
+      {
+        key: 'environmentName',
+        type: 'string',
+        required: false,
+        description: 'Optional environment name (or part of it). Leave empty for every environment with a base image.',
+      },
+    ],
+    expectedOutcome: 'The environments have a fresh set of coverage angles.',
+  },
+  {
+    id: 'build_environment_3d',
+    title: 'Build Environment 3D',
+    scope: 'project',
+    risk: 'medium',
+    policy: 'safe_auto',
+    description:
+      'Build a 3D blockout mesh (Hunyuan3D v3, Rodin 2.5, Trellis 2) or an explorable Marble world from an environment base image and its coverage angles.',
+    inputs: [
+      {
+        key: 'environmentName',
+        type: 'string',
+        required: false,
+        description: 'Optional environment name (or part of it). Leave empty for every environment with a base image.',
+      },
+      {
+        key: 'engine',
+        type: 'string',
+        required: false,
+        description: 'hunyuan3d-v3, rodin-v2.5, trellis-2 or marble-views. Defaults to the engine selected in the Environments tab.',
+      },
+    ],
+    expectedOutcome: 'Each environment has a blockout GLB or a Marble world that can be sent to Set Design.',
+  },
+  {
     id: 'generate_shot_image',
     title: 'Generate Shot Image',
     scope: 'storyboard',

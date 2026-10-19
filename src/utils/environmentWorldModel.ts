@@ -86,3 +86,46 @@ export const buildSetDesignAssetForEnvironmentWorld = (
   rotation: { x: 0, y: 0, z: 0 },
   scale: { x: 1, y: 1, z: 1 },
 });
+
+export type EnvironmentViewSlot = 'front' | 'right' | 'back' | 'left';
+
+const VIEW_SLOT_YAW: Record<EnvironmentViewSlot, number> = { front: 0, right: 90, back: 180, left: -90 };
+
+/** World Labs multi-image azimuths, clockwise from the front view. */
+export const MARBLE_VIEW_AZIMUTH: Record<EnvironmentViewSlot, 0 | 90 | 180 | 270> = { front: 0, right: 90, back: 180, left: 270 };
+
+const yawDistance = (a: number, b: number) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+
+/**
+ * The views a 3D generator can use: the base image as the front, and for each other side
+ * the eye-level generated angle closest to it (within 45°). Each angle fills one side only.
+ */
+export const pickEnvironmentViews = (
+  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta'>,
+): Partial<Record<EnvironmentViewSlot, string>> => {
+  const views: Partial<Record<EnvironmentViewSlot, string>> = {};
+  const bestDistance: Partial<Record<EnvironmentViewSlot, number>> = {};
+  for (const angle of reference.multiAngleMeta || []) {
+    if (!angle.url || typeof angle.yaw !== 'number' || Math.abs(angle.pitch ?? 0) > 25) continue;
+    const yaw = angle.yaw;
+    const [slot, distance] = (Object.keys(VIEW_SLOT_YAW) as EnvironmentViewSlot[])
+      .map((candidate) => [candidate, yawDistance(yaw, VIEW_SLOT_YAW[candidate])] as const)
+      .reduce((best, next) => (next[1] < best[1] ? next : best));
+    const current = bestDistance[slot];
+    if (distance <= 45 && (current === undefined || distance < current)) {
+      bestDistance[slot] = distance;
+      views[slot] = angle.url;
+    }
+  }
+  if (reference.imageUrl) views.front = reference.imageUrl;
+  return views;
+};
+
+export const buildSetDesignAssetForEnvironmentBlockout = (
+  reference: ReferenceItem,
+  meshUrl: string,
+  engineLabel: string,
+): SetDesignAsset => ({
+  ...buildSetDesignAssetForEnvironmentWorld(reference, meshUrl),
+  name: `${reference.name || 'Environment'} Blockout (${engineLabel})`,
+});

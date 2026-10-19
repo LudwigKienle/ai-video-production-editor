@@ -54,6 +54,13 @@ type UseStudioAgentRuntimeParams = {
   onGenerateProjectConcepts?: (payload: {
     limit?: number;
   }) => Promise<{ detail: string }>;
+  onGenerateEnvironmentAngles?: (payload: {
+    environmentName?: string;
+  }) => Promise<{ detail: string }>;
+  onBuildEnvironment3d?: (payload: {
+    environmentName?: string;
+    engine?: string;
+  }) => Promise<{ detail: string }>;
   onGenerateStoryboardImages?: (payload: {
     limit?: number;
   }) => Promise<{ detail: string }>;
@@ -126,6 +133,8 @@ export const useStudioAgentRuntime = ({
   onRunDirectorPass,
   onApplyDirectorTreatment,
   onGenerateProjectConcepts,
+  onGenerateEnvironmentAngles,
+  onBuildEnvironment3d,
   onGenerateStoryboardImages,
   onGenerateStoryboardVideos,
   onResearchWeb,
@@ -315,6 +324,17 @@ export const useStudioAgentRuntime = ({
                 : undefined,
           });
           immediateDetail = response?.detail || 'Project concept generation completed.';
+        } else if (capabilityId === 'generate_environment_angles') {
+          const response = await onGenerateEnvironmentAngles?.({
+            environmentName: typeof input.environmentName === 'string' ? input.environmentName : undefined,
+          });
+          immediateDetail = response?.detail || 'Environment angles generated.';
+        } else if (capabilityId === 'build_environment_3d') {
+          const response = await onBuildEnvironment3d?.({
+            environmentName: typeof input.environmentName === 'string' ? input.environmentName : undefined,
+            engine: typeof input.engine === 'string' ? input.engine : undefined,
+          });
+          immediateDetail = response?.detail || 'Environment 3D built.';
         } else if (capabilityId === 'generate_storyboard_images') {
           const response = await onGenerateStoryboardImages?.({
             limit:
@@ -392,6 +412,8 @@ export const useStudioAgentRuntime = ({
             capabilityId === 'run_director_pass' ||
             capabilityId === 'apply_director_treatment' ||
             capabilityId === 'generate_project_concepts' ||
+            capabilityId === 'generate_environment_angles' ||
+            capabilityId === 'build_environment_3d' ||
             capabilityId === 'generate_storyboard_images' ||
             capabilityId === 'generate_storyboard_videos' ||
             capabilityId === 'research_web' ||
@@ -416,6 +438,8 @@ export const useStudioAgentRuntime = ({
           capabilityId === 'run_director_pass' ||
           capabilityId === 'apply_director_treatment' ||
           capabilityId === 'generate_project_concepts' ||
+          capabilityId === 'generate_environment_angles' ||
+          capabilityId === 'build_environment_3d' ||
           capabilityId === 'generate_storyboard_images' ||
           capabilityId === 'generate_storyboard_videos' ||
           capabilityId === 'research_web' ||

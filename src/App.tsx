@@ -818,6 +818,8 @@ const BACKGROUND_SAFE_STUDIO_AGENT_CAPABILITIES = new Set<StudioAgentCapabilityI
     'run_director_pass',
     'apply_director_treatment',
     'generate_project_concepts',
+    'generate_environment_angles',
+    'build_environment_3d',
     'generate_storyboard_images',
     'generate_storyboard_videos',
     'research_web',
@@ -999,6 +1001,11 @@ function App() {
     const [modalSubmitHandler, setModalSubmitHandler] = useState<((values: any, pricing?: PricingResult | null) => void | Promise<void>) | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isAssistantVisible, setIsAssistantVisible] = useState(false);
+    const [assistantPrefill, setAssistantPrefill] = useState<{ text: string; nonce: number } | null>(null);
+    const handleAskAssistant = useCallback((text: string) => {
+        setAssistantPrefill({ text, nonce: Date.now() });
+        setIsAssistantVisible(true);
+    }, []);
     const [projectPath, setProjectPath] = useState<string | null>(null);
     const [projectName, setProjectName] = useState<string | null>(null);
     const [lastAgentApplyBatch, setLastAgentApplyBatch] = useState<AgentApplyBatchSummary | null>(null);
@@ -1445,6 +1452,16 @@ function App() {
             setProjectHubRequestedPhase('concept');
             const bindings = await ensureProjectHubAutomation('concept');
             return bindings.generateProjectConcepts({ limit });
+        },
+        onGenerateEnvironmentAngles: async ({ environmentName }) => {
+            setProjectHubRequestedPhase('concept');
+            const bindings = await ensureProjectHubAutomation('concept');
+            return bindings.generateEnvironmentAngles({ environmentName });
+        },
+        onBuildEnvironment3d: async ({ environmentName, engine }) => {
+            setProjectHubRequestedPhase('concept');
+            const bindings = await ensureProjectHubAutomation('concept');
+            return bindings.buildEnvironment3d({ environmentName, engine });
         },
         onRunDirectorPass: async () => {
             setProjectHubRequestedPhase('director');
@@ -6535,6 +6552,36 @@ function App() {
             },
         },
         {
+            name: 'studioAgentGenerateEnvironmentAngles',
+            description: 'Use the Studio Agent to generate camera coverage angles (left, right, reverse, top, detail zones) for environment concept references, with the angle model chosen in the Environments tab.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    environmentName: {
+                        type: Type.STRING,
+                        description: 'Optional environment name or part of it. Omit to cover every environment that has a base image.',
+                    },
+                },
+            },
+        },
+        {
+            name: 'studioAgentBuildEnvironment3d',
+            description: 'Use the Studio Agent to build a 3D blockout (GLB mesh for Set Design) or an explorable Marble world from an environment base image and its generated angles. Generate the angles first for the best result.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    environmentName: {
+                        type: Type.STRING,
+                        description: 'Optional environment name or part of it. Omit to build every environment that has a base image.',
+                    },
+                    engine: {
+                        type: Type.STRING,
+                        description: 'hunyuan3d-v3 (blockout from front/back/left/right views), rodin-v2.5 (blockout from up to 5 views), trellis-2 (blockout from the base image) or marble-views (explorable world). Omit to use the engine selected in the app.',
+                    },
+                },
+            },
+        },
+        {
             name: 'studioAgentApplyDirectorTreatment',
             description: 'Use the Studio Agent to apply the latest director treatment into storyboard shots.',
             parameters: { type: Type.OBJECT, properties: {} },
@@ -6921,6 +6968,14 @@ function App() {
             typeof limit === 'number' && Number.isFinite(limit) ? { limit: Math.max(1, Math.floor(limit)) } : {},
         ),
         studioAgentApplyDirectorTreatment: async () => runStudioAgentCapability('apply_director_treatment', {}),
+        studioAgentGenerateEnvironmentAngles: async ({ environmentName }: { environmentName?: string }) => runStudioAgentCapability(
+            'generate_environment_angles',
+            environmentName ? { environmentName } : {},
+        ),
+        studioAgentBuildEnvironment3d: async ({ environmentName, engine }: { environmentName?: string; engine?: string }) => runStudioAgentCapability(
+            'build_environment_3d',
+            { ...(environmentName ? { environmentName } : {}), ...(engine ? { engine } : {}) },
+        ),
         studioAgentGenerateStoryboardImages: async ({ limit }: { limit?: number }) => runStudioAgentCapability(
             'generate_storyboard_images',
             typeof limit === 'number' && Number.isFinite(limit) ? { limit: Math.max(1, Math.floor(limit)) } : {},
@@ -8424,6 +8479,7 @@ function App() {
                             projectHubAutomationRef.current = bindings;
                         }}
                         onSendWorldMeshToSetDesign={handleSendWorldMeshToSetDesign}
+                        onAskAssistant={handleAskAssistant}
                         onActivityChange={({ activePhase, activeShotNumber }) => {
                             setProjectHubActivePhase(activePhase);
                             setProjectHubRequestedPhase((current) => {
@@ -9020,6 +9076,7 @@ function App() {
                             toolExecutor={aiToolExecutor}
                             context={assistantContext}
                             onUserTurnStart={handleAssistantTurnStart}
+                            prefill={assistantPrefill}
                         />
                     </div>
                 </>

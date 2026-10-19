@@ -42,7 +42,7 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25 } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { runLocalModel, sizeForAspect } from '../services/localModelService';
@@ -53,7 +53,7 @@ import { generateCatalogVideo } from '../services/videoCatalogRouter';
 import { startTask } from '../services/taskCenter';
 import { DOP_ENTRY, HIGGSFIELD_IMAGE_MODELS, generateImageWithHiggsfield, higgsfieldHostsVideoModel, isHiggsfieldImageModel } from '../services/higgsfieldService';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
-import { generateWorldFromImageUrl, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
+import { generateWorldFromImageUrl, generateWorldFromImageViews, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
 import { loadProjectFromFolder, selectProjectFolder } from '../services/projectService';
 import { isReplicateGoogleProvider } from '../services/googleModelProvider';
@@ -91,7 +91,8 @@ import lensVintage58 from '../assets/lenses/vintage-58.png';
 import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingService';
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
-import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentWorld } from '../utils/environmentWorldModel';
+import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews } from '../utils/environmentWorldModel';
+import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
 import type { RelightSettings } from '../utils/relight';
@@ -132,6 +133,13 @@ export type ProjectHubStudioAutomationBindings = {
     generateProjectConcepts: (payload?: {
         limit?: number;
     }) => Promise<{ detail: string; generatedCount: number }>;
+    generateEnvironmentAngles: (payload?: {
+        environmentName?: string;
+    }) => Promise<{ detail: string; generatedCount: number }>;
+    buildEnvironment3d: (payload?: {
+        environmentName?: string;
+        engine?: string;
+    }) => Promise<{ detail: string; builtCount: number }>;
     runDirectorPass: () => Promise<{ detail: string; shotCount: number }>;
     applyDirectorTreatment: () => Promise<{ detail: string; shotCount: number }>;
     generateStoryboardImages: (payload?: { limit?: number }) => Promise<{ detail: string; generatedCount: number }>;
@@ -181,6 +189,7 @@ interface ProjectHubWorkspaceProps {
     allowedFeatures?: StoryProjectFeature[];
     disabledFeatures?: StoryProjectFeature[];
     onSendWorldMeshToSetDesign?: (asset: SetDesignAsset) => void;
+    onAskAssistant?: (prompt: string) => void;
     /** Render only the Team layer (collaboration, sync, chat) as its own workspace. */
     teamMode?: boolean;
 }
@@ -254,36 +263,87 @@ const OUTFIT_EDIT_SIBLINGS: Record<string, Exclude<OutfitImageModel, 'same'>> = 
 };
 const OUTFIT_FALLBACK_MODEL: Exclude<OutfitImageModel, 'same'> = 'seedream';
 
-/** The outfit model "Same as image model" stands for: the image model itself, its edit sibling, or Seedream 4.5. */
-const outfitModelForImageModel = (imageModel: string): Exclude<OutfitImageModel, 'same'> => {
+/** The reference-capable edit model behind an image model: itself or its edit sibling. */
+const editModelForImageModel = (imageModel: string): Exclude<OutfitImageModel, 'same'> | null => {
     const direct = OUTFIT_MODEL_OPTIONS.find((option) => option.id !== 'same' && option.id === imageModel);
     if (direct) return direct.id as Exclude<OutfitImageModel, 'same'>;
-    return OUTFIT_EDIT_SIBLINGS[imageModel] || OUTFIT_FALLBACK_MODEL;
+    return OUTFIT_EDIT_SIBLINGS[imageModel] || null;
 };
+/** The outfit model "Same as image model" stands for: the image model itself, its edit sibling, or Seedream 4.5. */
+const outfitModelForImageModel = (imageModel: string): Exclude<OutfitImageModel, 'same'> =>
+    editModelForImageModel(imageModel) || OUTFIT_FALLBACK_MODEL;
 const outfitModelLabel = (model: OutfitImageModel) => OUTFIT_MODEL_OPTIONS.find((option) => option.id === model)?.label || model;
+
+/** Models for angles and coverage: the camera-aware Qwen Multi-Angle plus every reference edit model. */
+type AngleImageModel = OutfitImageModel | 'qwen-multiangle';
+const ANGLE_MODEL_OPTIONS: Array<{ id: AngleImageModel; label: string; group: 'Cloud' | 'Local' | '' }> = [
+    { id: 'qwen-multiangle', label: 'Qwen Multi-Angle (Replicate) · camera-aware', group: 'Cloud' },
+    ...OUTFIT_MODEL_OPTIONS.filter((option) => option.id !== 'same'),
+];
+const ANGLE_MODEL_STORAGE_KEY = 'angle_image_model_v1';
+const angleModelForImageModel = (imageModel: string): Exclude<AngleImageModel, 'same'> =>
+    imageModel === 'qwen-multiangle' ? 'qwen-multiangle' : editModelForImageModel(imageModel) || 'qwen-multiangle';
+const angleModelLabel = (model: AngleImageModel) => ANGLE_MODEL_OPTIONS.find((option) => option.id === model)?.label || model;
+const isQwenAngleModel = (model: AngleImageModel) => model === 'qwen-multiangle' || model === 'qwen-multiangle-fal';
+
+/** Prop views for models without a camera parameter: one call per view. */
+const PROP_VIEW_PRESETS: AnglePresetSelection[] = [
+    { id: 'prop-front', label: 'Front', yaw: 0, pitch: 0 },
+    { id: 'prop-left', label: 'Left Side', yaw: -90, pitch: 0 },
+    { id: 'prop-right', label: 'Right Side', yaw: 90, pitch: 0 },
+    { id: 'prop-back', label: 'Back', yaw: 180, pitch: 0 },
+    { id: 'prop-top', label: 'Top', yaw: 0, pitch: 45 },
+];
+
+type Environment3dEngine = 'hunyuan3d-v3' | 'rodin-v2.5' | 'trellis-2' | 'marble-views';
+const ENVIRONMENT_3D_ENGINES: Array<{ id: Environment3dEngine; label: string; short: string }> = [
+    { id: 'hunyuan3d-v3', label: 'Blockout · Hunyuan3D v3 (front/back/left/right)', short: 'Hunyuan3D v3' },
+    { id: 'rodin-v2.5', label: 'Blockout · Rodin 2.5 (up to 5 views)', short: 'Rodin 2.5' },
+    { id: 'trellis-2', label: 'Blockout · Trellis 2 (base image)', short: 'Trellis 2' },
+    { id: 'marble-views', label: 'World · Marble from views', short: 'Marble world' },
+];
+const ENVIRONMENT_3D_STORAGE_KEY = 'environment_3d_engine_v1';
+
+function EditModelSelect<T extends string>({ value, onChange, options, sameLabel, title, className }: {
+    value: T;
+    onChange: (model: T) => void;
+    options: Array<{ id: T; label: string; group: 'Cloud' | 'Local' | '' }>;
+    sameLabel: string;
+    title: string;
+    className?: string;
+}) {
+    return (
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value as T)}
+            className={className || 'bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 max-w-[15rem]'}
+            title={title}
+        >
+            <option value="same">{sameLabel}</option>
+            {(['Cloud', 'Local'] as const).map((group) => (
+                <optgroup key={group} label={group === 'Local' ? 'Local (download in Local AI)' : 'Cloud'}>
+                    {options.filter((option) => option.group === group).map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                </optgroup>
+            ))}
+        </select>
+    );
+}
 
 const OutfitModelSelect: React.FC<{
     value: OutfitImageModel;
     onChange: (model: OutfitImageModel) => void;
     sameLabel: string;
     className?: string;
-}> = ({ value, onChange, sameLabel, className }) => (
-    <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as OutfitImageModel)}
-        className={className || 'bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 max-w-[15rem]'}
-        title="Model used for outfits and garment pieces"
-    >
-        <option value="same">{sameLabel}</option>
-        {(['Cloud', 'Local'] as const).map((group) => (
-            <optgroup key={group} label={group === 'Local' ? 'Local (download in Local AI)' : 'Cloud'}>
-                {OUTFIT_MODEL_OPTIONS.filter((option) => option.group === group).map((option) => (
-                    <option key={option.id} value={option.id}>{option.label}</option>
-                ))}
-            </optgroup>
-        ))}
-    </select>
-);
+}> = (props) => <EditModelSelect {...props} options={OUTFIT_MODEL_OPTIONS} title="Model used for outfits and garment pieces" />;
+
+const AngleModelSelect: React.FC<{
+    value: AngleImageModel;
+    onChange: (model: AngleImageModel) => void;
+    sameLabel: string;
+    className?: string;
+}> = (props) => <EditModelSelect {...props} options={ANGLE_MODEL_OPTIONS} title="Model used for angles and coverage" />;
 type CameraPreset = { id: string; label: string; prompt: string; image?: string };
 type LensPreset = { id: string; label: string; prompt: string; aspectRatioOverride?: AspectRatioOption; aspectRatioHint?: string; image?: string };
 type ReferenceSuggestion = { type: 'character' | 'environment' | 'product' | 'prop'; name: string; description: string };
@@ -2115,6 +2175,9 @@ const CharacterSheetModal: React.FC<{
     outfitModel: OutfitImageModel;
     onOutfitModelChange: (model: OutfitImageModel) => void;
     outfitSameLabel: string;
+    angleModel: AngleImageModel;
+    onAngleModelChange: (model: AngleImageModel) => void;
+    angleSameLabel: string;
 }> = ({
     character,
     onClose,
@@ -2130,6 +2193,9 @@ const CharacterSheetModal: React.FC<{
     outfitModel,
     onOutfitModelChange,
     outfitSameLabel,
+    angleModel,
+    onAngleModelChange,
+    angleSameLabel,
 }) => {
         const [activeTab, setActiveTab] = useState<'bio' | 'look' | 'wardrobe' | 'angles' | 'versions'>('bio');
         const [outfitCount, setOutfitCount] = useState(4);
@@ -3061,11 +3127,10 @@ const CharacterSheetModal: React.FC<{
                                 )}
                                 {activeTab === 'angles' && (
                                     <div className="space-y-4">
-                                        {!showCameraControls && (
-                                            <div className="text-[10px] text-amber-300">
-                                                For best angle control, switch the reference model to Qwen Multi-Angle.
-                                            </div>
-                                        )}
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="text-[10px] text-gray-500">Angle model</div>
+                                            <AngleModelSelect value={angleModel} onChange={onAngleModelChange} sameLabel={angleSameLabel} />
+                                        </div>
                                         <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-4 space-y-4">
                                             <div className="text-[10px] text-gray-400">
                                                 Default set: Left Side, Right Side, Back, Face Close-Up.
@@ -3964,6 +4029,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     allowedFeatures,
     disabledFeatures,
     onSendWorldMeshToSetDesign,
+    onAskAssistant,
     teamMode = false,
 }) => {
     const phaseCatalog = useMemo(
@@ -8867,6 +8933,107 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
     };
 
+    const storeWorldOnEnvironment = (
+        reference: ReferenceItem,
+        world: Awaited<ReturnType<typeof generateWorldFromText>>,
+        modelId: MarbleModel,
+    ) => {
+        const assets = getWorldAssetUrls(world);
+        const resolvedModel = normalizeWorldModelId(world.model || modelId);
+        setReferences(prev => prev.map(ref => (
+            ref.id === reference.id
+                ? applyGeneratedWorldToEnvironmentReference(ref, {
+                    worldId: world.id,
+                    modelId: resolvedModel,
+                    assets: {
+                        viewUrl: assets.viewUrl,
+                        thumbnailUrl: assets.thumbnail,
+                        panoramaUrl: assets.panorama,
+                        meshUrl: assets.colliderMesh,
+                        splat100kUrl: assets.splat100k,
+                        splat500kUrl: assets.splat500k,
+                        splatFullResUrl: assets.splatFullRes,
+                    },
+                })
+                : ref
+        )));
+        addWorldAssetsToLibrary(reference, assets, resolvedModel);
+    };
+
+    /** Builds a blockout mesh or a Marble world from the base image and the nearest front/right/back/left angles. */
+    const buildEnvironment3d = async (reference: ReferenceItem, engine: Environment3dEngine): Promise<string> => {
+        if (reference.type !== 'environment') throw new Error('Only environments can be built in 3D.');
+        const name = reference.name?.trim() || 'Environment';
+        const views = pickEnvironmentViews(reference);
+        if (!views.front) throw new Error(`Add a base image for ${name} before building it in 3D.`);
+        const slots = (['front', 'right', 'back', 'left'] as EnvironmentViewSlot[]).filter((slot) => views[slot]);
+        const loaded = await Promise.all(slots.map(async (slot) => [slot, await getBase64FromUrl(views[slot]!)] as const));
+        const images = Object.fromEntries(loaded) as Partial<Record<EnvironmentViewSlot, { base64: string; mimeType: string }>>;
+        const viewNote = `${slots.length} view${slots.length === 1 ? '' : 's'} (${slots.join(', ')})`;
+
+        if (engine === 'marble-views') {
+            if (!hasWorldLabsApiKey()) throw new Error('Add your World Labs API key in Settings to build explorable worlds.');
+            const modelId = normalizeWorldModelId(environmentWorldModel);
+            const world = await generateWorldFromImageViews(
+                name,
+                slots.map((slot) => ({ azimuth: MARBLE_VIEW_AZIMUTH[slot], image: images[slot]! })),
+                buildEnvironmentWorldPrompt(reference, stylePrompt),
+                modelId,
+                (message) => setError(message),
+            );
+            storeWorldOnEnvironment(reference, world, modelId);
+            setError(null);
+            return `${name}: ${getWorldModelLabel(modelId)} world built from ${viewNote}.`;
+        }
+
+        const engineInfo = ENVIRONMENT_3D_ENGINES.find((item) => item.id === engine) || ENVIRONMENT_3D_ENGINES[0];
+        const front = images.front!;
+        const result = engine === 'hunyuan3d-v3'
+            ? await generate3dWithFalHunyuan3dV3(front, { name, backImage: images.back, leftImage: images.left, rightImage: images.right })
+            : engine === 'rodin-v2.5'
+                ? await generate3dWithFalRodinV25(slots.map((slot) => images[slot]!).slice(0, 5), {
+                    name,
+                    prompt: composeReferencePrompt(reference, { includeCamera: false }),
+                })
+                : await generate3dWithFalTrellis2(front, { name });
+        setReferences(prev => prev.map(ref => ref.id === reference.id ? {
+            ...ref,
+            blockoutMeshUrl: result.meshUrl,
+            blockoutEngine: engineInfo.short,
+            blockoutGeneratedAt: new Date().toISOString(),
+        } : ref));
+        setMediaItems(prev => [...prev, { ...result, name: `${name}_blockout_${engine}.glb` }]);
+        const usedViews = engine === 'trellis-2' ? 'the base image' : viewNote;
+        return `${name}: ${engineInfo.short} blockout built from ${usedViews}.`;
+    };
+
+    const handleBuildEnvironment3d = async (referenceId: string) => {
+        const reference = references.find(ref => ref.id === referenceId);
+        if (!reference) return;
+        const flag = environment3dEngine === 'marble-views' ? 'isGeneratingWorld' : 'isGeneratingBlockout';
+        setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, [flag]: true } : ref));
+        try {
+            pushUiStatus(await buildEnvironment3d(reference, environment3dEngine));
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, [flag]: false } : ref));
+        }
+    };
+
+    const askAgentToBuildEnvironment = (reference: ReferenceItem) => {
+        if (!onAskAssistant) return;
+        const engine = ENVIRONMENT_3D_ENGINES.find((item) => item.id === environment3dEngine) || ENVIRONMENT_3D_ENGINES[0];
+        const angleCount = reference.multiAngleMeta?.length || 0;
+        onAskAssistant([
+            `Use the Studio Agent to build the environment "${reference.name || 'Environment'}" in 3D.`,
+            angleCount > 0
+                ? `It already has ${angleCount} coverage angles; regenerate them only if left, right or reverse views are missing (studioAgentGenerateEnvironmentAngles).`
+                : 'First generate its coverage angles (studioAgentGenerateEnvironmentAngles).',
+            `Then build it with studioAgentBuildEnvironment3d using engine "${engine.id}" (${engine.short}), and tell me which views were used.`,
+        ].join(' '));
+    };
+
     const handleGenerateEnvironmentWorld = async (referenceId: string) => {
         const reference = references.find(ref => ref.id === referenceId);
         if (!reference || reference.type !== 'environment') return;
@@ -8896,34 +9063,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     modelId,
                     (message) => setError(message),
                 )
-                : await generateWorldFromText(
-                    name,
-                    worldPrompt,
-                    modelId,
-                    (message) => setError(message),
-                );
+                : reference.imageUrl
+                    ? await generateWorldFromImageViews(
+                        name,
+                        [{ azimuth: 0, image: await getBase64FromUrl(reference.imageUrl) }],
+                        worldPrompt,
+                        modelId,
+                        (message) => setError(message),
+                    )
+                    : await generateWorldFromText(
+                        name,
+                        worldPrompt,
+                        modelId,
+                        (message) => setError(message),
+                    );
 
-            const assets = getWorldAssetUrls(world);
-            const resolvedModel = normalizeWorldModelId(world.model || modelId);
-
-            setReferences(prev => prev.map(ref => (
-                ref.id === referenceId
-                    ? applyGeneratedWorldToEnvironmentReference(ref, {
-                        worldId: world.id,
-                        modelId: resolvedModel,
-                        assets: {
-                            viewUrl: assets.viewUrl,
-                            thumbnailUrl: assets.thumbnail,
-                            panoramaUrl: assets.panorama,
-                            meshUrl: assets.colliderMesh,
-                            splat100kUrl: assets.splat100k,
-                            splat500kUrl: assets.splat500k,
-                            splatFullResUrl: assets.splatFullRes,
-                        },
-                    })
-                    : ref
-            )));
-            addWorldAssetsToLibrary(reference, assets, resolvedModel);
+            storeWorldOnEnvironment(reference, world, modelId);
+            setError(null);
             pushUiStatus(`World generated for ${name}.`);
         } catch (error) {
             setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, isGeneratingWorld: false } : ref));
@@ -9089,9 +9245,6 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         if (!reference.imageUrl) {
             throw new Error(`Add a base image before generating coverage angles for ${reference.name}.`);
         }
-        if (!isMultiAngleModel) {
-            throw new Error('Switch reference model to Qwen Multi-Angle to generate 360 environment coverage.');
-        }
         const baseImage = await getBase64FromUrl(reference.imageUrl);
         const coveragePrompts = await buildEnvironmentCoveragePrompts(reference);
         const generated: Array<{
@@ -9112,7 +9265,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 'cinematic still, only change camera position or focus zone'
             ].filter(Boolean).join('. ');
             try {
-                const images = await editMultiAngleImages(prompt, baseImage, { numOutputs: 1 });
+                const images = await editAngleImages(prompt, baseImage, { numOutputs: 1 });
                 if (images[0]) {
                     generated.push({ preset, image: images[0] });
                 }
@@ -9151,16 +9304,39 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         if (!reference.imageUrl) {
             throw new Error(`Add a base image before generating angles for ${reference.name}.`);
         }
-        if (!isMultiAngleModel) {
-            throw new Error('Switch reference model to Qwen Multi-Angle to generate explicit angle sets.');
-        }
         const baseImage = await getBase64FromUrl(reference.imageUrl);
+        if (!isQwenAngleModel(resolveAngleModel())) {
+            const generatedViews: Array<{ preset: AnglePresetSelection; image: MediaItem }> = [];
+            for (const preset of PROP_VIEW_PRESETS) {
+                const viewPrompt = [
+                    stylePrompt,
+                    composeReferencePrompt(reference, { includeCamera: false }),
+                    formatCameraAngleHintFromAngles(preset.yaw, preset.pitch),
+                    `${preset.label.toLowerCase()} view of the same object`,
+                    'keep the exact same subject identity, proportions, materials, and lighting as the reference',
+                    'clean product-style framing, only the camera position changes'
+                ].filter(Boolean).join('. ');
+                try {
+                    const [image] = await editAngleImages(viewPrompt, baseImage, { numOutputs: 1 });
+                    if (image) generatedViews.push({ preset, image });
+                } catch (error) {
+                    console.error(`Prop angle generation failed for ${reference.name} (${preset.label})`, error);
+                }
+            }
+            if (generatedViews.length === 0) {
+                throw new Error('No prop angles were generated. Try another angle model.');
+            }
+            const croppedViews = await applyCinemascopeCropToImages(generatedViews.map((item) => item.image), referenceAspectRatio);
+            const finalViewImage = await finalizeReferenceImage(reference, croppedViews[0], croppedViews.map(img => img.url));
+            const viewUrls = finalViewImage.multiAngleUrls || croppedViews.map(img => img.url);
+            return { finalImage: finalViewImage, angleMeta: buildAngleMetaFromPresets(generatedViews.map((item) => item.preset), viewUrls) };
+        }
         const prompt = [
             stylePrompt,
             composeReferencePrompt(reference, { includeCamera: true }),
             'multi-angle turntable, keep same subject identity, materials, and lighting'
         ].filter(Boolean).join('. ');
-        const images = await editMultiAngleImages(prompt, baseImage);
+        const images = await editAngleImages(prompt, baseImage);
         const cropped = await applyCinemascopeCropToImages(images, referenceAspectRatio);
         const finalImage = await finalizeReferenceImage(reference, cropped[0], cropped.map(img => img.url));
         const angleUrls = finalImage.multiAngleUrls || cropped.map(img => img.url);
@@ -9168,19 +9344,29 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return { finalImage, angleMeta };
     };
 
+    /** Generates and stores angles for one reference; returns how many angles it now has. */
+    const generateAndStoreReferenceAngles = async (reference: ReferenceItem) => {
+        setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, isGeneratingAngles: true } : ref));
+        try {
+            const { finalImage, angleMeta } = await generateAnglesForReference(reference);
+            setReferences(prev => prev.map(ref => ref.id === reference.id ? {
+                ...ref,
+                ...applyReferenceVersion(ref, finalImage.imageUrl, finalImage.multiAngleUrls, angleModelLabel(resolveAngleModel()), angleMeta),
+                isGeneratingAngles: false
+            } : ref));
+            return angleMeta.length;
+        } catch (error) {
+            setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, isGeneratingAngles: false } : ref));
+            throw error;
+        }
+    };
+
     const handleGenerateReferenceAngles = async (referenceId: string) => {
         const reference = references.find(ref => ref.id === referenceId);
         if (!reference) return;
-        setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, isGeneratingAngles: true } : ref));
         try {
-            const { finalImage, angleMeta } = await generateAnglesForReference(reference);
-            setReferences(prev => prev.map(ref => ref.id === referenceId ? {
-                ...ref,
-                ...applyReferenceVersion(ref, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel, angleMeta),
-                isGeneratingAngles: false
-            } : ref));
+            await generateAndStoreReferenceAngles(reference);
         } catch (error) {
-            setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, isGeneratingAngles: false } : ref));
             handleError(error);
         }
     };
@@ -9191,23 +9377,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             setError(`No ${referenceType} references available to generate angles.`);
             return;
         }
-        if (!isMultiAngleModel) {
-            setError('Switch reference model to Qwen Multi-Angle to generate explicit angle sets.');
-            return;
-        }
-        setIsLoading(`Generating angles for all ${referenceType} references...`);
+        setIsLoading(`Generating angles for all ${referenceType} references with ${angleModelLabel(resolveAngleModel())}...`);
         for (const reference of refsOfType) {
             if (!reference.imageUrl) continue;
-            setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, isGeneratingAngles: true } : ref));
             try {
-                const { finalImage, angleMeta } = await generateAnglesForReference(reference);
-                setReferences(prev => prev.map(ref => ref.id === reference.id ? {
-                    ...ref,
-                    ...applyReferenceVersion(ref, finalImage.imageUrl, finalImage.multiAngleUrls, referenceModelLabel, angleMeta),
-                    isGeneratingAngles: false
-                } : ref));
+                await generateAndStoreReferenceAngles(reference);
             } catch (error) {
-                setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, isGeneratingAngles: false } : ref));
                 console.error(`Angle generation failed for ${reference.name}`, error);
             }
         }
@@ -9435,20 +9610,59 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
     const resolveOutfitModel = (): Exclude<OutfitImageModel, 'same'> =>
         outfitImageModel === 'same' ? outfitModelForImageModel(referenceImageModel) : outfitImageModel;
+
+    const [angleImageModel, setAngleImageModelState] = useState<AngleImageModel>(() => {
+        try {
+            const stored = localStorage.getItem(ANGLE_MODEL_STORAGE_KEY);
+            return ANGLE_MODEL_OPTIONS.some((option) => option.id === stored) || stored === 'same' ? (stored as AngleImageModel) : 'same';
+        } catch {
+            return 'same';
+        }
+    });
+    const setAngleImageModel = (model: AngleImageModel) => {
+        setAngleImageModelState(model);
+        try {
+            localStorage.setItem(ANGLE_MODEL_STORAGE_KEY, model);
+        } catch {
+            /* storage unavailable */
+        }
+    };
+    const resolveAngleModel = (): Exclude<AngleImageModel, 'same'> =>
+        angleImageModel === 'same' ? angleModelForImageModel(referenceImageModel) : angleImageModel;
+    const angleSameLabel = `Same as image model (${angleModelLabel(angleModelForImageModel(referenceImageModel))})`;
+
+    const [environment3dEngine, setEnvironment3dEngineState] = useState<Environment3dEngine>(() => {
+        try {
+            const stored = localStorage.getItem(ENVIRONMENT_3D_STORAGE_KEY);
+            return ENVIRONMENT_3D_ENGINES.some((engine) => engine.id === stored) ? (stored as Environment3dEngine) : 'hunyuan3d-v3';
+        } catch {
+            return 'hunyuan3d-v3';
+        }
+    });
+    const setEnvironment3dEngine = (engine: Environment3dEngine) => {
+        setEnvironment3dEngineState(engine);
+        try {
+            localStorage.setItem(ENVIRONMENT_3D_STORAGE_KEY, engine);
+        } catch {
+            /* storage unavailable */
+        }
+    };
     const sameAsImageModelLabel = `Same as image model (${outfitModelLabel(outfitModelForImageModel(referenceImageModel))})`;
 
-    /** One image of a character (or garment) from reference images, with the chosen outfit model. */
-    const renderWithOutfitModel = async (
+    /** One image from reference images with a given edit model (outfits, garments, angles). */
+    const renderWithEditModel = async (
+        model: Exclude<AngleImageModel, 'same'>,
         prompt: string,
         refs: Array<{ base64: string; mimeType: string }>,
         modelAspectRatio: ModelAspectRatio,
     ): Promise<MediaItem> => {
-        const model = resolveOutfitModel();
         const firstEdit = (items: MediaItem[], label: string) => {
             if (!items.length) throw new Error(`${label} returned no images.`);
             return items[0];
         };
         switch (model) {
+            case 'qwen-multiangle':
+                return firstEdit(await editImageWithQwenMultiAngle(prompt, refs[0], { numOutputs: 1 }), 'Qwen Multi-Angle');
             case 'seedream':
                 return generateImageWithSeedreamReferences(prompt, refs, modelAspectRatio, seedreamSize);
             case 'nano-banana-2-fal':
@@ -9493,6 +9707,31 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     { aspectRatio: modelAspectRatio, imageSize }
                 );
         }
+    };
+
+    const renderWithOutfitModel = (
+        prompt: string,
+        refs: Array<{ base64: string; mimeType: string }>,
+        modelAspectRatio: ModelAspectRatio,
+    ) => renderWithEditModel(resolveOutfitModel(), prompt, refs, modelAspectRatio);
+
+    /** Angles with the chosen angle model; models without a camera parameter run once per output. */
+    const editAngleImages = async (
+        prompt: string,
+        images: { base64: string; mimeType: string } | Array<{ base64: string; mimeType: string }>,
+        opts?: { numOutputs?: number }
+    ): Promise<MediaItem[]> => {
+        const refs = (Array.isArray(images) ? images : [images]).filter((item) => !!item?.base64);
+        if (refs.length === 0) throw new Error('Angle generation needs at least one reference image.');
+        const model = resolveAngleModel();
+        if (model === 'qwen-multiangle') return editImageWithQwenMultiAngle(prompt, refs[0], opts);
+        if (model === 'qwen-multiangle-fal') return editImageWithFalQwenMultiAngle(prompt, refs, opts);
+        const modelAspectRatio = resolveModelAspectRatio(referenceAspectRatio);
+        const results: MediaItem[] = [];
+        for (let index = 0; index < Math.max(1, opts?.numOutputs ?? 1); index++) {
+            results.push(await renderWithEditModel(model, prompt, refs, modelAspectRatio));
+        }
+        return results;
     };
 
     const handleGenerateOutfitGarmentPiece = async (
@@ -9760,7 +9999,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             for (const angle of selectedAngles) {
                 try {
                     const prompt = buildCharacterAnglePrompt(character, angle);
-                    const images = await editMultiAngleImages(prompt, baseImage, { numOutputs: 1 });
+                    const images = await editAngleImages(prompt, baseImage, { numOutputs: 1 });
                     if (images[0]) {
                         results.push(images[0]);
                         successfulAngles.push(angle);
@@ -9779,7 +10018,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return { finalImage, angleUrls, angleMeta };
         }
         const prompt = buildCharacterAnglePrompt(character);
-        const images = await editMultiAngleImages(prompt, baseImage);
+        const images = await editAngleImages(prompt, baseImage);
         const cropped = await applyCinemascopeCropToImages(images, referenceAspectRatio);
         const finalImage = await finalizeReferenceImage(character, cropped[0], cropped.map(img => img.url));
         const angleUrls = finalImage.multiAngleUrls || cropped.map(img => img.url);
@@ -9869,7 +10108,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         try {
             const baseImage = await getBase64FromUrl(outfit.imageUrl);
             const prompt = buildOutfitAnglePrompt(character, outfit);
-            const images = await editMultiAngleImages(prompt, baseImage);
+            const images = await editAngleImages(prompt, baseImage);
             const cropped = await applyCinemascopeCropToImages(images, referenceAspectRatio);
             updateCharacterOutfit(characterId, outfitId, {
                 imageUrl: cropped[0].url,
@@ -12618,6 +12857,21 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         onRoughCutReady(videos);
     };
 
+    const findEnvironmentTargets = (environmentName?: string) => {
+        const environments = references.filter((ref) => ref.type === 'environment' && ref.imageUrl);
+        const query = environmentName?.trim().toLowerCase();
+        const targets = query
+            ? environments.filter((ref) => (ref.name || '').toLowerCase().includes(query))
+            : environments;
+        if (targets.length === 0) {
+            const available = environments.map((ref) => ref.name).filter(Boolean).join(', ');
+            throw new Error(query
+                ? `No environment with a base image matches "${environmentName}". Available: ${available || 'none'}.`
+                : 'No environment has a base image yet. Generate the environment concepts first.');
+        }
+        return targets;
+    };
+
     useEffect(() => {
         if (!onBindStudioAutomation) return undefined;
 
@@ -12631,6 +12885,45 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             },
             generateProjectConcepts: async (payload) => {
                 return runGenerateProjectConcepts(payload);
+            },
+            generateEnvironmentAngles: async (payload) => {
+                const targets = findEnvironmentTargets(payload?.environmentName);
+                let generatedCount = 0;
+                const failures: string[] = [];
+                for (const reference of targets) {
+                    try {
+                        generatedCount += await generateAndStoreReferenceAngles(reference);
+                    } catch (error) {
+                        failures.push(`${reference.name}: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                }
+                if (generatedCount === 0) throw new Error(failures.join('; ') || 'No environment angles were generated.');
+                return {
+                    detail: `Generated ${generatedCount} angles for ${targets.length - failures.length} environment(s) with ${angleModelLabel(resolveAngleModel())}.${failures.length ? ` Failed: ${failures.join('; ')}` : ''}`,
+                    generatedCount,
+                };
+            },
+            buildEnvironment3d: async (payload) => {
+                const engine = ENVIRONMENT_3D_ENGINES.find((item) => item.id === payload?.engine)?.id || environment3dEngine;
+                const targets = findEnvironmentTargets(payload?.environmentName);
+                const details: string[] = [];
+                const failures: string[] = [];
+                for (const reference of targets) {
+                    const flag = engine === 'marble-views' ? 'isGeneratingWorld' : 'isGeneratingBlockout';
+                    setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, [flag]: true } : ref));
+                    try {
+                        details.push(await buildEnvironment3d(reference, engine));
+                    } catch (error) {
+                        failures.push(`${reference.name}: ${error instanceof Error ? error.message : String(error)}`);
+                    } finally {
+                        setReferences(prev => prev.map(ref => ref.id === reference.id ? { ...ref, [flag]: false } : ref));
+                    }
+                }
+                if (details.length === 0) throw new Error(failures.join('; ') || 'No environment was built.');
+                return {
+                    detail: [...details, failures.length ? `Failed: ${failures.join('; ')}` : ''].filter(Boolean).join(' '),
+                    builtCount: details.length,
+                };
             },
             runDirectorPass: async () => {
                 const treatment = await handleRunDirector();
@@ -12710,6 +13003,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         handleGenerateAllVideos,
         handleRunDirector,
         onBindStudioAutomation,
+        references,
+        angleImageModel,
+        environment3dEngine,
         runGenerateProjectConcepts,
         runImproveProjectScript,
         runWriteProjectScript,
@@ -16338,19 +16634,35 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                         ))}
                                                     </select>
                                                 </div>
-                                                {conceptEnvironmentSubtab === 'angles' && (
-                                                    <button
-                                                        onClick={() => handleGenerateAllReferenceAngles('environment')}
-                                                        className="text-xs font-semibold px-3 py-1.5 rounded bg-teal-700/80 text-white hover:bg-teal-600"
+                                                <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 p-1">
+                                                    <span className="px-2 text-xs font-bold text-gray-400">3D:</span>
+                                                    <select
+                                                        value={environment3dEngine}
+                                                        onChange={(e) => setEnvironment3dEngine(e.target.value as Environment3dEngine)}
+                                                        className="bg-gray-700 text-white text-xs font-bold py-1 px-2 rounded focus:outline-none"
+                                                        title="How Build 3D turns an environment into 3D"
                                                     >
-                                                        Generate All Angles
-                                                    </button>
+                                                        {ENVIRONMENT_3D_ENGINES.map((engine) => (
+                                                            <option key={engine.id} value={engine.id}>{engine.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                {conceptEnvironmentSubtab === 'angles' && (
+                                                    <>
+                                                        <AngleModelSelect value={angleImageModel} onChange={setAngleImageModel} sameLabel={angleSameLabel} />
+                                                        <button
+                                                            onClick={() => handleGenerateAllReferenceAngles('environment')}
+                                                            className="text-xs font-semibold px-3 py-1.5 rounded bg-teal-700/80 text-white hover:bg-teal-600"
+                                                        >
+                                                            Generate All Angles
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         </div>
                                         {conceptEnvironmentSubtab === 'angles' && (
                                             <div className="text-xs text-gray-400 bg-gray-900/60 border border-gray-800 rounded-lg p-3 mb-4">
-                                                Generates environment-type-aware coverage from the base reference (AI-planned per location, e.g. bar/apartment/street). Manual zones are used as required detail shots.
+                                                Generates environment-type-aware coverage from the base reference (AI-planned per location, e.g. bar/apartment/street) with the chosen angle model. Manual zones are used as required detail shots. Left, right and reverse angles feed Build 3D.
                                             </div>
                                         )}
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptEnvironmentSubtab === 'time_of_day' ? 'hidden' : ''}`}>
@@ -16406,6 +16718,52 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                         {ref.isGeneratingWorld ? 'World...' : ref.worldId ? 'Regenerate' : 'Generate World'}
                                                                     </button>
                                                                 </div>
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <div className="text-[10px] text-gray-500">
+                                                                        {(() => {
+                                                                            const sides = Object.keys(pickEnvironmentViews(ref));
+                                                                            return `Views: ${sides.length ? sides.join(', ') : 'none'}`;
+                                                                        })()}
+                                                                    </div>
+                                                                    <div className="flex gap-1">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleBuildEnvironment3d(ref.id)}
+                                                                            disabled={!ref.imageUrl || ref.isGeneratingBlockout || ref.isGeneratingWorld}
+                                                                            className="text-[10px] px-2 py-1 rounded bg-teal-700 text-white hover:bg-teal-600 disabled:bg-gray-700 disabled:text-gray-400"
+                                                                            title={ENVIRONMENT_3D_ENGINES.find((engine) => engine.id === environment3dEngine)?.label}
+                                                                        >
+                                                                            {ref.isGeneratingBlockout ? 'Building...' : 'Build 3D'}
+                                                                        </button>
+                                                                        {onAskAssistant && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => askAgentToBuildEnvironment(ref)}
+                                                                                disabled={!ref.imageUrl}
+                                                                                className="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+                                                                                title="Hand angles and 3D build to Claude Code or Codex in the AI assistant"
+                                                                            >
+                                                                                Agent
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                {ref.blockoutMeshUrl && (
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <div className="text-[10px] text-gray-500">Blockout · {ref.blockoutEngine}</div>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (!ref.blockoutMeshUrl || !onSendWorldMeshToSetDesign) return;
+                                                                                onSendWorldMeshToSetDesign(buildSetDesignAssetForEnvironmentBlockout(ref, ref.blockoutMeshUrl, ref.blockoutEngine || 'Blockout'));
+                                                                            }}
+                                                                            disabled={!onSendWorldMeshToSetDesign}
+                                                                            className="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+                                                                        >
+                                                                            Send Blockout to Set
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                                 {(ref.worldViewUrl || ref.worldMeshUrl) && (
                                                                     <div className="grid grid-cols-2 gap-2">
                                                                         <button
@@ -16562,12 +16920,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 <h3 className="text-xl font-bold text-white">Props, Weapons & Insignia</h3>
                                             </div>
                                             {conceptPropSubtab === 'angles' && (
-                                                <button
-                                                    onClick={() => handleGenerateAllReferenceAngles('prop')}
-                                                    className="text-xs font-semibold px-3 py-1.5 rounded bg-amber-700/80 text-white hover:bg-amber-600"
-                                                >
-                                                    Generate All Angles
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    <AngleModelSelect value={angleImageModel} onChange={setAngleImageModel} sameLabel={angleSameLabel} />
+                                                    <button
+                                                        onClick={() => handleGenerateAllReferenceAngles('prop')}
+                                                        className="text-xs font-semibold px-3 py-1.5 rounded bg-amber-700/80 text-white hover:bg-amber-600"
+                                                    >
+                                                        Generate All Angles
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 ${conceptPropSubtab === 'state' ? 'hidden' : ''}`}>
@@ -19741,6 +20102,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     outfitModel={outfitImageModel}
                     onOutfitModelChange={setOutfitImageModel}
                     outfitSameLabel={sameAsImageModelLabel}
+                    angleModel={angleImageModel}
+                    onAngleModelChange={setAngleImageModel}
+                    angleSameLabel={angleSameLabel}
                 />
             )}
             {fullResView && (

@@ -513,6 +513,46 @@ export async function generateWorldFromMultiImage(
     return completed.response!;
 }
 
+const uploadImageAsMediaAsset = async (
+    image: { base64: string; mimeType: string },
+    fileName: string,
+): Promise<ImageSource> => {
+    const raw = image.base64.includes(',') ? image.base64.split(',').pop() || '' : image.base64;
+    const bytes = Uint8Array.from(atob(raw), (char) => char.charCodeAt(0));
+    const extension = (image.mimeType.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const prepared = await prepareUpload(`${fileName}.${extension}`, 'image', extension);
+    await uploadFile(prepared.upload_info.upload_url, new Blob([bytes], { type: image.mimeType }), prepared.upload_info.required_headers);
+    return { source: 'media_asset', media_asset: { media_asset_id: prepared.media_asset.id } };
+};
+
+/**
+ * Generate a 3D world from local images of one place (front, right, back, left).
+ * Images are uploaded as media assets, so data URLs and local files work.
+ */
+export async function generateWorldFromImageViews(
+    name: string,
+    views: Array<{ azimuth: 0 | 90 | 180 | 270; image: { base64: string; mimeType: string } }>,
+    textPrompt?: string,
+    model: MarbleModel = DEFAULT_WORLD_MODEL_ID,
+    onProgress?: (status: string) => void
+): Promise<GeneratedWorld> {
+    if (views.length === 0) throw new Error('At least one image is required to build a world.');
+    onProgress?.(`Uploading ${views.length} view${views.length === 1 ? '' : 's'}...`);
+    const items: MultiImageItem[] = [];
+    for (const view of views) {
+        items.push({ azimuth: view.azimuth, content: await uploadImageAsMediaAsset(view.image, `view-${view.azimuth}`) });
+    }
+    const worldPrompt: WorldPrompt = items.length === 1
+        ? { type: 'image', image_prompt: items[0].content, text_prompt: textPrompt, is_pano: false }
+        : { type: 'multi-image', multi_image_prompt: items, text_prompt: textPrompt };
+
+    const operation = await generateWorld(name, worldPrompt, model);
+    onProgress?.('Generating 3D world...');
+    const completed = await waitForOperation(operation.operation_id, 3000, 300000);
+    onProgress?.('World generation complete!');
+    return completed.response!;
+}
+
 /**
  * Generate a 3D world from a video URL
  */
