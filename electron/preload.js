@@ -59,6 +59,29 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener('localAgents:event', handler);
     },
   },
+  localAi: {
+    request: (payload) => ipcRenderer.invoke('localAi:request', payload),
+    stream: (payload) => ipcRenderer.invoke('localAi:stream', payload),
+    cancelStream: (payload) => ipcRenderer.invoke('localAi:cancelStream', payload),
+    onStreamEvent: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('localAi:streamEvent', handler);
+      return () => ipcRenderer.removeListener('localAi:streamEvent', handler);
+    },
+  },
+  localModels: {
+    download: (payload) => ipcRenderer.invoke('localModels:download', payload),
+    cancel: (payload) => ipcRenderer.invoke('localModels:cancel', payload),
+    check: (payload) => ipcRenderer.invoke('localModels:check', payload),
+    remove: (payload) => ipcRenderer.invoke('localModels:delete', payload),
+    pickFolder: (payload) => ipcRenderer.invoke('localModels:pickFolder', payload),
+    openFolder: (payload) => ipcRenderer.invoke('localModels:openFolder', payload),
+    onProgress: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('localModels:progress', handler);
+      return () => ipcRenderer.removeListener('localModels:progress', handler);
+    },
+  },
   studioTools: {
     register: (tools) => ipcRenderer.invoke('studioTools:register', tools),
     onCall: (callback) => {

@@ -1,5 +1,6 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, FunctionDeclaration, GenerateImagesResponse } from "@google/genai";
 import { withModelFallback } from './geminiModelFallback';
+import { isLocalLlmReady, withLocalLlm } from './localLlmService';
 import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
 import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
@@ -127,10 +128,11 @@ const getAiClient = () => {
 
     const apiKey = envKey || storageKey;
 
-    if (!apiKey) {
-        throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings.");
+    if (!apiKey && !isLocalLlmReady()) {
+        throw new Error("API Key is missing. Please enter your Google Gemini API Key in the settings, or choose a local model in Local AI.");
     }
-    return withModelFallback(new GoogleGenAI({ apiKey }));
+    // Without a key, text requests go to the local model and the rest explain what is missing.
+    return withLocalLlm(withModelFallback(new GoogleGenAI({ apiKey: apiKey || 'local-llm' })), Boolean(apiKey));
 };
 
 const shouldUseReplicateForGoogleModels = () => getGoogleModelProvider() === 'replicate';
