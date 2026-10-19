@@ -1884,6 +1884,10 @@ export interface DirectorShot {
   prompt: string;
   visualTriggers: string[];
   characters: string[];
+  /** Concept location name when the shot is in one. */
+  environment?: string;
+  props?: string[];
+  cameraMovement?: string;
 }
 
 export interface DirectorTreatment {
@@ -1894,6 +1898,10 @@ export interface DirectorTreatment {
     keySymbols: string[];
   };
   shots: DirectorShot[];
+  /** Which part of the script the run covered: the whole script, or selected scenes. */
+  coverage?: { scope: 'all' | 'scenes'; sceneNumbers: number[] };
+  /** Scene batches that failed; their scenes are left out of the treatment. */
+  warnings?: string[];
 }
 
 export interface DirectorSceneSelectionScope {

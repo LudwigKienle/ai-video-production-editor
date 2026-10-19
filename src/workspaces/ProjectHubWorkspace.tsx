@@ -92,6 +92,7 @@ import lensVintage58 from '../assets/lenses/vintage-58.png';
 import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingService';
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
+import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes as splitScriptIntoSceneBlocks } from '../utils/directorScenes';
 import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews } from '../utils/environmentWorldModel';
 import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
@@ -558,60 +559,6 @@ const normalizeCustomPersonas = (value: any): DirectorPersona[] => {
     return result;
 };
 
-const DIRECTOR_SCENE_HEADER_REGEX = /^\s*(?:\[SCENE\]\s*)?(?:SCENE\s*[:\-]\s*)?(?:\d{1,4}[A-Z]?(?:[.)-])?\s+)?(?:INT\.?|EXT\.?|INT\/EXT\.?|EXT\/INT\.?|I\/E\.?|E\/I\.?)/i;
-
-// Headings that are not sluglines but still start a scene: "Scene 3", "Szene 3:", "## Scene 3 — Harbour", "Chapter 2", "SC. 4". Short lines only.
-const ALT_SCENE_HEADER_REGEX = /^\s*(?:#{1,4}\s*)?\[?(?:scene|szene|chapter|kapitel|sequence|sequenz|sc\.?)\s*\d{1,4}[A-Z]?\]?\b/i;
-const isSceneHeading = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.length > 90) return false;
-    return DIRECTOR_SCENE_HEADER_REGEX.test(trimmed) || ALT_SCENE_HEADER_REGEX.test(trimmed);
-};
-
-const splitScriptIntoSceneBlocks = (scriptText: string): ScriptSceneBlock[] => {
-    if (!scriptText || !scriptText.trim()) return [];
-    const lines = scriptText.replace(/\r/g, '\n').split('\n');
-    const blocks: ScriptSceneBlock[] = [];
-    let currentLines: string[] = [];
-    let currentSlugline = '';
-    let sceneIndex = 0;
-
-    const flush = () => {
-        if (currentLines.length === 0) return;
-        const text = currentLines.join('\n').trim();
-        if (!text) {
-            currentLines = [];
-            currentSlugline = '';
-            return;
-        }
-        sceneIndex += 1;
-        blocks.push({
-            sceneNumber: sceneIndex,
-            slugline: currentSlugline || `SCENE ${sceneIndex}`,
-            text,
-        });
-        currentLines = [];
-        currentSlugline = '';
-    };
-
-    lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (isSceneHeading(trimmed)) {
-            flush();
-            currentSlugline = trimmed.replace(/\s+/g, ' ').toUpperCase();
-            currentLines = [line];
-            return;
-        }
-        if (currentLines.length > 0) {
-            currentLines.push(line);
-        }
-    });
-    flush();
-
-    if (blocks.length > 0) return blocks;
-    return [{ sceneNumber: 1, slugline: 'SCENE 1', text: scriptText.trim() }];
-};
-
 const parseSceneListInput = (input: string, maxSceneNumber: number) => {
     const tokens = input
         .split(/[\s,;]+/)
@@ -918,20 +865,6 @@ const PHASE_DESCRIPTIONS: Record<ProductionPhase, string> = {
     team: 'Sync, chat and meetings',
 };
 
-/**
- * Chapter-by-chapter work: a new shot list for some scenes replaces only those
- * scenes. Everything else keeps its numbers, frames and videos.
- */
-const mergeShotsIntoScenes = (existing: ShotPrompt[], incoming: ShotPrompt[], sceneNumbers: number[]): ShotPrompt[] => {
-    if (existing.length === 0 || sceneNumbers.length === 0) return incoming;
-    const replaced = new Set(sceneNumbers);
-    const kept = existing.filter((shot) => !(Number.isFinite(shot.sceneNumber) && replaced.has(Number(shot.sceneNumber))));
-    let nextNumber = kept.reduce((max, shot) => Math.max(max, shot.shot), 0);
-    const renumbered = incoming.map((shot) => ({ ...shot, shot: ++nextNumber }));
-    const sceneKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : Number.POSITIVE_INFINITY);
-    const orderKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneShotNumber) ? Number(shot.sceneShotNumber) : shot.shot);
-    return [...kept, ...renumbered].sort((a, b) => sceneKey(a) - sceneKey(b) || orderKey(a) - orderKey(b) || a.shot - b.shot);
-};
 
 const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
     'auto',
@@ -12655,18 +12588,23 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         setIsDirecting(true);
         try {
             const style = stylePrompt.trim() || (visualStyle || storyBible.selectedStyle || '').trim();
-            const moodboardRefs = (storyBible.moodboard || []).map((m) => m.label || '').filter(Boolean);
-            const conceptRefs = references.map((ref) => ref.name || '').filter(Boolean);
-            const bibleCharacters = (storyBible.characters || []).map((c) => c.name || '').filter(Boolean);
-            const referenceKeywords = Array.from(new Set([...moodboardRefs, ...conceptRefs, ...bibleCharacters]))
-                .map((entry) => entry.trim())
-                .filter(Boolean)
-                .slice(0, 18);
+            const moodboardRefs = Array.from(new Set((storyBible.moodboard || []).map((m) => (m.label || '').trim()).filter(Boolean))).slice(0, 12);
+            const namedRefs = (types: ReferenceItem['type'][]) => references
+                .filter((ref) => types.includes(ref.type) && ref.name?.trim())
+                .map((ref) => ({ name: ref.name.trim(), description: (ref.description || ref.prompt || '').trim() || undefined }));
+            const conceptCharacters = namedRefs(['character']);
+            const knownCharacters = new Set(conceptCharacters.map((item) => item.name.toLowerCase()));
+            const bibleCharacters = (storyBible.characters || [])
+                .filter((c) => c.name?.trim() && !knownCharacters.has(c.name.trim().toLowerCase()))
+                .map((c) => ({ name: c.name.trim(), description: c.description?.trim() || undefined }));
 
             const context = {
                 style: style || undefined,
-                period: undefined, // StoryBible doesn't have a 'setting' field
-                references: referenceKeywords.length ? referenceKeywords : undefined
+                characters: [...conceptCharacters, ...bibleCharacters],
+                environments: namedRefs(['environment']),
+                props: namedRefs(['prop', 'product']),
+                references: moodboardRefs.length ? moodboardRefs : undefined,
+                aspectRatio: referenceAspectRatio,
             };
             const treatment = await generateViMaxStoryboardSceneByScene(
                 scriptForDirector,
@@ -12703,6 +12641,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     })(),
                 }
                 : treatment;
+            const coveredScenes = Array.from(new Set((remappedTreatment.shots || [])
+                .map((shot) => Number(shot.sceneNumber))
+                .filter((value) => Number.isFinite(value))));
+            remappedTreatment.coverage = { scope: scopedForFeature ? 'scenes' : 'all', sceneNumbers: coveredScenes };
+            if (remappedTreatment.warnings?.length) {
+                setError(remappedTreatment.warnings.join(' '));
+            }
             setDirectorTreatment(remappedTreatment);
             persistDirectorStoryboardSnapshot({
                 treatment: remappedTreatment,
@@ -12749,7 +12694,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             prompt: shot.prompt,
             description: shot.description,
             characters: shot.characters || [],
-            environment: null,
+            environment: shot.environment?.trim() || null,
+            motionPrompt: shot.cameraMovement && !/^static$/i.test(shot.cameraMovement.trim()) ? `Camera: ${shot.cameraMovement.trim()}` : undefined,
             shotTypePresetId: resolveShotTypePresetId(shot.shotTypePresetId) || shot.shotTypePresetId,
             lightingPresetId: resolveLightingPresetId(shot.lightingPresetId) || shot.lightingPresetId,
             cameraAngle: shot.cameraAngle,
@@ -12770,18 +12716,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             };
         });
 
-        const treatmentScenes = Array.from(new Set(alignedShots.map((shot) => shot.sceneNumber).filter((value): value is number => Number.isFinite(value))));
-        const scopedScenes = directorSceneScope.isScoped ? directorSceneScope.selectedSceneNumbers : treatmentScenes;
-        const hasGeneratedMedia = shotPrompts.some((shot) => shot.imageUrl || shot.videoUrl);
-        if (!directorSceneScope.isScoped && hasGeneratedMedia && shotPrompts.some((shot) => !Number.isFinite(shot.sceneNumber) || !scopedScenes.includes(Number(shot.sceneNumber)))) {
-            if (!window.confirm('This treatment covers the whole script. Shots outside its scenes, including their frames and videos, will be dropped. Continue?')) {
-                return { shotCount: 0 };
-            }
+        // Replace exactly the scenes this treatment covers (not the current selection); a whole-script run also replaces unnumbered shots.
+        const treatmentScenes = Array.from(new Set(alignedShots.map((shot) => shot.sceneNumber).filter((value): value is number => Number.isFinite(value)))).sort((a, b) => a - b);
+        const replaceOptions = { replaceUnnumbered: treatmentToApply.coverage?.scope === 'all' };
+        const replacedShots = treatmentScenes.length > 0 ? shotsReplacedByMerge(shotPrompts, treatmentScenes, replaceOptions) : shotPrompts;
+        const replacedWithMedia = replacedShots.filter((shot) => shot.imageUrl || shot.videoUrl).length;
+        if (replacedWithMedia > 0) {
+            const sceneLabel = treatmentScenes.length > 0
+                ? `scene${treatmentScenes.length === 1 ? '' : 's'} ${treatmentScenes.join(', ')}`
+                : 'the storyboard';
+            const confirmed = window.confirm(
+                `Apply the director treatment to ${sceneLabel}? This replaces ${replacedShots.length} existing shot${replacedShots.length === 1 ? '' : 's'}, ${replacedWithMedia} of them with frames or videos. Other scenes stay as they are.`,
+            );
+            if (!confirmed) return { shotCount: 0 };
         }
-        const merged = mergeShotsIntoScenes(shotPrompts, alignedShots, scopedScenes);
+        const merged = mergeShotsIntoScenes(shotPrompts, alignedShots, treatmentScenes, replaceOptions);
         setShotPrompts(merged);
-        if (directorSceneScope.isScoped && directorSceneScope.selectedSceneNumbers.length > 0) {
-            selectScene(directorSceneScope.selectedSceneNumbers[0]);
+        if (treatmentToApply.coverage?.scope === 'scenes' && treatmentScenes.length > 0) {
+            selectScene(treatmentScenes[0]);
         }
         setActivePhase('storyboard');
         return { shotCount: alignedShots.length };

@@ -1,9 +1,11 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, FunctionDeclaration, GenerateImagesResponse } from "@google/genai";
 import { withModelFallback } from './geminiModelFallback';
 import { isLocalLlmReady, withLocalLlm } from './localLlmService';
-import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
+import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorShot, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
 import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
+import { batchDirectorChunks, orderDirectorShots, splitScenesForDirector, splitScriptIntoScenes, targetShotCount } from '../utils/directorScenes';
+import type { DirectorSceneChunk } from '../utils/directorScenes';
 import { trackTask } from './taskCenter';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
@@ -4125,21 +4127,11 @@ export const generateTextWithGemini3Pro = async (prompt: string): Promise<string
     return response.text.trim();
 };
 
-type DirectorSceneBlock = {
-    sceneNumber: number;
-    slugline: string;
-    text: string;
-};
-
 const DIRECTOR_FAST_MODEL_CANDIDATES = [
     GEMINI_TEXT_MODEL_FLASH,
     'gemini-2.5-flash',
-    'gemini-2.5-flash-preview',
-    'gemini-1.5-flash',
-    'gemini-3-pro',
     GEMINI_TEXT_MODEL_PRO,
     'gemini-2.5-pro',
-    'gemini-1.5-pro',
 ];
 
 const DIRECTOR_SCENE_BY_SCENE_RESPONSE_SCHEMA = {
@@ -4172,6 +4164,9 @@ const DIRECTOR_SCENE_BY_SCENE_RESPONSE_SCHEMA = {
                     prompt: { type: Type.STRING },
                     visualTriggers: { type: Type.ARRAY, items: { type: Type.STRING } },
                     characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    environment: { type: Type.STRING },
+                    props: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    cameraMovement: { type: Type.STRING },
                 },
                 required: ['sceneNumber', 'description', 'rationale', 'shotTypePresetId', 'lightingPresetId', 'prompt'],
             },
@@ -4239,7 +4234,7 @@ const generateDirectorChunkJson = async <T>(
         const text = await generateTextWithGemini3ProReplicate(prompt, {
             systemPrompt: 'Return only valid JSON. No markdown.',
             temperature: 0.35,
-            maxTokens: 2800,
+            maxTokens: 8000,
             priority: 'speed',
         });
         return parseJsonFromText<T>(text, label);
@@ -4273,184 +4268,77 @@ const generateDirectorChunkJson = async <T>(
     throw lastError || new Error('No compatible director model available.');
 };
 
-const DIRECTOR_SCENE_HEADER_REGEX = /^\s*(?:\[SCENE\]\s*)?(?:\d{1,4}[A-Z]?(?:[.)-])?\s+)?(?:INT\.?|EXT\.?|INT\/EXT\.?|EXT\/INT\.?|EST\.?|I\/E\.?|E\/I\.?)/i;
+type DirectorNamedItem = { name: string; description?: string };
 
-// Same heading rules as the Project Hub: "Scene 3", "Szene 3:", "## Chapter 2", "SC. 4" start a scene too.
-const DIRECTOR_ALT_SCENE_HEADER_REGEX = /^\s*(?:#{1,4}\s*)?\[?(?:scene|szene|chapter|kapitel|sequence|sequenz|sc\.?)\s*\d{1,4}[A-Z]?\]?\b/i;
-const isDirectorSceneHeading = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.length > 90) return false;
-    return DIRECTOR_SCENE_HEADER_REGEX.test(trimmed) || DIRECTOR_ALT_SCENE_HEADER_REGEX.test(trimmed);
+export type DirectorContext = {
+    style?: string;
+    period?: string;
+    /** Free keywords (moodboard labels and names without a type). */
+    references?: string[];
+    characters?: DirectorNamedItem[];
+    environments?: DirectorNamedItem[];
+    props?: DirectorNamedItem[];
+    aspectRatio?: string;
 };
 
-const splitScriptIntoDirectorSceneBlocks = (scriptText: string, maxChunkChars = 2600): DirectorSceneBlock[] => {
-    const text = (scriptText || '').trim();
-    if (!text) return [];
-
-    const lines = text.replace(/\r/g, '\n').split('\n');
-    const rawBlocks: Array<{ slugline: string; text: string }> = [];
-    let currentSlugline = '';
-    let currentLines: string[] = [];
-    let detectedHeadings = false;
-
-    const pushCurrent = () => {
-        const blockText = currentLines.join('\n').trim();
-        if (!blockText) return;
-        rawBlocks.push({
-            slugline: (currentSlugline || `SCENE ${rawBlocks.length + 1}`).replace(/\s+/g, ' ').trim(),
-            text: blockText,
-        });
-    };
-
-    lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (isDirectorSceneHeading(trimmed)) {
-            detectedHeadings = true;
-            pushCurrent();
-            currentSlugline = trimmed.replace(/\s+/g, ' ').trim();
-            currentLines = [line];
-            return;
-        }
-        currentLines.push(line);
-    });
-    pushCurrent();
-
-    const sourceBlocks = detectedHeadings
-        ? rawBlocks
-        : text
-            .split(/\n{2,}/)
-            .map((chunk, index) => ({
-                slugline: `SCENE ${index + 1}`,
-                text: chunk.trim(),
-            }))
-            .filter((chunk) => chunk.text.length > 0);
-
-    const expanded: DirectorSceneBlock[] = [];
-    sourceBlocks.forEach((block, index) => {
-        const baseSceneNumber = index + 1;
-        if (block.text.length <= maxChunkChars) {
-            expanded.push({
-                sceneNumber: baseSceneNumber,
-                slugline: block.slugline || `SCENE ${baseSceneNumber}`,
-                text: block.text,
-            });
-            return;
-        }
-
-        const paragraphs = block.text.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
-        let buffer = '';
-        let partIndex = 1;
-        const flush = () => {
-            if (!buffer.trim()) return;
-            expanded.push({
-                sceneNumber: baseSceneNumber,
-                slugline: `${block.slugline || `SCENE ${baseSceneNumber}`} (PART ${partIndex})`,
-                text: buffer.trim(),
-            });
-            partIndex += 1;
-            buffer = '';
-        };
-
-        paragraphs.forEach((paragraph) => {
-            if (!buffer) {
-                buffer = paragraph;
-                return;
-            }
-            if ((buffer.length + paragraph.length + 2) <= maxChunkChars) {
-                buffer = `${buffer}\n\n${paragraph}`;
-                return;
-            }
-            flush();
-            if (paragraph.length > maxChunkChars) {
-                for (let i = 0; i < paragraph.length; i += maxChunkChars) {
-                    expanded.push({
-                        sceneNumber: baseSceneNumber,
-                        slugline: `${block.slugline || `SCENE ${baseSceneNumber}`} (PART ${partIndex})`,
-                        text: paragraph.slice(i, i + maxChunkChars),
-                    });
-                    partIndex += 1;
-                }
-            } else {
-                buffer = paragraph;
-            }
-        });
-        flush();
-    });
-
-    return expanded.length > 0
-        ? expanded
-        : [{ sceneNumber: 1, slugline: 'SCENE 1', text: text.slice(0, maxChunkChars) }];
+const directorNamedList = (title: string, items?: DirectorNamedItem[]) => {
+    const list = (items || []).filter((item) => item.name?.trim()).slice(0, 24);
+    if (list.length === 0) return '';
+    return `**${title}:**\n${list.map((item) => `- ${item.name.trim()}${item.description ? ` — ${item.description.replace(/\s+/g, ' ').trim().slice(0, 160)}` : ''}`).join('\n')}`;
 };
 
-const buildDirectorSceneBatches = (
-    scenes: DirectorSceneBlock[],
-    maxBatchChars = 8600,
-    maxScenesPerBatch = 5,
-): DirectorSceneBlock[][] => {
-    if (scenes.length === 0) return [];
-    const batches: DirectorSceneBlock[][] = [];
-    let current: DirectorSceneBlock[] = [];
-    let currentChars = 0;
+const buildDirectorContextBlock = (context?: DirectorContext) => [
+    context?.style ? `**Visual style:** ${context.style}` : '',
+    context?.period ? `**Period/setting:** ${context.period}` : '',
+    context?.aspectRatio ? `**Frame:** ${context.aspectRatio}, compose every shot for this aspect ratio.` : '',
+    directorNamedList('Cast (use these exact names)', context?.characters),
+    directorNamedList('Locations (use these exact names)', context?.environments),
+    directorNamedList('Props (use these exact names)', context?.props),
+    context?.references?.length ? `**Other reference keywords:** ${context.references.join(', ')}` : '',
+].filter(Boolean).join('\n\n');
 
-    const flush = () => {
-        if (current.length > 0) batches.push(current);
-        current = [];
-        currentChars = 0;
-    };
+const describeDirectorChunk = (chunk: DirectorSceneChunk) =>
+    `${chunk.slugline}${chunk.partCount > 1 ? ` (part ${chunk.part} of ${chunk.partCount})` : ''}`;
 
-    scenes.forEach((scene) => {
-        const nextChars = currentChars + scene.text.length;
-        const shouldFlush = current.length > 0 && (nextChars > maxBatchChars || current.length >= maxScenesPerBatch);
-        if (shouldFlush) flush();
-        current.push(scene);
-        currentChars += scene.text.length;
-    });
-    flush();
+const summarizeDirectorTail = (shots: DirectorShot[]) => shots.slice(-3).map((shot) => {
+    const who = shot.characters?.length ? ` [${shot.characters.join(', ')}]` : '';
+    const where = shot.environment ? ` @ ${shot.environment}` : '';
+    return `- Scene ${shot.sceneNumber}: ${shot.description}${who}${where}`;
+}).join('\n');
 
-    return batches.length > 0 ? batches : [scenes];
-};
+const normalizeDirectorShotKey = (shot: DirectorShot) => `${shot.sceneNumber}|${(shot.description || '').toLowerCase().replace(/\W+/g, ' ').trim()}|${(shot.prompt || '').toLowerCase().replace(/\W+/g, ' ').trim().slice(0, 240)}`;
 
 export const generateViMaxStoryboardSceneByScene = async (
     scriptText: string,
-    context?: { style?: string; period?: string; references?: string[] },
+    context?: DirectorContext,
     onProgress?: (msg: string) => void
 ): Promise<DirectorTreatment> => {
     onProgress?.('Initializing Director Agent (Scene-by-Scene)...');
-    const sceneBlocks = splitScriptIntoDirectorSceneBlocks(scriptText, 2600);
-    if (sceneBlocks.length <= 1) {
+    const scenes = splitScriptIntoScenes(scriptText);
+    if (scenes.length === 0) {
         return generateViMaxStoryboard(scriptText, context, onProgress);
     }
 
     const ai = getAiClient();
-    const styleHint = context?.style ? `**Visual Style Directive:** ${context.style}` : '';
-    const periodHint = context?.period ? `**Period/Setting:** ${context.period}` : '';
-    const referencesHint = context?.references?.length
-        ? `**Reference Keywords:** ${context.references.join(', ')}`
-        : '';
-    const contextBlock = [styleHint, periodHint, referencesHint].filter(Boolean).join('\n');
-    const batches = buildDirectorSceneBatches(sceneBlocks, 8600, 5);
-    const sceneOrder = new Map<number, number>();
-    sceneBlocks.forEach((scene, index) => {
-        if (!sceneOrder.has(scene.sceneNumber)) sceneOrder.set(scene.sceneNumber, index);
-    });
+    const contextBlock = buildDirectorContextBlock(context);
+    const batches = batchDirectorChunks(splitScenesForDirector(scenes, 2600), 8600, 5);
+    const sluglineFor = new Map(scenes.map((scene) => [scene.sceneNumber, scene.slugline]));
 
-    const mergedSymbols = new Set<string>();
-    const collectedShots: DirectorTreatment['shots'] = [];
-    let analysis: DirectorTreatment['analysis'] | null = null;
-
-    const buildPrompt = (batch: DirectorSceneBlock[], batchIndex: number, totalBatches: number) => `
-You are an autonomous AI Director and Cinematographer.
-Generate a scene-specific treatment and shot list for the provided scene batch.
+    const buildPrompt = (batch: DirectorSceneChunk[], batchIndex: number, previousTail: string) => `
+You are the director and cinematographer of this film. Break the scenes below into a shot list that a storyboard artist can draw and an editor can cut.
 
 ${contextBlock}
 
-**BATCH ${batchIndex + 1} of ${totalBatches}**
+**BATCH ${batchIndex + 1} of ${batches.length}**
+${previousTail ? `Continuity: the previous batch ended with these shots. Keep characters, wardrobe, props, screen direction and time of day consistent with them.\n${previousTail}\n` : ''}
 Rules:
-1. Generate shots for each listed scene number.
-2. Every output shot MUST include the correct "sceneNumber" from the input list.
-3. sceneShotNumber starts at 1 for each scene and increments without gaps.
-4. Include enough coverage for editorial flexibility. Prefer more shots over fewer shots.
-5. Keep strict continuity inside each scene.
+1. Cover every scene listed below. "sceneNumber" MUST be the number from its "### SCENE n" header, never a scene number written inside the script text.
+2. Aim for about the target shot count of each scene (more for dialogue and action, fewer for simple transitions). List shots in screen order. For a scene split into parts, cover only what happens in that part.
+3. Coverage: open a new location or a time jump with an establishing or wide shot. Cover dialogue with a master or two-shot plus over-the-shoulder shots from both sides and close-ups on the key lines. Add inserts (extreme_closeup or b_roll) for important props, hands and reveals. Vary shot sizes. Respect the 180° line inside a scene.
+4. "characters", "environment" and "props": use the exact names from the cast, locations and props lists for what is visible in the shot. Leave out anyone who is not in frame.
+5. "prompt": one self-contained English image prompt for a single still frame: subject and action, framing and lens feel, composition, lighting, location details and mood. No camera moves, dialogue or shot numbers in it.
+6. "description" and "rationale" are written in the language of the script. "rationale" says what the shot does for the story or the edit.
+7. "cameraMovement": static, pan, tilt, dolly in, dolly out, tracking, handheld, crane or drone.
 
 Authorized presets:
 - ShotType: closeup, extreme_closeup, portrait, medium, full_body, wide, extreme_wide, low_angle, overhead, ots, b_roll
@@ -4461,119 +4349,106 @@ Return JSON only:
   "analysis": { "mood": "...", "visualTheme": "...", "pacing": "...", "keySymbols": ["..."] },
   "shots": [
     {
-      "sceneNumber": 12,
-      "sceneSlugline": "INT. HOUSE - NIGHT",
+      "sceneNumber": ${batch[0]?.sceneNumber ?? 1},
       "sceneShotNumber": 1,
       "shotNumber": 1,
       "description": "...",
       "rationale": "...",
-      "shotTypePresetId": "medium",
+      "shotTypePresetId": "wide",
       "lightingPresetId": "cinematic",
-      "cameraAngle": "...",
+      "cameraAngle": "eye-level",
+      "cameraMovement": "static",
       "prompt": "...",
       "visualTriggers": ["..."],
-      "characters": ["..."]
+      "characters": ["..."],
+      "environment": "...",
+      "props": ["..."]
     }
   ]
 }
 
-Scene list:
-${batch.map((scene) => `- Scene ${scene.sceneNumber}: ${scene.slugline}`).join('\n')}
+Scenes in this batch:
+${batch.map((chunk) => `- Scene ${chunk.sceneNumber}: ${describeDirectorChunk(chunk)}, about ${targetShotCount(chunk.text)} shots`).join('\n')}
 
-Script batch:
-${batch.map((scene) => `\n### SCENE ${scene.sceneNumber} | ${scene.slugline}\n${scene.text}`).join('\n')}
+Script:
+${batch.map((chunk) => `\n### SCENE ${chunk.sceneNumber} | ${describeDirectorChunk(chunk)}\n${chunk.text}`).join('\n')}
 `;
+
+    const mergedSymbols = new Set<string>();
+    const collectedShots: DirectorShot[] = [];
+    const seenShots = new Set<string>();
+    const coveredScenes = new Set<number>();
+    const warnings: string[] = [];
+    let analysis: DirectorTreatment['analysis'] | null = null;
+    let lastError: unknown = null;
+    let previousTail = '';
 
     for (let i = 0; i < batches.length; i += 1) {
         const batch = batches[i];
-        const progressLabel = `${i + 1}/${batches.length}`;
-        const sceneRange = `${batch[0]?.sceneNumber}-${batch[batch.length - 1]?.sceneNumber}`;
-        onProgress?.(`Director Agent analyzing scenes ${sceneRange} (${progressLabel})...`);
+        const sceneNumbers = Array.from(new Set(batch.map((chunk) => chunk.sceneNumber)));
+        const sceneRange = sceneNumbers.length > 1 ? `${sceneNumbers[0]}-${sceneNumbers[sceneNumbers.length - 1]}` : `${sceneNumbers[0]}`;
+        onProgress?.(`Director Agent analyzing scene${sceneNumbers.length > 1 ? 's' : ''} ${sceneRange} (${i + 1}/${batches.length})...`);
 
-        const prompt = buildPrompt(batch, i, batches.length);
-        const batchResult = await generateDirectorChunkJson<DirectorTreatment>(
-            ai,
-            prompt,
-            DIRECTOR_SCENE_BY_SCENE_RESPONSE_SCHEMA,
-            'ViMaxStoryboardSceneByScene',
-        );
+        try {
+            const batchResult = await generateDirectorChunkJson<DirectorTreatment>(
+                ai,
+                buildPrompt(batch, i, previousTail),
+                DIRECTOR_SCENE_BY_SCENE_RESPONSE_SCHEMA,
+                'ViMaxStoryboardSceneByScene',
+            );
+            if (!analysis) analysis = batchResult.analysis;
+            (batchResult.analysis?.keySymbols || []).forEach((symbol) => mergedSymbols.add(symbol));
 
-        if (!analysis) {
-            analysis = batchResult.analysis;
-        }
-        (batchResult.analysis?.keySymbols || []).forEach((symbol) => mergedSymbols.add(symbol));
-
-        const validSceneNumbers = new Set(batch.map((scene) => scene.sceneNumber));
-        const batchSceneByNumber = new Map(batch.map((scene) => [scene.sceneNumber, scene]));
-        (batchResult.shots || []).forEach((shot, index) => {
-            const sceneNumber = Number.isFinite(shot.sceneNumber) && validSceneNumbers.has(Number(shot.sceneNumber))
-                ? Number(shot.sceneNumber)
-                : batch[0].sceneNumber;
-            const sceneSlugline = (shot.sceneSlugline || batchSceneByNumber.get(sceneNumber)?.slugline || '').trim();
-            const sceneShotNumber = Number.isFinite(shot.sceneShotNumber) ? Number(shot.sceneShotNumber) : undefined;
-            collectedShots.push({
-                ...shot,
-                sceneNumber,
-                sceneSlugline,
-                sceneShotNumber,
-                shotNumber: Number.isFinite(shot.shotNumber) ? shot.shotNumber : (index + 1),
+            const validSceneNumbers = new Set(sceneNumbers);
+            const batchShots: DirectorShot[] = [];
+            (batchResult.shots || []).forEach((shot) => {
+                const requested = Number(shot.sceneNumber);
+                const sceneNumber = validSceneNumbers.has(requested) ? requested : sceneNumbers[0];
+                const normalized: DirectorShot = {
+                    ...shot,
+                    sceneNumber,
+                    sceneSlugline: sluglineFor.get(sceneNumber) || shot.sceneSlugline || '',
+                    cameraAngle: shot.cameraAngle || '',
+                    visualTriggers: shot.visualTriggers || [],
+                    characters: shot.characters || [],
+                    props: shot.props || [],
+                };
+                const key = normalizeDirectorShotKey(normalized);
+                if (seenShots.has(key)) return;
+                seenShots.add(key);
+                batchShots.push(normalized);
             });
-        });
+            collectedShots.push(...batchShots);
+            sceneNumbers.forEach((sceneNumber) => coveredScenes.add(sceneNumber));
+            previousTail = summarizeDirectorTail(batchShots);
+        } catch (error) {
+            if (isDirectorPermissionError(error)) throw error;
+            lastError = error;
+            const message = error instanceof Error ? error.message : String(error);
+            warnings.push(`Scene${sceneNumbers.length > 1 ? 's' : ''} ${sceneRange} failed and kept their current shots: ${message.slice(0, 200)}`);
+        }
     }
 
-    const byScene = new Map<number, DirectorTreatment['shots']>();
-    collectedShots.forEach((shot) => {
-        const sceneNumber = Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : 1;
-        const list = byScene.get(sceneNumber) || [];
-        list.push(shot);
-        byScene.set(sceneNumber, list);
-    });
+    if (collectedShots.length === 0) {
+        throw lastError || new Error('The Director produced no shots.');
+    }
 
-    const allSceneNumbers = Array.from(new Set(sceneBlocks.map((scene) => scene.sceneNumber)));
-    const orderedSceneNumbers = allSceneNumbers.sort((a, b) => {
-        const aOrder = sceneOrder.get(a) ?? Number.MAX_SAFE_INTEGER;
-        const bOrder = sceneOrder.get(b) ?? Number.MAX_SAFE_INTEGER;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return a - b;
-    });
-
-    const finalShots: DirectorTreatment['shots'] = [];
-    let globalShotNumber = 1;
-    orderedSceneNumbers.forEach((sceneNumber) => {
-        const generatedSceneShots = (byScene.get(sceneNumber) || []).sort((a, b) => {
-            const aSceneShot = Number.isFinite(a.sceneShotNumber) ? Number(a.sceneShotNumber) : Number.MAX_SAFE_INTEGER;
-            const bSceneShot = Number.isFinite(b.sceneShotNumber) ? Number(b.sceneShotNumber) : Number.MAX_SAFE_INTEGER;
-            if (aSceneShot !== bSceneShot) return aSceneShot - bSceneShot;
-            return (a.shotNumber || 0) - (b.shotNumber || 0);
-        });
-        const baseSlugline = sceneBlocks.find((scene) => scene.sceneNumber === sceneNumber)?.slugline || `SCENE ${sceneNumber}`;
-        const sceneShots = generatedSceneShots.length > 0
-            ? generatedSceneShots
-            : [{
-                shotNumber: 1,
-                sceneNumber,
-                sceneSlugline: baseSlugline,
-                sceneShotNumber: 1,
-                description: `Editorial fallback coverage for ${baseSlugline}`,
-                rationale: 'Fallback shot because this scene had no generated coverage in the model response.',
-                shotTypePresetId: 'wide',
-                lightingPresetId: 'natural',
-                cameraAngle: 'eye-level',
-                prompt: `Cinematic wide establishing shot, ${baseSlugline}, coherent continuity, production-ready storyboard frame`,
-                visualTriggers: [],
-                characters: [],
-            }];
-
-        sceneShots.forEach((shot, index) => {
-            const sceneShotNumber = index + 1;
-            finalShots.push({
-                ...shot,
-                shotNumber: globalShotNumber,
-                sceneNumber,
-                sceneShotNumber,
-                shotLabel: `${sceneNumber}.${sceneShotNumber}`,
-            });
-            globalShotNumber += 1;
+    // A covered scene the model skipped still gets one establishing frame, so it is not silently emptied.
+    coveredScenes.forEach((sceneNumber) => {
+        if (collectedShots.some((shot) => shot.sceneNumber === sceneNumber)) return;
+        const slugline = sluglineFor.get(sceneNumber) || `SCENE ${sceneNumber}`;
+        collectedShots.push({
+            shotNumber: 0,
+            sceneNumber,
+            sceneSlugline: slugline,
+            description: `Establishing coverage for ${slugline}`,
+            rationale: 'Added because the Director returned no shots for this scene.',
+            shotTypePresetId: 'wide',
+            lightingPresetId: 'natural',
+            cameraAngle: 'eye-level',
+            prompt: `Cinematic wide establishing shot, ${slugline}, production-ready storyboard frame`,
+            visualTriggers: [],
+            characters: [],
         });
     });
 
@@ -4584,7 +4459,8 @@ ${batch.map((scene) => `\n### SCENE ${scene.sceneNumber} | ${scene.slugline}\n${
             pacing: analysis?.pacing || '',
             keySymbols: Array.from(mergedSymbols),
         },
-        shots: finalShots,
+        shots: orderDirectorShots(collectedShots, scenes.map((scene) => scene.sceneNumber)),
+        warnings: warnings.length > 0 ? warnings : undefined,
     };
 };
 
