@@ -9,8 +9,9 @@ export type LocalRunOptions = {
   height?: number;
   seed?: number;
   steps?: number;
-  /** Video length in frames for video workflows. */
-  frames?: number;
+  /** Video length; turned into frames or seconds depending on the workflow. */
+  durationSeconds?: number;
+  fps?: number;
   images?: Array<{ base64: string; mimeType: string }>;
   /** Run the model's prompt enhancer (needs its optional file). */
   enhance?: boolean;
@@ -36,6 +37,17 @@ export const sizeForAspect = (aspect: string, imageSize: '1K' | '2K' | '4K' = '1
   const round = (value: number) => Math.max(256, Math.round((value * fit) / 16) * 16);
   return [round(w), round(h)];
 };
+
+const VIDEO_SIZES: Record<string, [number, number]> = {
+  '16:9': [1280, 704],
+  '9:16': [704, 1280],
+  '1:1': [960, 960],
+  '4:3': [1088, 832],
+  '3:4': [832, 1088],
+};
+
+/** 720p-class video sizes; multiples of 64 (LTX renders half size first, then upscales 2x). */
+export const videoSizeForAspect = (aspect: string): [number, number] => VIDEO_SIZES[aspect] || VIDEO_SIZES['16:9'];
 
 const deepClone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -82,7 +94,14 @@ export const fillWorkflow = (template: LocalWorkflowTemplate, options: LocalRunO
   setBinding(graph, bindings.height, options.height);
   setBinding(graph, bindings.seed, typeof options.seed === 'number' ? options.seed : Math.floor(Math.random() * 2 ** 31));
   setBinding(graph, bindings.steps, options.steps);
-  setBinding(graph, bindings.frames, options.frames);
+  if (bindings.enhanceFlag) setBinding(graph, bindings.enhanceFlag, options.enhance ? bindings.enhanceFlag.enabledValue : !bindings.enhanceFlag.enabledValue);
+  if (typeof options.durationSeconds === 'number') {
+    const fps = options.fps || 24;
+    setBinding(graph, bindings.durationSeconds, options.durationSeconds);
+    // Wan wants 4n+1 frames.
+    setBinding(graph, bindings.frames, Math.round((options.durationSeconds * fps) / 4) * 4 + 1);
+  }
+  setBinding(graph, bindings.fps, options.fps);
   // Fill the reference slots in order; slots without an image are removed with their wiring.
   const imageSlots = bindings.images || [];
   const unused: string[] = [];

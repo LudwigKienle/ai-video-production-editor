@@ -32,7 +32,7 @@ import {
 import { LOCAL_MODEL_CATALOG, type LocalModelEntry } from '../data/localModelCatalog';
 import { DRAW_THINGS_DEFAULT_URL, getDrawThingsUrl, probeDrawThings, setDrawThingsUrl } from '../services/drawThingsService';
 import { getComfyUiHealth } from '../services/comfyUiService';
-import { BrainCircuitIcon, DownloadIcon, FolderIcon, ImageIcon, SparklesIcon, TrashIcon, XIcon } from '../components/icons';
+import { BrainCircuitIcon, DownloadIcon, FolderIcon, ImageIcon, SparklesIcon, TrashIcon, VideoIcon, XIcon } from '../components/icons';
 
 type Section = 'text' | 'images' | 'draw-things';
 
@@ -346,7 +346,7 @@ const ImageModelsPanel: React.FC = () => {
     <section className="local-ai-section">
       <div className="plugin-install__hero">
         <h2>Image & video models</h2>
-        <p>Open-weights models that run on your GPU through ComfyUI. Download once, then pick them in Images like any other model. No per-image cost; your images never leave the machine.</p>
+        <p>Open-weights models that run on your GPU through ComfyUI. Download once, then pick them in Images or Video like any other model. No per-image cost; your images never leave the machine.</p>
       </div>
 
       <div className="local-ai-card">
@@ -380,7 +380,7 @@ const ImageModelsPanel: React.FC = () => {
           return (
             <li key={model.id} className="local-ai-model">
               <div className="local-ai-model__head">
-                <span className="plugin-card__icon"><ImageIcon className="w-5 h-5" /></span>
+                <span className="plugin-card__icon">{model.kind === 'video' ? <VideoIcon className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}</span>
                 <div className="local-ai-item__text">
                   <strong>{model.label} <span className="local-ai-item__meta">· {model.vendor}</span></strong>
                   <span className="local-ai-item__note">{model.summary}</span>

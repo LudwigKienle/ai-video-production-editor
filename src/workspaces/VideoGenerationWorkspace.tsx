@@ -41,6 +41,11 @@ import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
 import { structurePromptForModel } from '../utils/modelPromptGuides';
 import { pickVideoModel } from '../utils/modelAutoSelect';
+import { runLocalModel } from '../services/localModelService';
+import { videoSizeForAspect } from '../services/localWorkflowFill';
+
+/** Auto never picks a local model: it may not be downloaded. */
+const option_isCloud = (id: string) => !id.endsWith('-local');
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
@@ -86,6 +91,9 @@ type VideoModelId =
   | 'wan-30-i2v-fal'
   | 'flux-3-t2v-fal'
   | 'flux-3-i2v-fal'
+  | 'wan-22-5b-local'
+  | 'ltx-23-local'
+  | 'ltx-25-local'
   | 'happy-horse-t2v-fal'
   | 'happy-horse-i2v-fal'
   | 'kling-26'
@@ -140,6 +148,9 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'wan-30-i2v-fal', label: 'Wan 3.0 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true, supportsEndFrame: true },
   { id: 'flux-3-t2v-fal', label: 'FLUX.3 Video (Text-to-Video)', provider: 'FAL', supportsImage: false },
   { id: 'flux-3-i2v-fal', label: 'FLUX.3 Video (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true },
+  { id: 'wan-22-5b-local', label: 'Wan 2.2 5B (Local)', provider: 'Local', supportsImage: true },
+  { id: 'ltx-23-local', label: 'LTX-2.3 with audio (Local)', provider: 'Local', supportsImage: true },
+  { id: 'ltx-25-local', label: 'LTX-2.5 with audio (Local)', provider: 'Local', supportsImage: true },
   { id: 'happy-horse-t2v-fal', label: 'Happy Horse 1.0 (Text-to-Video)', provider: 'FAL', supportsImage: false },
   { id: 'happy-horse-i2v-fal', label: 'Happy Horse 1.0 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true },
   { id: 'kling-26', label: 'Kling 2.6', provider: 'Replicate', supportsImage: true },
@@ -225,6 +236,9 @@ const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
   'wan-30-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'flux-3-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'flux-3-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'wan-22-5b-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'ltx-23-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'ltx-25-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'happy-horse-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'happy-horse-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'kling-26': ['16:9', '9:16', '1:1'],
@@ -249,7 +263,7 @@ type VideoModelPricing = {
   model?: string;
 };
 
-const VIDEO_MODEL_PRICING: Record<VideoModelId, VideoModelPricing> = {
+const VIDEO_MODEL_PRICING: Partial<Record<VideoModelId, VideoModelPricing>> = {
   auto: { provider: 'fal', kind: 'video', model: 'bytedance/seedance-2.5/image-to-video' },
   'veo-fast': { provider: 'gemini', kind: 'video', model: 'veo-3.1-fast-generate-preview' },
   veo: { provider: 'gemini', kind: 'video', model: 'veo-3.1-generate-preview' },
@@ -303,6 +317,9 @@ const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options
   'wan-30-i2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30], fallback: 5 },
   'flux-3-t2v-fal': { supported: true, options: [5, 6, 8, 10, 12, 15, 20], fallback: 8 },
   'flux-3-i2v-fal': { supported: true, options: [5, 6, 8, 10, 12, 15, 20], fallback: 8 },
+  'wan-22-5b-local': { supported: true, options: [2, 3, 4, 5], fallback: 5 },
+  'ltx-23-local': { supported: true, options: [4, 5, 6, 8, 10, 12, 15, 20], fallback: 6 },
+  'ltx-25-local': { supported: true, options: [4, 5, 6, 8, 10, 12, 15, 20], fallback: 6 },
   'happy-horse-t2v-fal': { supported: true, options: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'happy-horse-i2v-fal': { supported: true, options: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 },
   'kling-26': { supported: true, options: [5, 10], fallback: 5 },
@@ -587,6 +604,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     });
   }, [costRates, estimatedDurationSeconds, modelId]);
   const generationCostDetail = useMemo(() => {
+    if (modelId.endsWith('-local')) return 'Runs on your computer; not billed. Download the model in Local AI first.';
     if (!generationCostEstimate) return 'No price mapping found for the selected model.';
     const base = `Based on ${formatUnitSummary(generationCostEstimate.units, generationCostEstimate.unitLabel)}.`;
     if (needsAudio) return `${base} Final cost can vary with uploaded audio length.`;
@@ -625,6 +643,9 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     }
     if (modelId === 'wan-30-i2v-fal') {
       return 'Wan 3.0 animates your start frame (optional end frame) for 2–30 s with native audio; keep the frame clean and well composed.';
+    }
+    if (modelId === 'wan-22-5b-local' || modelId === 'ltx-23-local' || modelId === 'ltx-25-local') {
+      return 'Runs on your GPU through ComfyUI (download it in Local AI first). Add a start frame for image-to-video, leave it empty for text-to-video. The first run loads the model and takes a while.';
     }
     if (modelId === 'flux-3-t2v-fal') {
       return 'FLUX.3 renders 5–20 s with native audio in one continuous shot; describe the motion and the sound you want to hear.';
@@ -1047,7 +1068,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
           hasStartFrame: Boolean(reference || seedanceStoryboardReference),
           referenceCount: storyboardReferencePayloads.length,
           durationSeconds: normalizedDurationSeconds,
-        }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedance-25-i2v-fal')
+        }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && option_isCloud(id)), 'seedance-25-i2v-fal')
         : null;
       const resolvedModelId: VideoModelId = autoPick ? autoPick.model : modelId;
       // Per-model shaping happens last, once the model is known (see PromptPreview under the prompt box).
@@ -1179,6 +1200,20 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             audio: true,
           });
           break;
+        case 'wan-22-5b-local':
+        case 'ltx-23-local':
+        case 'ltx-25-local': {
+          const [width, height] = videoSizeForAspect(availableAspectRatios.includes(aspectRatio) ? aspectRatio : '16:9');
+          item = await runLocalModel(resolvedModelId, reference ? 'i2v' : 't2v', {
+            prompt: shapedPrompt,
+            width,
+            height,
+            durationSeconds: normalizedDurationSeconds,
+            fps: 24,
+            images: reference ? [reference] : undefined,
+          }, (message) => setStatus(message));
+          break;
+        }
         case 'flux-3-t2v-fal':
           item = await generateVideoWithFalFlux3Text(shapedPrompt, {
             duration: normalizedDurationSeconds,

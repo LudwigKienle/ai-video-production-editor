@@ -164,6 +164,8 @@ type ImageModelId =
   | 'flux-3-klein-local'
   | 'qwen-image-21-local'
   | 'qwen-image-21-turbo-local'
+  | 'z-image-turbo-local'
+  | 'flux-2-klein-4b-local'
   | 'draw-things';
 
 const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; icon?: string; goodFor?: string }> = [
@@ -212,10 +214,12 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', provider: 'Local', goodFor: 'Open-weights FLUX.3 on your GPU via ComfyUI: text-to-image and reference edits, no per-image cost' },
   { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Open-weights Qwen on your GPU: typography, 2K, multi-reference edits (non-commercial license)' },
   { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Fast 8-step local Qwen drafts and edits (non-commercial license)' },
+  { id: 'z-image-turbo-local', label: 'Z-Image Turbo (Local)', provider: 'Local', goodFor: 'Fast 8-step photoreal images on 8 GB GPUs; Apache 2.0' },
+  { id: 'flux-2-klein-4b-local', label: 'FLUX.2 Klein 4B (Local)', provider: 'Local', goodFor: 'Small 4-step FLUX.2 for drafts and single-reference edits on 8 GB GPUs; Apache 2.0' },
   { id: 'draw-things', label: 'Draw Things (Local, Mac)', provider: 'Local', goodFor: 'Whatever model is loaded in Draw Things on Apple silicon; optional start image' },
 ];
 
-const LOCAL_IMAGE_MODEL_IDS = new Set<ImageModelId>(['flux-3-klein-local', 'qwen-image-21-local', 'qwen-image-21-turbo-local', 'draw-things']);
+const LOCAL_IMAGE_MODEL_IDS = new Set<ImageModelId>(['flux-3-klein-local', 'qwen-image-21-local', 'qwen-image-21-turbo-local', 'z-image-turbo-local', 'flux-2-klein-4b-local', 'draw-things']);
 
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100', '239:100'] as const;
 const IMAGE_SIZES = ['1K', '2K', '4K'] as const;
@@ -267,6 +271,8 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'flux-3-klein-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
   'qwen-image-21-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
   'qwen-image-21-turbo-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'z-image-turbo-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'flux-2-klein-4b-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
   'draw-things': ['16:9', '9:16', '1:1', '4:3', '3:4'],
 };
 
@@ -318,6 +324,8 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'flux-3-klein-local': 1,
   'qwen-image-21-local': 2,
   'qwen-image-21-turbo-local': 1,
+  'z-image-turbo-local': 0,
+  'flux-2-klein-4b-local': 1,
   'draw-things': 1,
 };
 type ImageModelPricing = {
@@ -2661,7 +2669,9 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           break;
         case 'flux-3-klein-local':
         case 'qwen-image-21-local':
-        case 'qwen-image-21-turbo-local': {
+        case 'qwen-image-21-turbo-local':
+        case 'z-image-turbo-local':
+        case 'flux-2-klein-4b-local': {
           const [width, height] = sizeForAspect(effectiveAspectRatio, imageSize);
           const localModelId = resolvedModelId;
           item = await runLocalModel(localModelId, referenceImages.length > 0 ? 'edit' : 't2i', {

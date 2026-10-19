@@ -10,7 +10,7 @@ import catalog from './localModelCatalog.generated.json';
  * size, seed and reference images.
  */
 
-export type LocalModelFolder = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'checkpoints' | 'model_patches';
+export type LocalModelFolder = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'checkpoints' | 'model_patches' | 'latent_upscale_models';
 
 export type LocalModelFile = {
   folder: LocalModelFolder;
@@ -36,8 +36,14 @@ export type LocalWorkflowTemplate = {
     height?: ComfyNodeInputRef;
     seed?: ComfyNodeInputRef;
     steps?: ComfyNodeInputRef;
+    /** Video length in frames (Wan: 4n+1). */
     frames?: ComfyNodeInputRef;
+    /** Video length in seconds (LTX computes frames as seconds × fps + 1). */
+    durationSeconds?: ComfyNodeInputRef;
+    fps?: ComfyNodeInputRef;
     images?: ComfyNodeInputRef[];
+    /** A prompt enhancer behind a simple on/off value (its files are always installed). */
+    enhanceFlag?: ComfyNodeInputRef & { enabledValue: boolean };
     /**
      * Built-in prompt enhancer (an LLM that expands the prompt). Turning it off removes
      * its nodes, because ComfyUI validates their model file even when a switch skips them.
