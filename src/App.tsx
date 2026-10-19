@@ -111,6 +111,7 @@ import MoodboardWorkspace from './workspaces/MoodboardWorkspace';
 import NotebookLMWorkspace from './workspaces/NotebookLMWorkspace';
 import MicrodramaWorkspace from './workspaces/MicrodramaWorkspace';
 import PluginsWorkspace from './workspaces/PluginsWorkspace';
+import LocalAiWorkspace from './workspaces/LocalAiWorkspace';
 import PostPageBar, { POST_PAGES, isPostPage } from './components/PostPageBar';
 import PricingScreen from './components/PricingScreen';
 import OptionsModal, { EstimateResult, OptionsModalConfig, PricingResult } from './components/OptionsModal';
@@ -8733,6 +8734,7 @@ function App() {
                     setStoryBible={setStoryBible}
                 />
             );
+            case 'LOCAL_AI': return <LocalAiWorkspace />;
             case 'PLUGINS': return (
                 <PluginsWorkspace onOpenGrading={() => setActiveWorkspace('POST')} />
             );

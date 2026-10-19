@@ -84,6 +84,8 @@ import {
   testComfyUiConnection,
   uploadComfyImage,
 } from '../services/comfyUiService';
+import { runLocalModel, sizeForAspect } from '../services/localModelService';
+import { generateImageWithDrawThings } from '../services/drawThingsService';
 
 import logoGemini from '../assets/logos/logo_gemini_1772276093848.png';
 import logoNanabanana from '../assets/logos/logo_nanabanana_1772276159682.png';
@@ -158,7 +160,11 @@ type ImageModelId =
   | 'z-image'
   | 'z-turbo'
   | 'z-turbo-img2img'
-  | 'comfyui';
+  | 'comfyui'
+  | 'flux-3-klein-local'
+  | 'qwen-image-21-local'
+  | 'qwen-image-21-turbo-local'
+  | 'draw-things';
 
 const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; icon?: string; goodFor?: string }> = [
   { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'People → Nano Banana / GPT Image 2, creatures and stylised art → Krea 2, environments → Seedream 5 Pro, typography → Ideogram 4' },
@@ -203,7 +209,13 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'z-turbo', label: 'Z-Image Turbo', provider: 'Replicate', goodFor: 'Maximum speed lightweight generation' },
   { id: 'z-turbo-img2img', label: 'Z-Image Turbo Img2Img', provider: 'Replicate', goodFor: 'Fast style transfer and image-to-image workflows' },
   { id: 'comfyui', label: 'ComfyUI (Local)', provider: 'Local', goodFor: 'Unlimited control and advanced node-based local workflows' },
+  { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', provider: 'Local', goodFor: 'Open-weights FLUX.3 on your GPU via ComfyUI: text-to-image and reference edits, no per-image cost' },
+  { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Open-weights Qwen on your GPU: typography, 2K, multi-reference edits (non-commercial license)' },
+  { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', provider: 'Local', icon: logoQwen, goodFor: 'Fast 8-step local Qwen drafts and edits (non-commercial license)' },
+  { id: 'draw-things', label: 'Draw Things (Local, Mac)', provider: 'Local', goodFor: 'Whatever model is loaded in Draw Things on Apple silicon; optional start image' },
 ];
+
+const LOCAL_IMAGE_MODEL_IDS = new Set<ImageModelId>(['flux-3-klein-local', 'qwen-image-21-local', 'qwen-image-21-turbo-local', 'draw-things']);
 
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100', '239:100'] as const;
 const IMAGE_SIZES = ['1K', '2K', '4K'] as const;
@@ -252,6 +264,10 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'z-turbo': [...ASPECT_RATIOS],
   'z-turbo-img2img': [...ASPECT_RATIOS],
   comfyui: [...ASPECT_RATIOS],
+  'flux-3-klein-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'qwen-image-21-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'qwen-image-21-turbo-local': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9'],
+  'draw-things': ['16:9', '9:16', '1:1', '4:3', '3:4'],
 };
 
 // Camera/Lens data moved to ../data/cameraData.ts
@@ -298,6 +314,11 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'z-turbo': 0,
   'z-turbo-img2img': 1,
   comfyui: 1,
+  // As many references as the model's edit workflow has image inputs.
+  'flux-3-klein-local': 1,
+  'qwen-image-21-local': 2,
+  'qwen-image-21-turbo-local': 1,
+  'draw-things': 1,
 };
 type ImageModelPricing = {
   provider: CostRate['provider'];
@@ -1098,7 +1119,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
     });
   }, [modelId, imageSize, costRates]);
   const generationCostDetail = useMemo(() => {
-    if (modelId === 'comfyui') return 'Local ComfyUI generation is not billed by hosted credits.';
+    if (modelId === 'comfyui' || LOCAL_IMAGE_MODEL_IDS.has(modelId)) return 'Runs on your computer; not billed. Download the model in Local AI first.';
     if (!generationCostEstimate) return 'No price mapping found for the selected model.';
     if (modelId === 'firered') return 'FireRed is a reference-first edit model and needs at least one context or moodboard image.';
     if (modelId === 'gemini-flash' && imageSize !== '1K') return `${imageSize} render applies a large output-token multiplier for Nano Banana 2.`;
@@ -2279,7 +2300,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       setStatus('Add a prompt before generating.');
       return;
     }
-    if (billingMode === 'hosted' && modelId !== 'comfyui' && onValidateHostedGeneration) {
+    if (billingMode === 'hosted' && modelId !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(modelId) && onValidateHostedGeneration) {
       const pricing = IMAGE_MODEL_PRICING[modelId];
       if (pricing) {
         const validation = await onValidateHostedGeneration({
@@ -2347,7 +2368,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           : '16:9'
       ) as '21:9' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
       const autoPick = modelId === 'auto'
-        ? pickImageModel({ prompt: finalPrompt, hasReferences: referenceImages.length > 0 }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'comfyui'), 'seedream-v5-pro-fal')
+        ? pickImageModel({ prompt: finalPrompt, hasReferences: referenceImages.length > 0 }, MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto' && id !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(id)), 'seedream-v5-pro-fal')
         : null;
       const resolvedModelId: ImageModelId = autoPick ? autoPick.model : modelId;
       if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
@@ -2638,6 +2659,33 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           }
           item = await generateImageWithZTurboImg2Img(shapedPrompt, effectiveAspectRatio as any, singleReference, loraOptions);
           break;
+        case 'flux-3-klein-local':
+        case 'qwen-image-21-local':
+        case 'qwen-image-21-turbo-local': {
+          const [width, height] = sizeForAspect(effectiveAspectRatio, imageSize);
+          const localModelId = resolvedModelId;
+          item = await runLocalModel(localModelId, referenceImages.length > 0 ? 'edit' : 't2i', {
+            prompt: shapedPrompt,
+            negativePrompt: negativePrompt.trim() || undefined,
+            width,
+            height,
+            images: referenceImages,
+            // Used when the optional enhancer file is installed.
+            enhance: true,
+          }, (message) => setStatus(message));
+          break;
+        }
+        case 'draw-things': {
+          const [width, height] = sizeForAspect(effectiveAspectRatio, imageSize);
+          item = await generateImageWithDrawThings({
+            prompt: shapedPrompt,
+            negativePrompt: negativePrompt.trim() || undefined,
+            width,
+            height,
+            image: referenceImages[0],
+          });
+          break;
+        }
         case 'comfyui': {
           const baseUrl = normalizeComfyUrl(comfyUrl);
           if (!baseUrl) {
