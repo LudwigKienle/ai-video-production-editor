@@ -6,10 +6,13 @@
 |---|---|---|
 | Google (Gemini / Imagen / Veo) | API key | Script, prompts, Imagen, Nano Banana, Veo |
 | Replicate | API key | Flux, Z-Image, Qwen, upscaling, Lyria, Demucs, P-Video |
-| fal.ai | API key | Most video models (Kling, Seedance, Wan, LTX, MiniMax, PixVerse, Grok), GPT Image, Seedream, Krea, Ideogram |
+| fal.ai | API key | Most video models (Kling, Seedance, Wan, LTX, MiniMax, PixVerse, Grok, FLUX.3), GPT Image, Seedream, Krea 2 / 3, Ideogram, FLUX.3 |
 | Higgsfield | `KEY_ID:KEY_SECRET` | Soul / Soul Cinema / DoP, and a **second host** for the shared vendor models |
 | Midjourney | your account via Jeff (browser agent) | Concept and storyboard images |
 | Claude Code / Codex | their own CLI login | Assistant agents |
+| Ollama / LM Studio | none (local) | Every text feature, when chosen in Local AI ([docs](local-ai.md)) |
+| ComfyUI (local) | none, Hugging Face token for gated downloads | Open-weights image and video models from the Local AI catalog |
+| Draw Things (local) | none | Images with the model loaded in Draw Things |
 
 ## The video catalog (`src/services/falVideoCatalog.ts`)
 
