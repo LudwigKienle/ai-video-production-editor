@@ -1,0 +1,4 @@
+# Generated: media cut from the asset library, renders, caches
+build/
+remotion/node_modules/
+remotion/out/

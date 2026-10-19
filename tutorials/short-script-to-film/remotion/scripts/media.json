@@ -1,0 +1,133 @@
+{
+  "library": "~/Projekte/04_Bibliothek",
+  "clips": [
+    {
+      "id": "hook",
+      "src": "KI_Generierungen/Seedance/Seedance 2_5 - _ ACT IEXT_ SALT FLAT - DAWN White_ all the way up to where the sky starts_ No tree_.mov 4K.mp4",
+      "in": 5.6,
+      "dur": 1.6,
+      "full": true,
+      "credit": "Seedance 2.5"
+    },
+    {
+      "id": "reveal",
+      "src": "KI_Generierungen/Dreamina/dreamina-2026-08-08-5053-# ACT I EXT. SALT FLAT - DAWN White, all....mp4",
+      "in": 6,
+      "dur": 1.6,
+      "credit": "Dreamina"
+    },
+    {
+      "id": "dragon",
+      "src": "KI_Generierungen/Dreamina/dreamina-2026-08-06-4229-make a cool loop able intro animation of....mp4",
+      "in": 10.4,
+      "dur": 1.2,
+      "credit": "Dreamina"
+    },
+    {
+      "id": "lantern",
+      "src": "KI_Generierungen/Dreamina/dreamina-2026-07-07-8917-0_40–0_51 — EXT. CITY SQUARE — NIGHT Eli....mp4",
+      "in": 6.2,
+      "dur": 1.2,
+      "credit": "Dreamina"
+    },
+    {
+      "id": "carpet",
+      "src": "KI_Generierungen/Seedance/Seedance%202_0%20-%20_%20%20_%20%20%20%20shot_id%2004_cannes_arrival_%20%20%20%20prompt%20Cannes%20red%20carpet_%20Theo%20in%20a%20white%20dinne.mp4",
+      "in": 6.2,
+      "dur": 1.2,
+      "credit": "Seedance 2.0"
+    },
+    {
+      "id": "yacht",
+      "src": "KI_Generierungen/Seedance/Seedance%202_0%20-%20_%20%20_%20%20%20%20shot_id%2006_yacht_jump_%20%20%20%20prompt%20Action%20shot_%20Santorini_%20Theo%20jumps%20onto%20a%20lu.mp4",
+      "in": 10.6,
+      "dur": 1.2,
+      "credit": "Seedance 2.0"
+    },
+    {
+      "id": "oldwoman",
+      "src": "KI_Generierungen/Dreamina/dreamina-2026-07-07-3245-go on based on video 0_27–0_40 — MONTAGE....mp4",
+      "in": 1.6,
+      "dur": 1.2,
+      "credit": "Dreamina"
+    },
+    {
+      "id": "snow",
+      "src": "KI_Generierungen/Seedance/Seedance%202_0%20-%20Create%20a%20cinematic%20multi-shot%20winter%20romance%20sequence%20for%20a%20premium%20young%20adult%20drama.mp4",
+      "in": 10.6,
+      "dur": 1.2,
+      "credit": "Seedance 2.0"
+    },
+    {
+      "id": "cinema",
+      "src": "KI_Generierungen/OpenArt/OpenArt Video (26).mp4",
+      "in": 6.2,
+      "dur": 1.2,
+      "credit": "OpenArt"
+    },
+    {
+      "id": "paris",
+      "src": "KI_Generierungen/Seedance/Seedance 2_5 - put the Two Charachters from _Video 1 excat same movement distance  into the image of.mov",
+      "in": 3.6,
+      "dur": 1.2,
+      "credit": "Seedance 2.5"
+    },
+    {
+      "id": "boy",
+      "src": "KI_Generierungen/Dreamina/dreamina-2026-07-07-1839- go on based on video  0_08–0_17 — STREE....mp4",
+      "in": 10.6,
+      "dur": 1.2,
+      "credit": "Dreamina"
+    },
+    {
+      "id": "motorway",
+      "src": "KI_Generierungen/Seedance/Seedance 2_5 - Continuous single take_ locked-off elevated view of a snowy divided motorway at night (1).mov",
+      "in": 1.4,
+      "dur": 1.4,
+      "credit": "Seedance 2.5"
+    }
+  ],
+  "audio": {
+    "music": {
+      "src": "Musik/MUS_Carrera_Teaser_Soundtrack_v1_Mixkit_60s_3fd3df.wav",
+      "in": 17,
+      "dur": 30,
+      "license": "Mixkit Stock Music Free License"
+    },
+    "typing": {
+      "src": "Sounddesign/Foley/Clicks/FOL_Laptop_Keyboard_Typing_Fast_4s_581cef.mp3",
+      "license": "Magnific (Business), ElevenLabs SFX"
+    },
+    "impact": {
+      "src": "Sounddesign/SFX/Impacts/SFX_Big_cinematic_impact_8s_1d4fbc.mp3",
+      "license": "Mixkit Sound Effects Free License"
+    },
+    "whoosh": {
+      "src": "Sounddesign/SFX/Whooshes/SFX_Cinematic_whoosh_deep_impact_4s_9854bf.mp3",
+      "license": "Mixkit Sound Effects Free License"
+    },
+    "swoosh": {
+      "src": "Sounddesign/SFX/Whooshes/SFX_Airy_UI_Swoosh_Transition_1s_37d7e3.mp3",
+      "license": "Magnific (Business), ElevenLabs SFX"
+    },
+    "sting": {
+      "src": "Sounddesign/SFX/Impacts/SFX_Tech_Logo_Sting_Boom_Shimmer_3s_c168d7.mp3",
+      "license": "Magnific (Business), ElevenLabs SFX"
+    }
+  },
+  "stills": {
+    "script": "docs/assets/screenshots/studio-script.png",
+    "moodboard": "docs/assets/screenshots/studio-moodboard.png",
+    "scenemap": "docs/assets/screenshots/studio-scene-map-3d.png",
+    "video": "docs/assets/screenshots/studio-video-gen.png",
+    "icon": "build/icon.png"
+  },
+  "frames": {
+    "export": {
+      "src": "~/Downloads/tutorial-youtube.mp4",
+      "at": 202.5,
+      "crop": "1328:830:400:105",
+      "note": "Render Setup from the published tutorial (youtu.be/p99IG1m5ybU)"
+    }
+  }
+}
