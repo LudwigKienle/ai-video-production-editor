@@ -41,7 +41,7 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { adaptPromptForModel, promptStyleGuide } from '../services/promptStyle';
@@ -237,6 +237,10 @@ type ReferenceImageModel =
     | 'krea-2-large-fal'
     | 'krea-2-turbo-fal'
     | 'ideogram-v4-fal'
+    | 'krea-3-fal'
+    | 'krea-3-edit-fal'
+    | 'flux-3-fal'
+    | 'flux-3-edit-fal'
     | 'qwen'
     | 'qwen-2512'
     | 'qwen-max-fal'
@@ -638,6 +642,10 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'krea-2-large-fal': 'Krea 2 Large (FAL)',
     'krea-2-turbo-fal': 'Krea 2 Turbo (FAL)',
     'ideogram-v4-fal': 'Ideogram 4 (FAL)',
+    'krea-3-fal': 'Krea 3 (FAL)',
+    'krea-3-edit-fal': 'Krea 3 Edit (FAL)',
+    'flux-3-fal': 'FLUX.3 (FAL)',
+    'flux-3-edit-fal': 'FLUX.3 Edit (FAL)',
     midjourney: 'Midjourney · Jeff',
     'soul-standard-hf': 'Higgsfield Soul (Higgsfield)',
     'soul-2-hf': 'Higgsfield Soul 2 (Higgsfield)',
@@ -679,6 +687,10 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Aesthetic-first concept art with film-stock looks' },
     { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick concept passes', badge: '⚡ Fast' },
     { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters and title cards with clean text' },
+    { id: 'krea-3-fal', label: 'Krea 3 (FAL)', provider: 'FAL', goodFor: 'Krea\'s newest model for polished, art-directed concept frames' },
+    { id: 'krea-3-edit-fal', label: 'Krea 3 Edit (FAL)', provider: 'FAL', goodFor: 'Keeps characters and products consistent across shots from your concept refs (up to 8)' },
+    { id: 'flux-3-fal', label: 'FLUX.3 (FAL)', provider: 'FAL', goodFor: 'Photoreal detail and prompt adherence, up to 4K' },
+    { id: 'flux-3-edit-fal', label: 'FLUX.3 Edit (FAL)', provider: 'FAL', goodFor: 'Multi-reference continuity (up to 10 refs) that leaves the rest of the frame untouched' },
     { id: 'midjourney', label: 'Midjourney · Jeff', provider: 'Midjourney', goodFor: 'Your own Midjourney account, driven by a background browser agent. Returns the 4-grid as versions; storyboard shots get concept refs as --oref / --sref', badge: '🧭 Agent' },
     ...HIGGSFIELD_IMAGE_MODELS.map((model) => ({ id: model.id as ReferenceImageModel, label: model.label, provider: 'Higgsfield', goodFor: model.goodFor, badge: model.badge })),
     { id: 'qwen', label: 'Qwen 2511', provider: 'Qwen', icon: logoQwen, goodFor: 'Strong multilingual support and diverse aesthetic styles' },
@@ -10753,6 +10765,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     });
                 } else if (activeReferenceModel === 'ideogram-v4-fal') {
                     imageMedia = await generateImageWithFalIdeogramV4(fullPrompt, { aspectRatio: modelAspectRatio, renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY' });
+                } else if (activeReferenceModel === 'krea-3-fal' || (activeReferenceModel === 'krea-3-edit-fal' && gptInputs.length === 0)) {
+                    imageMedia = await generateImageWithFalKrea3(fullPrompt, { aspectRatio: modelAspectRatio, variant: imageSize === '1K' ? 'jam' : 'berry' });
+                } else if (activeReferenceModel === 'krea-3-edit-fal') {
+                    imageMedia = (await editImageWithFalKrea3(gptImage2Prompt, gptInputs.slice(0, 8), { aspectRatio: modelAspectRatio, variant: imageSize === '1K' ? 'jam' : 'berry' }))[0];
+                } else if (activeReferenceModel === 'flux-3-fal' || (activeReferenceModel === 'flux-3-edit-fal' && gptInputs.length === 0)) {
+                    imageMedia = await generateImageWithFalFlux3(fullPrompt, toFlux3Options(effectiveAspectRatio, imageSize));
+                } else if (activeReferenceModel === 'flux-3-edit-fal') {
+                    imageMedia = (await editImageWithFalFlux3(gptImage2Prompt, gptInputs.slice(0, 10), toFlux3Options(effectiveAspectRatio, imageSize)))[0];
                 } else if (isMultiAngleModel) {
                     if (qwenInputs.length === 0) {
                         throw new Error('Qwen Multi-Angle requires at least one reference or sketch image for storyboards.');

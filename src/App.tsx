@@ -514,6 +514,16 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-krea-2-large', provider: 'fal', model: 'krea/v2/large/text-to-image', kind: 'image', unitCost: withMargin(0.05), unitLabel: 'image', label: 'FAL Krea 2 Large T2I' },
     { id: 'fal-krea-2-turbo', provider: 'fal', model: 'fal-ai/krea-2/turbo', kind: 'image', unitCost: withMargin(0.02), unitLabel: 'image', label: 'FAL Krea 2 Turbo T2I' },
     { id: 'fal-ideogram-v4', provider: 'fal', model: 'ideogram/v4', kind: 'image', unitCost: withMargin(0.06), unitLabel: 'image', label: 'FAL Ideogram 4 T2I' },
+    // Krea 3 bills $0.025 per megapixel; auto size is about 4 MP, and an edit also pays for its references.
+    { id: 'fal-krea-3-t2i', provider: 'fal', model: 'krea/v3/text-to-image', kind: 'image', unitCost: withMargin(0.1), unitLabel: 'image', label: 'FAL Krea 3 T2I (~4 MP)' },
+    { id: 'fal-krea-3-edit', provider: 'fal', model: 'krea/v3/edit', kind: 'edit', unitCost: withMargin(0.2), unitLabel: 'request', label: 'FAL Krea 3 Edit (~4 MP + 1 ref)' },
+    // FLUX.3 bills per image by resolution tier; these are the 1K prices.
+    { id: 'fal-flux-3-t2i', provider: 'fal', model: 'blackforestlabs/flux-3/text-to-image', kind: 'image', unitCost: withMargin(0.048), unitLabel: 'image', label: 'FAL FLUX.3 T2I (1K)' },
+    { id: 'fal-flux-3-edit', provider: 'fal', model: 'blackforestlabs/flux-3/edit-image', kind: 'edit', unitCost: withMargin(0.048), unitLabel: 'request', label: 'FAL FLUX.3 Edit (1K)' },
+    { id: 'fal-flux-3-klein-t2i', provider: 'fal', model: 'blackforestlabs/flux-3/klein/text-to-image', kind: 'image', unitCost: withMargin(0.009), unitLabel: 'image', label: 'FAL FLUX.3 Klein T2I (1K)' },
+    { id: 'fal-flux-3-klein-edit', provider: 'fal', model: 'blackforestlabs/flux-3/klein/edit-image', kind: 'edit', unitCost: withMargin(0.009), unitLabel: 'request', label: 'FAL FLUX.3 Klein Edit (1K)' },
+    { id: 'fal-flux-3-t2v', provider: 'fal', model: 'blackforestlabs/flux-3/text-to-video', kind: 'video', unitCost: withMargin(0.29), unitLabel: 'second', label: 'FAL FLUX.3 Video T2V (1080p)' },
+    { id: 'fal-flux-3-i2v', provider: 'fal', model: 'blackforestlabs/flux-3/image-to-video', kind: 'video', unitCost: withMargin(0.29), unitLabel: 'second', label: 'FAL FLUX.3 Video I2V (1080p)' },
     { id: 'fal-hunyuan3d-v3', provider: 'fal', model: 'fal-ai/hunyuan3d-v3/image-to-3d', kind: 'edit', unitCost: withMargin(0.3), unitLabel: 'request', label: 'FAL Hunyuan3D v3 Image-to-3D' },
     { id: 'fal-trellis-2', provider: 'fal', model: 'fal-ai/trellis-2', kind: 'edit', unitCost: withMargin(0.1), unitLabel: 'request', label: 'FAL Trellis 2 Image-to-3D' },
     { id: 'fal-rodin-v25', provider: 'fal', model: 'fal-ai/hyper3d/rodin/v2.5', kind: 'edit', unitCost: withMargin(0.4), unitLabel: 'request', label: 'FAL Rodin 2.5 Image-to-3D' },

@@ -45,6 +45,13 @@ import {
   editImageWithFalSeedreamV5Pro,
   generateImageWithFalKrea2,
   generateImageWithFalIdeogramV4,
+  generateImageWithFalKrea3,
+  editImageWithFalKrea3,
+  generateImageWithFalFlux3,
+  editImageWithFalFlux3,
+  generateImageWithFalFlux3Klein,
+  editImageWithFalFlux3Klein,
+  toFlux3Options,
   generateImageWithFalWanV27Pro
 } from '../services/falAiService';
 import { generateImageWithGrok } from '../services/xaiService';
@@ -127,6 +134,12 @@ type ImageModelId =
   | 'krea-2-large-fal'
   | 'krea-2-turbo-fal'
   | 'ideogram-v4-fal'
+  | 'krea-3-fal'
+  | 'krea-3-fal-edit'
+  | 'flux-3-fal'
+  | 'flux-3-fal-edit'
+  | 'flux-3-klein-fal'
+  | 'flux-3-klein-fal-edit'
   | 'wan-v27-pro-fal'
   | 'wan-v27-pro-edit-fal'
   | 'nano-banana-2-fal'
@@ -165,6 +178,12 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Painterly, aesthetic-first generation with optional style references' },
   { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick exploration and variations' },
   { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters, and design-heavy frames with clean text rendering' },
+  { id: 'krea-3-fal', label: 'Krea 3 (FAL)', provider: 'FAL', goodFor: 'Krea\'s newest model: polished, art-directed stills with a quality (berry) look' },
+  { id: 'krea-3-fal-edit', label: 'Krea 3 Edit (FAL)', provider: 'FAL', goodFor: 'Reference-driven edits: restage products, swap materials, keep characters consistent (up to 8 refs)' },
+  { id: 'flux-3-fal', label: 'FLUX.3 (FAL)', provider: 'FAL', goodFor: 'Black Forest Labs\' flagship: photoreal detail and strong prompt adherence, up to 4K' },
+  { id: 'flux-3-fal-edit', label: 'FLUX.3 Edit (FAL)', provider: 'FAL', goodFor: 'Precise local edits and multi-reference composition (up to 10 refs), rest of the frame untouched' },
+  { id: 'flux-3-klein-fal', label: 'FLUX.3 Klein (FAL)', provider: 'FAL', goodFor: 'Small open-weights FLUX.3: fast, cheap drafts with prompt expansion' },
+  { id: 'flux-3-klein-fal-edit', label: 'FLUX.3 Klein Edit (FAL)', provider: 'FAL', goodFor: 'Cheap multi-reference edits (up to 10 refs) with the open-weights FLUX.3' },
   { id: 'wan-v27-pro-fal', label: 'WAN 2.7 Pro (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'High-detail cinematic image generation with strong composition' },
   { id: 'wan-v27-pro-edit-fal', label: 'WAN 2.7 Pro Edit (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Precise multi-reference image editing and transformations' },
   { id: 'nano-banana-2-fal', label: 'Nano Banana 2 (FAL)', provider: 'FAL', icon: logoNanabanana, goodFor: 'Speed, photorealism, and accurate character generation' },
@@ -208,6 +227,12 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'krea-2-large-fal': ['16:9', '9:16', '1:1', '4:3', '235:100'],
   'krea-2-turbo-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'ideogram-v4-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'krea-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'krea-3-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'flux-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100'],
+  'flux-3-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100'],
+  'flux-3-klein-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'flux-3-klein-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'wan-v27-pro-edit-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'nano-banana-2-fal': ['21:9', '16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -248,6 +273,12 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'krea-2-large-fal': 3,
   'krea-2-turbo-fal': 0,
   'ideogram-v4-fal': 0,
+  'krea-3-fal': 0,
+  'krea-3-fal-edit': 8,
+  'flux-3-fal': 0,
+  'flux-3-fal-edit': 10,
+  'flux-3-klein-fal': 0,
+  'flux-3-klein-fal-edit': 10,
   'wan-v27-pro-fal': 0,
   'wan-v27-pro-edit-fal': 4,
   'nano-banana-2-fal': 0,
@@ -292,6 +323,12 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   'krea-2-large-fal': { provider: 'fal', kind: 'image', model: 'krea/v2/large/text-to-image' },
   'krea-2-turbo-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/krea-2/turbo' },
   'ideogram-v4-fal': { provider: 'fal', kind: 'image', model: 'ideogram/v4' },
+  'krea-3-fal': { provider: 'fal', kind: 'image', model: 'krea/v3/text-to-image' },
+  'krea-3-fal-edit': { provider: 'fal', kind: 'edit', model: 'krea/v3/edit' },
+  'flux-3-fal': { provider: 'fal', kind: 'image', model: 'blackforestlabs/flux-3/text-to-image' },
+  'flux-3-fal-edit': { provider: 'fal', kind: 'edit', model: 'blackforestlabs/flux-3/edit-image' },
+  'flux-3-klein-fal': { provider: 'fal', kind: 'image', model: 'blackforestlabs/flux-3/klein/text-to-image' },
+  'flux-3-klein-fal-edit': { provider: 'fal', kind: 'edit', model: 'blackforestlabs/flux-3/klein/edit-image' },
   'wan-v27-pro-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/wan/v2.7/pro/text-to-image' },
   'wan-v27-pro-edit-fal': { provider: 'fal', kind: 'edit', model: 'fal-ai/wan/v2.7/pro/edit' },
   'nano-banana-2-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/nano-banana-2' },
@@ -1046,6 +1083,11 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       units = imageSize === '4K' ? 1.5 : 1;
     } else if (modelId === 'wan-v27-image-pro-replicate') {
       units = imageSize === '4K' ? 1.8 : imageSize === '2K' ? 1.25 : 1;
+    } else if (modelId === 'flux-3-fal' || modelId === 'flux-3-fal-edit') {
+      // $0.048 at 1K, $0.10 at 2K, $0.607 at 4K (per image).
+      units = imageSize === '4K' ? 12.6 : imageSize === '2K' ? 2.1 : 1;
+    } else if (modelId === 'flux-3-klein-fal' || modelId === 'flux-3-klein-fal-edit') {
+      units = imageSize === '4K' ? 4 : imageSize === '2K' ? 1.55 : 1;
     }
     return estimateGenerationCost({
       rates: costRates,
@@ -2428,6 +2470,40 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             aspectRatio: qwenMaxAspectRatio,
             renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY',
           });
+          break;
+        case 'krea-3-fal':
+          item = await generateImageWithFalKrea3(shapedPrompt, {
+            aspectRatio: qwenMaxAspectRatio,
+            variant: imageSize === '1K' ? 'jam' : 'berry',
+            negativePrompt: negativePrompt.trim() || undefined,
+          });
+          break;
+        case 'krea-3-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('Krea 3 Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalKrea3(shapedPrompt, referenceImages.slice(0, 8), {
+            aspectRatio: qwenMaxAspectRatio,
+            variant: imageSize === '1K' ? 'jam' : 'berry',
+          }))[0];
+          break;
+        case 'flux-3-fal':
+          item = await generateImageWithFalFlux3(shapedPrompt, toFlux3Options(effectiveAspectRatio, imageSize));
+          break;
+        case 'flux-3-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('FLUX.3 Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalFlux3(shapedPrompt, referenceImages.slice(0, 10), toFlux3Options(effectiveAspectRatio, imageSize)))[0];
+          break;
+        case 'flux-3-klein-fal':
+          item = await generateImageWithFalFlux3Klein(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
+          break;
+        case 'flux-3-klein-fal-edit':
+          if (referenceImages.length === 0) {
+            throw new Error('FLUX.3 Klein Edit (FAL) requires at least one reference image.');
+          }
+          item = (await editImageWithFalFlux3Klein(shapedPrompt, referenceImages.slice(0, 10), { aspectRatio: qwenMaxAspectRatio }))[0];
           break;
         case 'wan-v27-pro-fal':
           item = await generateImageWithFalWanV27Pro(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });

@@ -21,6 +21,8 @@ This document mirrors `api/usage/record.js` billing rates.
   - <https://fal.ai/models/fal-ai/qwen-image-max/text-to-image>
   - <https://fal.ai/models/fal-ai/qwen-image-max/edit>
   - <https://fal.ai/models/xai/grok-imagine-video/image-to-video>
+  - <https://fal.ai/krea-3> (Krea 3: $0.025 per megapixel, output plus references)
+  - <https://fal.ai/flux-video-free> (FLUX.3 video: $0.17/s at 720p, $0.29/s at 1080p)
 - Sonauto developer pricing: <https://sonauto.ai/developers>
 - Black Forest Labs pricing (Flux family): <https://bfl.ai/pricing>
 - OpenAI image pricing reference (GPT image family): <https://openai.com/api/pricing/>
@@ -50,6 +52,14 @@ Where direct provider list pricing was unavailable, conservative estimates are m
 | `fal:fal-ai/pixverse/c1/reference-to-video:video` | 0.050000 | 0.051000 | 0.000000 | 0.000000 |
 | `fal:fal-ai/qwen-image-max/text-to-image:image` | 0.075000 | 0.076500 | 0.000000 | 0.000000 |
 | `fal:fal-ai/qwen-image-max/edit:edit` | 0.075000 | 0.076500 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/edit-image:edit` | 0.048000 | 0.048960 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/image-to-video:video` | 0.290000 | 0.295800 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/klein/edit-image:edit` | 0.009000 | 0.009180 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/klein/text-to-image:image` | 0.009000 | 0.009180 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/text-to-image:image` | 0.048000 | 0.048960 | 0.000000 | 0.000000 |
+| `fal:blackforestlabs/flux-3/text-to-video:video` | 0.290000 | 0.295800 | 0.000000 | 0.000000 |
+| `fal:krea/v3/edit:edit` | 0.200000 | 0.204000 | 0.000000 | 0.000000 |
+| `fal:krea/v3/text-to-image:image` | 0.100000 | 0.102000 | 0.000000 | 0.000000 |
 | `fal:xai/grok-imagine-video/image-to-video:video` | 0.050000 | 0.051000 | 0.002000 | 0.002040 |
 | `gemini:gemini-2.5-flash-image:image` | 0.039000 | 0.039780 | 0.000000 | 0.000000 |
 | `gemini:gemini-2.5-flash-preview-tts:audio` | 0.020000 | 0.020400 | 0.000000 | 0.000000 |
