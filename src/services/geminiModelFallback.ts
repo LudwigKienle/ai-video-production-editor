@@ -16,7 +16,7 @@ const CHAINS: Record<'flash' | 'pro' | 'image', string[]> = {
 
 const familyOf = (model: string): keyof typeof CHAINS | null => {
   const id = model.toLowerCase();
-  if (id.includes('image')) return 'image';
+  if (id.includes('image') || id.includes('banana')) return 'image';
   if (id.includes('flash')) return 'flash';
   if (id.includes('pro')) return 'pro';
   return null;

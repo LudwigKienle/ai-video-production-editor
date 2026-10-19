@@ -474,6 +474,7 @@ const DEFAULT_COST_RATES: CostRate[] = [
 const DEFAULT_MODEL_RATES: CostRate[] = [
     // Gemini
     { id: 'gemini-flash-image', provider: 'gemini', model: 'gemini-3.1-flash-image-preview', kind: 'image', unitCost: withMargin(0.039), unitLabel: 'image', label: 'Nano Banana 2 (Gemini API)' },
+    { id: 'gemini-nano-banana-21', provider: 'gemini', model: 'gemini-nano-banana-2.1', kind: 'image', unitCost: withMargin(0.059), unitLabel: 'image', label: 'Nano Banana 2.1 (Gemini API)' },
     { id: 'gemini-pro-image', provider: 'gemini', model: 'gemini-3-pro-image-preview', kind: 'image', unitCost: withMargin(0.134), unitLabel: 'image', label: 'Gemini 3 Pro Image Preview' },
     { id: 'gemini-imagen', provider: 'gemini', model: 'imagen-4.0-generate-001', kind: 'image', unitCost: withMargin(0.04), unitLabel: 'image', label: 'Imagen 4' },
     { id: 'gemini-veo-fast', provider: 'gemini', model: 'veo-3.1-fast-generate-preview', kind: 'video', unitCost: withMargin(0.15), unitLabel: 'second', label: 'Veo 3.1 Fast' },
@@ -494,6 +495,9 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-gpt-image-25-sunburst-edit', provider: 'fal', model: 'openai/gpt-image-2.5/sunburst/edit', kind: 'edit', unitCost: withMargin(0.15), unitLabel: 'request', label: 'FAL GPT Image 2.5 Sunburst Edit' },
     { id: 'fal-gpt-image-2-edit', provider: 'fal', model: 'openai/gpt-image-2/edit', kind: 'edit', unitCost: withMargin(0.15), unitLabel: 'request', label: 'FAL GPT Image 2 Edit' },
     { id: 'fal-nano-banana-2-t2i', provider: 'fal', model: 'fal-ai/nano-banana-2', kind: 'image', unitCost: withMargin(0.08), unitLabel: 'image', label: 'FAL Nano Banana 2 T2I' },
+    // Nano Banana 2.1 is billed per token; these are fal's 2K reference prices (Oct 2026).
+    { id: 'fal-nano-banana-21-t2i', provider: 'fal', model: 'google/nano-banana-2.1', kind: 'image', unitCost: withMargin(0.059), unitLabel: 'image', label: 'FAL Nano Banana 2.1 T2I' },
+    { id: 'fal-nano-banana-21-edit', provider: 'fal', model: 'google/nano-banana-2.1/edit', kind: 'edit', unitCost: withMargin(0.063), unitLabel: 'request', label: 'FAL Nano Banana 2.1 Edit' },
     { id: 'fal-nano-banana-2-edit', provider: 'fal', model: 'fal-ai/nano-banana-2/edit', kind: 'edit', unitCost: withMargin(0.08), unitLabel: 'request', label: 'FAL Nano Banana 2 Edit' },
     { id: 'fal-seedream-v5-lite-t2i', provider: 'fal', model: 'fal-ai/bytedance/seedream/v5/lite/text-to-image', kind: 'image', unitCost: withMargin(0.035), unitLabel: 'image', label: 'FAL Seedream v5 Lite T2I' },
     { id: 'fal-wan-v27-pro-t2i', provider: 'fal', model: 'fal-ai/wan/v2.7/pro/text-to-image', kind: 'image', unitCost: withMargin(0.075), unitLabel: 'image', label: 'FAL WAN 2.7 Pro T2I' },

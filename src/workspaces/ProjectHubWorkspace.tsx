@@ -7,6 +7,7 @@ import {
     generateScriptWithMode,
     generateReferenceDetails,
     generateImageWithNano,
+    GEMINI_NANO_BANANA_21_IMAGE_MODEL,
     generateShotImagePrompts,
     generateExtraShotPrompt,
     generateMotionPromptForShot,
@@ -200,6 +201,8 @@ type OutfitImageModel =
     | 'nano'
     | 'gemini-pro'
     | 'nano-banana-2-fal'
+    | 'nano-21'
+    | 'nano-banana-21-fal'
     | 'seedream-v5-pro-edit-fal'
     | 'gpt-image-2-fal'
     | 'gpt-image-25-flare-fal'
@@ -208,6 +211,8 @@ type OutfitImageModel =
     | 'krea-3-edit-fal'
     | 'wan-2.7-image-pro'
     | 'wan-2.7-pro-fal'
+    | 'firered'
+    | 'qwen-multiangle-fal'
     | 'flux-3-klein-local'
     | 'qwen-image-21-local'
     | 'qwen-image-21-turbo-local'
@@ -217,6 +222,8 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
     { id: 'same', label: 'Same as image model', group: '' },
     { id: 'seedream', label: 'Seedream 4.5 (Replicate)', group: 'Cloud' },
     { id: 'seedream-v5-pro-edit-fal', label: 'Seedream 5.0 Pro Edit (FAL)', group: 'Cloud' },
+    { id: 'nano-21', label: 'Nano Banana 2.1 (Gemini)', group: 'Cloud' },
+    { id: 'nano-banana-21-fal', label: 'Nano Banana 2.1 Edit (FAL) · up to 14 refs', group: 'Cloud' },
     { id: 'nano', label: 'Nano Banana 2 (Gemini)', group: 'Cloud' },
     { id: 'gemini-pro', label: 'Gemini 3 Pro Image', group: 'Cloud' },
     { id: 'nano-banana-2-fal', label: 'Nano Banana 2 Edit (FAL)', group: 'Cloud' },
@@ -227,6 +234,8 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
     { id: 'krea-3-edit-fal', label: 'Krea 3 Edit (FAL)', group: 'Cloud' },
     { id: 'wan-2.7-image-pro', label: 'WAN 2.7 Image Pro (Replicate)', group: 'Cloud' },
     { id: 'wan-2.7-pro-fal', label: 'WAN 2.7 Pro Edit (FAL)', group: 'Cloud' },
+    { id: 'firered', label: 'FireRed Edit (Replicate)', group: 'Cloud' },
+    { id: 'qwen-multiangle-fal', label: 'Qwen Image Max Edit (FAL)', group: 'Cloud' },
     { id: 'flux-3-klein-local', label: 'FLUX.3 Klein (Local)', group: 'Local' },
     { id: 'qwen-image-21-local', label: 'Qwen Image 2.1 (Local)', group: 'Local' },
     { id: 'qwen-image-21-turbo-local', label: 'Qwen Image 2.1 Turbo (Local)', group: 'Local' },
@@ -234,7 +243,47 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
 ];
 
 const OUTFIT_MODEL_STORAGE_KEY = 'outfit_image_model_v1';
-const LEGACY_OUTFIT_MODELS = new Set<string>(['seedream', 'gemini-pro', 'nano', 'nano-banana-2-fal', 'wan-2.7-image-pro', 'wan-2.7-pro-fal']);
+/** Text-to-image models whose edit sibling can dress a character from references. */
+const OUTFIT_EDIT_SIBLINGS: Record<string, Exclude<OutfitImageModel, 'same'>> = {
+    'seedream-v5-lite-fal': 'seedream-v5-pro-edit-fal',
+    'seedream-v5-pro-fal': 'seedream-v5-pro-edit-fal',
+    'flux-3-fal': 'flux-3-edit-fal',
+    'krea-3-fal': 'krea-3-edit-fal',
+    'gpt-image-2-fal-t2i': 'gpt-image-2-fal',
+    'qwen-max-fal': 'qwen-multiangle-fal',
+};
+const OUTFIT_FALLBACK_MODEL: Exclude<OutfitImageModel, 'same'> = 'seedream';
+
+/** The outfit model "Same as image model" stands for: the image model itself, its edit sibling, or Seedream 4.5. */
+const outfitModelForImageModel = (imageModel: string): Exclude<OutfitImageModel, 'same'> => {
+    const direct = OUTFIT_MODEL_OPTIONS.find((option) => option.id !== 'same' && option.id === imageModel);
+    if (direct) return direct.id as Exclude<OutfitImageModel, 'same'>;
+    return OUTFIT_EDIT_SIBLINGS[imageModel] || OUTFIT_FALLBACK_MODEL;
+};
+const outfitModelLabel = (model: OutfitImageModel) => OUTFIT_MODEL_OPTIONS.find((option) => option.id === model)?.label || model;
+
+const OutfitModelSelect: React.FC<{
+    value: OutfitImageModel;
+    onChange: (model: OutfitImageModel) => void;
+    sameLabel: string;
+    className?: string;
+}> = ({ value, onChange, sameLabel, className }) => (
+    <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as OutfitImageModel)}
+        className={className || 'bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 max-w-[15rem]'}
+        title="Model used for outfits and garment pieces"
+    >
+        <option value="same">{sameLabel}</option>
+        {(['Cloud', 'Local'] as const).map((group) => (
+            <optgroup key={group} label={group === 'Local' ? 'Local (download in Local AI)' : 'Cloud'}>
+                {OUTFIT_MODEL_OPTIONS.filter((option) => option.group === group).map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+            </optgroup>
+        ))}
+    </select>
+);
 type CameraPreset = { id: string; label: string; prompt: string; image?: string };
 type LensPreset = { id: string; label: string; prompt: string; aspectRatioOverride?: AspectRatioOption; aspectRatioHint?: string; image?: string };
 type ReferenceSuggestion = { type: 'character' | 'environment' | 'product' | 'prop'; name: string; description: string };
@@ -265,6 +314,8 @@ type ReferenceImageModel =
     | 'wan-2.7-image-pro'
     | 'wan-2.7-pro-fal'
     | 'nano-banana-2-fal'
+    | 'nano-21'
+    | 'nano-banana-21-fal'
     | 'firered'
     | 'z-image'
     | 'z-turbo'
@@ -670,6 +721,8 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'wan-2.7-image-pro': 'WAN 2.7 Image Pro',
     'wan-2.7-pro-fal': 'WAN 2.7 Pro (FAL)',
     'nano-banana-2-fal': 'Nano Banana 2 (FAL)',
+    'nano-21': 'Nano Banana 2.1',
+    'nano-banana-21-fal': 'Nano Banana 2.1 (FAL)',
     firered: 'FireRed Edit',
     'z-image': 'Z-Image',
     'z-turbo': 'Z-Turbo',
@@ -709,8 +762,10 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'auto', label: 'Auto (best for the shot)', provider: 'Studio', goodFor: 'Picks Nano Banana / GPT Image 2 for people, Krea 2 for creatures and stylised art, Seedream 5 Pro for environments, Ideogram for typography', badge: '✨ Auto' },
     { id: 'imagen', label: 'Imagen 4', provider: 'Google', icon: logoGemini, goodFor: 'Cinematic quality and stylized artistic renders' },
     { id: 'gemini-pro', label: 'Gemini 3 Pro', provider: 'Google', icon: logoGemini, goodFor: 'Prompt adherence and complex reasoning' },
+    { id: 'nano-21', label: 'Nano Banana 2.1', provider: 'Google', icon: logoNanabanana, goodFor: 'Newest Nano Banana: conversational editing, up to 14 references, up to 4K', badge: '🆕 New' },
     { id: 'nano', label: 'Nano Banana 2', provider: 'Banana', icon: logoNanabanana, goodFor: 'Speed, photorealism and detailed context', badge: '⭐ Recommended' },
     { id: 'wan-2.7-image-pro', label: 'WAN 2.7 Image Pro', provider: 'Replicate', icon: logoBytedance, goodFor: '4K-capable generation and multi-image editing in one model' },
+    { id: 'nano-banana-21-fal', label: 'Nano Banana 2.1 (FAL)', provider: 'FAL', icon: logoNanabanana, goodFor: 'Newest Nano Banana through FAL, up to 14 references and 4K', badge: '🆕 New' },
     { id: 'nano-banana-2-fal', label: 'Nano Banana 2 (FAL)', provider: 'FAL', icon: logoNanabanana, goodFor: 'Fast and photorealistic generation' },
     { id: 'wan-2.7-pro-fal', label: 'WAN 2.7 Pro (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'High-detail cinematic generation with reference-aware editing' },
     { id: 'grok-image', label: 'Grok Image', provider: 'xAI', icon: logoGrok, goodFor: 'Creative and diverse artistic generations' },
@@ -2059,6 +2114,7 @@ const CharacterSheetModal: React.FC<{
     showCameraControls: boolean;
     outfitModel: OutfitImageModel;
     onOutfitModelChange: (model: OutfitImageModel) => void;
+    outfitSameLabel: string;
 }> = ({
     character,
     onClose,
@@ -2073,6 +2129,7 @@ const CharacterSheetModal: React.FC<{
     showCameraControls,
     outfitModel,
     onOutfitModelChange,
+    outfitSameLabel,
 }) => {
         const [activeTab, setActiveTab] = useState<'bio' | 'look' | 'wardrobe' | 'angles' | 'versions'>('bio');
         const [outfitCount, setOutfitCount] = useState(4);
@@ -2773,23 +2830,7 @@ const CharacterSheetModal: React.FC<{
                                         <div className="flex items-center justify-between">
                                             <div className="text-sm font-semibold text-white">Outfit Variations</div>
                                             <div className="flex items-center gap-2">
-                                                <select
-                                                    value={outfitModel}
-                                                    onChange={(e) => onOutfitModelChange(e.target.value as OutfitImageModel)}
-                                                    className="bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 max-w-[13rem]"
-                                                    title="Model used for outfits and garment pieces"
-                                                >
-                                                    {OUTFIT_MODEL_OPTIONS.filter((option) => !option.group).map((option) => (
-                                                        <option key={option.id} value={option.id}>{option.label}</option>
-                                                    ))}
-                                                    {(['Cloud', 'Local'] as const).map((group) => (
-                                                        <optgroup key={group} label={group === 'Local' ? 'Local (download in Local AI)' : 'Cloud'}>
-                                                            {OUTFIT_MODEL_OPTIONS.filter((option) => option.group === group).map((option) => (
-                                                                <option key={option.id} value={option.id}>{option.label}</option>
-                                                            ))}
-                                                        </optgroup>
-                                                    ))}
-                                                </select>
+                                                <OutfitModelSelect value={outfitModel} onChange={onOutfitModelChange} sameLabel={outfitSameLabel} />
                                                 <select
                                                     value={outfitCount}
                                                     onChange={(e) => setOutfitCount(Number(e.target.value) || 4)}
@@ -6783,22 +6824,25 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             } else {
                 image = await generateImageWithFalWanV27Pro(prompt, { aspectRatio: modelAspectRatio });
             }
-        } else if (selectedReferenceModel === 'nano-banana-2-fal') {
+        } else if (selectedReferenceModel === 'nano-banana-2-fal' || selectedReferenceModel === 'nano-banana-21-fal') {
+            const version = selectedReferenceModel === 'nano-banana-21-fal' ? '2.1' : '2';
             const refs = await buildMoodboardReferences(baseImageUrl);
             if (refs.length > 0) {
                 const edited = await editImageWithFalNanoBanana2(prompt, refs, {
                     aspectRatio: modelAspectRatio,
                     resolution: imageSize,
                     numOutputs: 1,
+                    version,
                 });
                 if (!edited.length) {
-                    throw new Error('FAL Nano Banana 2 Edit returned no images.');
+                    throw new Error(`FAL Nano Banana ${version} Edit returned no images.`);
                 }
                 image = edited[0];
             } else {
                 image = await generateImageWithFalNanoBanana2(prompt, {
                     aspectRatio: modelAspectRatio,
                     resolution: imageSize,
+                    version,
                 });
             }
         } else if (selectedReferenceModel === 'firered') {
@@ -6809,17 +6853,18 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             image = await editImageWithFireRed(prompt, refs, { aspectRatio: modelAspectRatio });
         } else if (selectedReferenceModel === 'z-image') {
             image = await generateImageWithZImage(prompt, modelAspectRatio, loraOptions);
-        } else if (selectedReferenceModel === 'nano') {
+        } else if (selectedReferenceModel === 'nano' || selectedReferenceModel === 'nano-21') {
+            const nanoModel = selectedReferenceModel === 'nano-21' ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : 'gemini-3.1-flash-image-preview';
             const refs = await buildMoodboardReferences(baseImageUrl);
             image = refs.length > 0
                 ? await generateImageWithReferences(
                     prompt,
                     refs,
                     undefined,
-                    'gemini-3.1-flash-image-preview',
+                    nanoModel,
                     { aspectRatio: modelAspectRatio, imageSize }
                 )
-                : await generateImageWithNano(prompt, { aspectRatio: modelAspectRatio, imageSize });
+                : await generateImageWithNano(prompt, { aspectRatio: modelAspectRatio, imageSize, model: nanoModel });
         } else if (selectedReferenceModel === 'qwen-2512') {
             const baseImage = baseImageUrl ? await getBase64FromUrl(baseImageUrl) : await getMoodboardFallback();
             image = await generateImageWithQwenImage(prompt, modelAspectRatio, baseImage);
@@ -7002,21 +7047,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return generateImageWithFalWanV27Pro(enrichedPrompt, { aspectRatio: modelAspectRatio });
         }
 
-        if (marketingImageModel === 'nano-banana-2-fal') {
+        if (marketingImageModel === 'nano-banana-2-fal' || marketingImageModel === 'nano-banana-21-fal') {
+            const version = marketingImageModel === 'nano-banana-21-fal' ? '2.1' : '2';
             if (refs.length > 0) {
                 const edited = await editImageWithFalNanoBanana2(enrichedPrompt, refs, {
                     aspectRatio: modelAspectRatio,
                     resolution: imageSize,
                     numOutputs: 1,
+                    version,
                 });
                 if (!edited.length) {
-                    throw new Error('FAL Nano Banana 2 Edit returned no images.');
+                    throw new Error(`FAL Nano Banana ${version} Edit returned no images.`);
                 }
                 return edited[0];
             }
             return generateImageWithFalNanoBanana2(enrichedPrompt, {
                 aspectRatio: modelAspectRatio,
                 resolution: imageSize,
+                version,
             });
         }
 
@@ -7034,17 +7082,18 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             return generateImageWithZImage(enrichedPrompt, modelAspectRatio);
         }
 
-        if (marketingImageModel === 'nano') {
+        if (marketingImageModel === 'nano' || marketingImageModel === 'nano-21') {
+            const nanoModel = marketingImageModel === 'nano-21' ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : 'gemini-3.1-flash-image-preview';
             if (refs.length > 0) {
                 return generateImageWithReferences(
                     enrichedPrompt,
                     refs,
                     undefined,
-                    'gemini-3.1-flash-image-preview',
+                    nanoModel,
                     { aspectRatio: modelAspectRatio, imageSize }
                 );
             }
-            return generateImageWithNano(enrichedPrompt, { aspectRatio: modelAspectRatio, imageSize });
+            return generateImageWithNano(enrichedPrompt, { aspectRatio: modelAspectRatio, imageSize, model: nanoModel });
         }
 
         if (marketingImageModel === 'qwen-2512') {
@@ -9384,13 +9433,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
     };
 
-    /** "Same as image model" keeps the old behaviour: the concept model if it can edit, else Seedream. */
-    const resolveOutfitModel = (): Exclude<OutfitImageModel, 'same'> => {
-        if (outfitImageModel !== 'same') return outfitImageModel;
-        if (LEGACY_OUTFIT_MODELS.has(referenceImageModel)) return referenceImageModel as Exclude<OutfitImageModel, 'same'>;
-        if (referenceImageModel === 'flux-3-edit-fal' || referenceImageModel === 'krea-3-edit-fal' || referenceImageModel === 'seedream-v5-pro-edit-fal' || referenceImageModel === 'gpt-image-2-fal') return referenceImageModel;
-        return 'seedream';
-    };
+    const resolveOutfitModel = (): Exclude<OutfitImageModel, 'same'> =>
+        outfitImageModel === 'same' ? outfitModelForImageModel(referenceImageModel) : outfitImageModel;
+    const sameAsImageModelLabel = `Same as image model (${outfitModelLabel(outfitModelForImageModel(referenceImageModel))})`;
 
     /** One image of a character (or garment) from reference images, with the chosen outfit model. */
     const renderWithOutfitModel = async (
@@ -9408,6 +9453,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return generateImageWithSeedreamReferences(prompt, refs, modelAspectRatio, seedreamSize);
             case 'nano-banana-2-fal':
                 return firstEdit(await editImageWithFalNanoBanana2(prompt, refs, { aspectRatio: modelAspectRatio, resolution: imageSize, numOutputs: 1 }), 'FAL Nano Banana 2 Edit');
+            case 'nano-banana-21-fal':
+                return firstEdit(await editImageWithFalNanoBanana2(prompt, refs, { aspectRatio: modelAspectRatio, resolution: imageSize, numOutputs: 1, version: '2.1' }), 'FAL Nano Banana 2.1 Edit');
+            case 'firered':
+                return editImageWithFireRed(prompt, refs, { aspectRatio: modelAspectRatio });
+            case 'qwen-multiangle-fal':
+                return firstEdit(await editImageWithFalQwenMultiAngle(prompt, refs, { numOutputs: 1 }), 'FAL Qwen Image Max Edit');
             case 'seedream-v5-pro-edit-fal':
                 return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), 'FAL Seedream 5.0 Pro Edit');
             case 'gpt-image-2-fal':
@@ -9431,13 +9482,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return runLocalModel(model, 'edit', { prompt, width, height, images: refs, enhance: true });
             }
             case 'nano':
+            case 'nano-21':
             case 'gemini-pro':
             default:
                 return generateImageWithReferences(
                     prompt,
                     refs,
                     undefined,
-                    model === 'gemini-pro' ? 'gemini-3-pro-image-preview' : 'gemini-3.1-flash-image-preview',
+                    model === 'gemini-pro' ? 'gemini-3-pro-image-preview' : model === 'nano-21' ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : 'gemini-3.1-flash-image-preview',
                     { aspectRatio: modelAspectRatio, imageSize }
                 );
         }
@@ -10894,22 +10946,25 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     } else {
                         imageMedia = await generateImageWithFalWanV27Pro(fullPrompt, { aspectRatio: modelAspectRatio });
                     }
-                } else if (activeReferenceModel === 'nano-banana-2-fal') {
+                } else if (activeReferenceModel === 'nano-banana-2-fal' || activeReferenceModel === 'nano-banana-21-fal') {
+                    const version = activeReferenceModel === 'nano-banana-21-fal' ? '2.1' : '2';
                     const falInputs = compositionData ? [compositionData, ...supplementalReferences] : supplementalReferences;
                     if (falInputs.length > 0) {
                         const edited = await editImageWithFalNanoBanana2(fullPrompt, falInputs, {
                             aspectRatio: modelAspectRatio,
                             resolution: imageSize,
                             numOutputs: 1,
+                            version,
                         });
                         if (!edited.length) {
-                            throw new Error('FAL Nano Banana 2 Edit returned no images.');
+                            throw new Error(`FAL Nano Banana ${version} Edit returned no images.`);
                         }
                         imageMedia = edited[0];
                     } else {
                         imageMedia = await generateImageWithFalNanoBanana2(fullPrompt, {
                             aspectRatio: modelAspectRatio,
                             resolution: imageSize,
+                            version,
                         });
                     }
                 } else if (activeReferenceModel === 'firered') {
@@ -10945,7 +11000,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         fullPrompt,
                         supplementalReferences,
                         compositionData,
-                        modelToUse,
+                        activeReferenceModel === 'nano-21' ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : modelToUse,
                         { aspectRatio: modelAspectRatio, imageSize: imageSize }
                     );
                 }
@@ -15267,7 +15322,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                     </div>
                                                 )}
                                             </div>
-                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
+                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
                                                 <select
                                                     value={imageSize}
                                                     onChange={(e) => setImageSize(e.target.value as any)}
@@ -15707,8 +15762,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                 >
                                                                     {ref.isGeneratingOutfits ? 'Generating Outfits...' : 'Generate Outfits'}
                                                                 </button>
+                                                                <OutfitModelSelect
+                                                                    value={outfitImageModel}
+                                                                    onChange={setOutfitImageModel}
+                                                                    sameLabel={sameAsImageModelLabel}
+                                                                    className="bg-gray-800 text-white text-[10px] px-1.5 py-1 rounded border border-gray-700 max-w-[14rem]"
+                                                                />
                                                             </div>
-                                                            <p className="text-[10px] text-gray-500">Outfits use context models (Seedream 4.5 or Gemini).</p>
                                                             <textarea
                                                                 value={ref.personalityNotes || ''}
                                                                 onChange={(e) => setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, personalityNotes: e.target.value } : r))}
@@ -15866,12 +15926,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                     Keep one base identity. Outfit variants should stay in this section only.
                                                                 </div>
                                                             </div>
-                                                            <button
-                                                                onClick={() => handleGenerateCharacterOutfits(ref.id)}
-                                                                className="text-xs font-semibold px-3 py-1.5 rounded bg-indigo-700 text-white hover:bg-indigo-600"
-                                                            >
-                                                                {ref.isGeneratingOutfits ? 'Generating Outfits...' : 'Generate Outfits'}
-                                                            </button>
+                                                            <div className="flex items-center gap-2">
+                                                                <OutfitModelSelect value={outfitImageModel} onChange={setOutfitImageModel} sameLabel={sameAsImageModelLabel} />
+                                                                <button
+                                                                    onClick={() => handleGenerateCharacterOutfits(ref.id)}
+                                                                    className="text-xs font-semibold px-3 py-1.5 rounded bg-indigo-700 text-white hover:bg-indigo-600"
+                                                                >
+                                                                    {ref.isGeneratingOutfits ? 'Generating Outfits...' : 'Generate Outfits'}
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                         <div className="grid grid-cols-1 lg:grid-cols-[260px,1fr] gap-4">
                                                             <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-3 space-y-3">
@@ -16769,7 +16832,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         <AspectRatioPicker value={referenceAspectRatio} onChange={setReferenceAspectRatio} />
                                         {styleRefsButton}
                                         <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 mr-2">
-                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
+                                            {(referenceImageModel === 'gemini-pro' || referenceImageModel === 'nano' || referenceImageModel === 'nano-21' || referenceImageModel === 'nano-banana-2-fal' || referenceImageModel === 'nano-banana-21-fal' || referenceImageModel === 'wan-2.7-image-pro' || referenceImageModel === 'seedream') && (
                                                 <select
                                                     value={imageSize}
                                                     onChange={(e) => setImageSize(e.target.value as any)}
@@ -19188,7 +19251,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                             <h3 className="text-lg font-semibold text-white">Marketing Image Models</h3>
                                             <p className="text-xs text-gray-400">Choose the generator for posters, thumbnails, and promo creatives.</p>
                                         </div>
-                                        {(marketingImageModel === 'gemini-pro' || marketingImageModel === 'seedream' || marketingImageModel === 'nano-banana-2-fal' || marketingImageModel === 'wan-2.7-image-pro') && (
+                                        {(marketingImageModel === 'gemini-pro' || marketingImageModel === 'seedream' || marketingImageModel === 'nano-21' || marketingImageModel === 'nano-banana-2-fal' || marketingImageModel === 'nano-banana-21-fal' || marketingImageModel === 'wan-2.7-image-pro') && (
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[11px] text-gray-400">Output Size</span>
                                                 <select
@@ -19216,6 +19279,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         {(
                                             [
                                                 'nano-banana-pro',
+                                                'nano-21',
+                                                'nano-banana-21-fal',
                                                 'imagen',
                                                 'gemini-pro',
                                                 'grok-image',
@@ -19675,6 +19740,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     showCameraControls={isMultiAngleModel}
                     outfitModel={outfitImageModel}
                     onOutfitModelChange={setOutfitImageModel}
+                    outfitSameLabel={sameAsImageModelLabel}
                 />
             )}
             {fullResView && (

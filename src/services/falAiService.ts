@@ -17,6 +17,8 @@ const MODELS = {
     GPT_IMAGE_25_SUNBURST_EDIT: 'openai/gpt-image-2.5/sunburst/edit',
     NANO_BANANA_2_T2I: 'fal-ai/nano-banana-2',
     NANO_BANANA_2_EDIT: 'fal-ai/nano-banana-2/edit',
+    NANO_BANANA_21_T2I: 'google/nano-banana-2.1',
+    NANO_BANANA_21_EDIT: 'google/nano-banana-2.1/edit',
     SEEDREAM_V5_LITE_T2I: 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
     WAN_V27_PRO_T2I: 'fal-ai/wan/v2.7/pro/text-to-image',
     WAN_V27_PRO_EDIT: 'fal-ai/wan/v2.7/pro/edit',
@@ -710,15 +712,23 @@ const normalizeFalNanoBananaAspectRatio = (aspectRatio?: string): FalNanoBananaA
     return allowed.has(value) ? value : 'auto';
 };
 
-const normalizeFalNanoBananaResolution = (resolution?: string): FalNanoBananaResolution => {
+const normalizeFalNanoBananaResolution = (resolution?: string, version: FalNanoBananaVersion = '2'): FalNanoBananaResolution => {
     switch (resolution) {
         case '0.5K':
+            return version === '2.1' ? '1K' : '0.5K';
         case '2K':
         case '4K':
             return resolution;
         default:
             return '1K';
     }
+};
+
+export type FalNanoBananaVersion = '2' | '2.1';
+
+const falNanoBananaEndpoint = (version: FalNanoBananaVersion, kind: 't2i' | 'edit') => {
+    if (version === '2.1') return kind === 't2i' ? MODELS.NANO_BANANA_21_T2I : MODELS.NANO_BANANA_21_EDIT;
+    return kind === 't2i' ? MODELS.NANO_BANANA_2_T2I : MODELS.NANO_BANANA_2_EDIT;
 };
 
 export const generateImageWithFalNanoBanana2 = async (
@@ -728,12 +738,16 @@ export const generateImageWithFalNanoBanana2 = async (
         resolution?: FalNanoBananaResolution;
         numOutputs?: number;
         enableWebSearch?: boolean;
+        version?: FalNanoBananaVersion;
     }
 ): Promise<MediaItem> => {
+    const version = opts?.version || '2';
+    const endpoint = falNanoBananaEndpoint(version, 't2i');
+    const label = `FAL Nano Banana ${version}`;
     const input: Record<string, any> = {
         prompt,
         aspect_ratio: normalizeFalNanoBananaAspectRatio(opts?.aspectRatio),
-        resolution: normalizeFalNanoBananaResolution(opts?.resolution),
+        resolution: normalizeFalNanoBananaResolution(opts?.resolution, version),
     };
     if (opts?.numOutputs) {
         input.num_images = opts.numOutputs;
@@ -742,26 +756,27 @@ export const generateImageWithFalNanoBanana2 = async (
         input.enable_web_search = opts.enableWebSearch;
     }
 
-    const output = await runFal(MODELS.NANO_BANANA_2_T2I, input);
+    const output = await runFal(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
 
     if (urls.length === 0) {
-        throw new Error('FAL Nano Banana 2 text-to-image returned no images.');
+        throw new Error(`${label} text-to-image returned no images.`);
     }
 
     const url = urls[0];
     recordUsage({
         provider: 'fal',
-        model: MODELS.NANO_BANANA_2_T2I,
+        model: endpoint,
         kind: 'image',
         units: 1,
         unitLabel: 'image',
-        note: 'FAL Nano Banana 2 text-to-image',
+        note: `${label} text-to-image`,
     });
 
+    const slug = version === '2.1' ? 'nano_banana_2_1' : 'nano_banana_2';
     return {
-        id: `fal-nano-banana-2-t2i-${Date.now()}`,
-        name: `fal_nano_banana_2_${prompt.slice(0, 16) || 'image'}.png`,
+        id: `fal-${slug.replace(/_/g, '-')}-t2i-${Date.now()}`,
+        name: `fal_${slug}_${prompt.slice(0, 16) || 'image'}.png`,
         type: 'image',
         url,
         source: 'generated',
@@ -776,21 +791,27 @@ export const editImageWithFalNanoBanana2 = async (
         resolution?: FalNanoBananaResolution;
         numOutputs?: number;
         enableWebSearch?: boolean;
+        version?: FalNanoBananaVersion;
     }
 ): Promise<MediaItem[]> => {
+    const version = opts?.version || '2';
+    const endpoint = falNanoBananaEndpoint(version, 'edit');
+    const label = `FAL Nano Banana ${version} Edit`;
+    const maxImages = version === '2.1' ? 14 : Number.POSITIVE_INFINITY;
     const images = Array.isArray(image) ? image : [image];
     const imageUrls = images
         .filter((item) => !!item?.base64)
+        .slice(0, maxImages)
         .map((item) => toDataUri(item));
     if (imageUrls.length === 0) {
-        throw new Error('FAL Nano Banana 2 Edit requires at least one reference image.');
+        throw new Error(`${label} requires at least one reference image.`);
     }
 
     const input: Record<string, any> = {
         prompt,
         image_urls: imageUrls,
         aspect_ratio: normalizeFalNanoBananaAspectRatio(opts?.aspectRatio),
-        resolution: normalizeFalNanoBananaResolution(opts?.resolution),
+        resolution: normalizeFalNanoBananaResolution(opts?.resolution, version),
     };
     if (opts?.numOutputs) {
         input.num_images = opts.numOutputs;
@@ -799,25 +820,26 @@ export const editImageWithFalNanoBanana2 = async (
         input.enable_web_search = opts.enableWebSearch;
     }
 
-    const output = await runFal(MODELS.NANO_BANANA_2_EDIT, input);
+    const output = await runFal(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
 
     if (urls.length === 0) {
-        throw new Error('FAL Nano Banana 2 Edit returned no images.');
+        throw new Error(`${label} returned no images.`);
     }
 
     recordUsage({
         provider: 'fal',
-        model: MODELS.NANO_BANANA_2_EDIT,
+        model: endpoint,
         kind: 'edit',
         units: 1,
         unitLabel: 'request',
-        note: 'FAL Nano Banana 2 edit',
+        note: label,
     });
 
+    const slug = version === '2.1' ? 'nano_banana_2_1' : 'nano_banana_2';
     return urls.map((url, index) => ({
-        id: `fal-nano-banana-2-edit-${Date.now()}-${index}`,
-        name: `fal_nano_banana_2_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
+        id: `fal-${slug.replace(/_/g, '-')}-edit-${Date.now()}-${index}`,
+        name: `fal_${slug}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
         type: 'image',
         url,
         source: 'generated',

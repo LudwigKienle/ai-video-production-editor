@@ -137,6 +137,8 @@ const getAiClient = () => {
 
 const shouldUseReplicateForGoogleModels = () => getGoogleModelProvider() === 'replicate';
 const GEMINI_NANO_BANANA_2_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+export const GEMINI_NANO_BANANA_21_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+export type GeminiReferenceImageModel = 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | typeof GEMINI_NANO_BANANA_21_IMAGE_MODEL;
 const GEMINI_3_PRO_IMAGE_MODEL = 'gemini-3-pro-image-preview';
 const GEMINI_TEXT_MODEL_PRO = 'gemini-3.1-pro-preview';
 const GEMINI_TEXT_MODEL_FLASH = 'gemini-3.1-flash-preview';
@@ -608,7 +610,7 @@ export const generateVideoWithVeo = (
 
 export const generateImageWithNano = async (
     prompt: string,
-    config?: { aspectRatio?: string; imageSize?: string }
+    config?: { aspectRatio?: string; imageSize?: string; model?: typeof GEMINI_NANO_BANANA_2_IMAGE_MODEL | typeof GEMINI_NANO_BANANA_21_IMAGE_MODEL }
 ): Promise<MediaItem> => {
     if (shouldUseReplicateForGoogleModels()) {
         return generateImageWithGemini3ProReplicate(
@@ -618,7 +620,7 @@ export const generateImageWithNano = async (
         );
     }
     const ai = getAiClient();
-    const model = GEMINI_NANO_BANANA_2_IMAGE_MODEL;
+    const model = config?.model || GEMINI_NANO_BANANA_2_IMAGE_MODEL;
     const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
         model,
         contents: {
@@ -652,7 +654,7 @@ export const generateImageWithNano = async (
                     kind: 'image',
                     units: 1,
                     unitLabel: 'image',
-                    note: 'Nano Banana 2 image generation',
+                    note: model === GEMINI_NANO_BANANA_21_IMAGE_MODEL ? 'Nano Banana 2.1 image generation' : 'Nano Banana 2 image generation',
                 });
                 return item;
             }
@@ -3422,7 +3424,7 @@ export const generateImageWithReferences = async (
     prompt: string,
     referenceImages: { base64: string; mimeType: string }[],
     sketchImage?: { base64: string; mimeType: string },
-    model: 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' = 'gemini-3.1-flash-image-preview',
+    model: GeminiReferenceImageModel = 'gemini-3.1-flash-image-preview',
     config?: { aspectRatio?: string, imageSize?: string }
 ): Promise<MediaItem> => {
     if (shouldUseReplicateForGoogleModels()) {
@@ -3517,6 +3519,7 @@ export const generateImageWithReferences = async (
         const fallbackImage = await generateImageWithNano(prompt, {
             aspectRatio: config?.aspectRatio || '16:9',
             imageSize: config?.imageSize || '1K',
+            model: model === GEMINI_NANO_BANANA_21_IMAGE_MODEL ? GEMINI_NANO_BANANA_21_IMAGE_MODEL : undefined,
         });
         // Prepend name to indicate it's a fallback
         fallbackImage.name = `(fallback)_${fallbackImage.name}`;
