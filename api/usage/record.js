@@ -61,6 +61,15 @@ const MODEL_PROVIDER_RATES = {
   'xai:grok-2-image:image': { unitCost: 0.07 },
   'xai:grok-imagine-video:video': { unitCost: 0.05 }, // Estimated from partner/market Grok video rates.
 
+  // MachGen (BYOK only; images bill per megapixel, ~1 MP shown).
+  'machgen:MiniMax-H3-Turbo:video': { unitCost: 0.02 }, // $0.01/s promo until Nov 1, 2026.
+  'machgen:MiniMax-H3:video': { unitCost: 0.04 }, // 768p, 1-15 s.
+  'machgen:LTX-2.3-Pro:video': { unitCost: 0.03 }, // 1080p.
+  'machgen:Vidu-Q3-Turbo:video': { unitCost: 0.04 }, // 720p, 6-10 s.
+  'machgen:Wan2.2-A14B:video': { unitCost: 0.036 }, // 720p.
+  'machgen:FLUX.2-dev:image': { unitCost: 0.004 },
+  'machgen:FLUX.2-dev:edit': { unitCost: 0.004 },
+  'machgen:HiDream-O1-Image:image': { unitCost: 0.003 },
   // FAL
   'fal:fal-ai/qwen-image-max/text-to-image:image': { unitCost: 0.075 },
   'fal:fal-ai/qwen-image-max/edit:edit': { unitCost: 0.075 },

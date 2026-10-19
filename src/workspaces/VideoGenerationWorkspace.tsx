@@ -42,10 +42,20 @@ import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/g
 import { structurePromptForModel } from '../utils/modelPromptGuides';
 import { pickVideoModel } from '../utils/modelAutoSelect';
 import { runLocalModel } from '../services/localModelService';
+import { MACHGEN_VIDEO_MODELS, generateVideoWithMachgen, getMachgenApiKey, type MachgenVideoModelId } from '../services/machgenService';
 import { videoSizeForAspect } from '../services/localWorkflowFill';
 
 /** Auto never picks a local model: it may not be downloaded. */
 const option_isCloud = (id: string) => !id.endsWith('-local');
+
+/** Video workspace ids for the models served by MachGen. */
+const MACHGEN_VIDEO_IDS: Partial<Record<VideoModelId, MachgenVideoModelId>> = {
+  'machgen-minimax-h3-turbo': 'MiniMax-H3-Turbo',
+  'machgen-minimax-h3': 'MiniMax-H3',
+  'machgen-ltx-23-pro': 'LTX-2.3-Pro',
+  'machgen-vidu-q3-turbo': 'Vidu-Q3-Turbo',
+  'machgen-wan22-a14b': 'Wan2.2-A14B',
+};
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
@@ -91,6 +101,11 @@ type VideoModelId =
   | 'wan-30-i2v-fal'
   | 'flux-3-t2v-fal'
   | 'flux-3-i2v-fal'
+  | 'machgen-minimax-h3-turbo'
+  | 'machgen-minimax-h3'
+  | 'machgen-ltx-23-pro'
+  | 'machgen-vidu-q3-turbo'
+  | 'machgen-wan22-a14b'
   | 'wan-22-5b-local'
   | 'ltx-23-local'
   | 'ltx-25-local'
@@ -148,6 +163,11 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'wan-30-i2v-fal', label: 'Wan 3.0 (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true, supportsEndFrame: true },
   { id: 'flux-3-t2v-fal', label: 'FLUX.3 Video (Text-to-Video)', provider: 'FAL', supportsImage: false },
   { id: 'flux-3-i2v-fal', label: 'FLUX.3 Video (Image-to-Video)', provider: 'FAL', supportsImage: true, requiresImage: true },
+  { id: 'machgen-minimax-h3-turbo', label: 'MiniMax H3 Turbo (MachGen, fast, audio)', provider: 'MachGen', supportsImage: true, supportsEndFrame: true },
+  { id: 'machgen-minimax-h3', label: 'MiniMax H3 (MachGen, audio)', provider: 'MachGen', supportsImage: true, supportsEndFrame: true },
+  { id: 'machgen-ltx-23-pro', label: 'LTX-2.3 Pro 1080p (MachGen, audio)', provider: 'MachGen', supportsImage: true, supportsEndFrame: true },
+  { id: 'machgen-vidu-q3-turbo', label: 'Vidu Q3 Turbo (MachGen, audio)', provider: 'MachGen', supportsImage: true, supportsEndFrame: true },
+  { id: 'machgen-wan22-a14b', label: 'Wan 2.2 A14B (MachGen)', provider: 'MachGen', supportsImage: true },
   { id: 'wan-22-5b-local', label: 'Wan 2.2 5B (Local)', provider: 'Local', supportsImage: true },
   { id: 'ltx-23-local', label: 'LTX-2.3 with audio (Local)', provider: 'Local', supportsImage: true },
   { id: 'ltx-25-local', label: 'LTX-2.5 with audio (Local)', provider: 'Local', supportsImage: true },
@@ -236,6 +256,11 @@ const MODEL_ASPECT_RATIOS: Record<VideoModelId, AspectRatioOption[]> = {
   'wan-30-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'flux-3-t2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'flux-3-i2v-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'machgen-minimax-h3-turbo': ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  'machgen-minimax-h3': ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  'machgen-ltx-23-pro': ['16:9'],
+  'machgen-vidu-q3-turbo': ['16:9', '9:16', '1:1', '4:3'],
+  'machgen-wan22-a14b': ['16:9'],
   'wan-22-5b-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'ltx-23-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'ltx-25-local': ['16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -281,6 +306,11 @@ const VIDEO_MODEL_PRICING: Partial<Record<VideoModelId, VideoModelPricing>> = {
   'wan-30-i2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/wan-3.0/image-to-video' },
   'flux-3-t2v-fal': { provider: 'fal', kind: 'video', model: 'blackforestlabs/flux-3/text-to-video' },
   'flux-3-i2v-fal': { provider: 'fal', kind: 'video', model: 'blackforestlabs/flux-3/image-to-video' },
+  'machgen-minimax-h3-turbo': { provider: 'machgen', kind: 'video', model: 'MiniMax-H3-Turbo' },
+  'machgen-minimax-h3': { provider: 'machgen', kind: 'video', model: 'MiniMax-H3' },
+  'machgen-ltx-23-pro': { provider: 'machgen', kind: 'video', model: 'LTX-2.3-Pro' },
+  'machgen-vidu-q3-turbo': { provider: 'machgen', kind: 'video', model: 'Vidu-Q3-Turbo' },
+  'machgen-wan22-a14b': { provider: 'machgen', kind: 'video', model: 'Wan2.2-A14B' },
   'happy-horse-t2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/happy-horse/text-to-video' },
   'happy-horse-i2v-fal': { provider: 'fal', kind: 'video', model: 'alibaba/happy-horse/image-to-video' },
   'kling-26': { provider: 'replicate', kind: 'video', model: 'kwaivgi/kling-v2.6' },
@@ -317,6 +347,11 @@ const VIDEO_DURATION_OPTIONS: Record<VideoModelId, { supported: boolean; options
   'wan-30-i2v-fal': { supported: true, options: [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30], fallback: 5 },
   'flux-3-t2v-fal': { supported: true, options: [5, 6, 8, 10, 12, 15, 20], fallback: 8 },
   'flux-3-i2v-fal': { supported: true, options: [5, 6, 8, 10, 12, 15, 20], fallback: 8 },
+  'machgen-minimax-h3-turbo': { supported: true, options: MACHGEN_VIDEO_MODELS['MiniMax-H3-Turbo'].durations, fallback: MACHGEN_VIDEO_MODELS['MiniMax-H3-Turbo'].durations[0] },
+  'machgen-minimax-h3': { supported: true, options: MACHGEN_VIDEO_MODELS['MiniMax-H3'].durations, fallback: MACHGEN_VIDEO_MODELS['MiniMax-H3'].durations[0] },
+  'machgen-ltx-23-pro': { supported: true, options: MACHGEN_VIDEO_MODELS['LTX-2.3-Pro'].durations, fallback: MACHGEN_VIDEO_MODELS['LTX-2.3-Pro'].durations[0] },
+  'machgen-vidu-q3-turbo': { supported: true, options: MACHGEN_VIDEO_MODELS['Vidu-Q3-Turbo'].durations, fallback: MACHGEN_VIDEO_MODELS['Vidu-Q3-Turbo'].durations[0] },
+  'machgen-wan22-a14b': { supported: false, options: MACHGEN_VIDEO_MODELS['Wan2.2-A14B'].durations, fallback: MACHGEN_VIDEO_MODELS['Wan2.2-A14B'].durations[0] },
   'wan-22-5b-local': { supported: true, options: [2, 3, 4, 5], fallback: 5 },
   'ltx-23-local': { supported: true, options: [4, 5, 6, 8, 10, 12, 15, 20], fallback: 6 },
   'ltx-25-local': { supported: true, options: [4, 5, 6, 8, 10, 12, 15, 20], fallback: 6 },
@@ -631,7 +666,8 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     } else if (supportsAudioInput) {
       badges.push('Audio optional');
     }
-    if (modelId === 'happy-horse-t2v-fal' || modelId === 'happy-horse-i2v-fal' || modelId === 'flux-3-t2v-fal' || modelId === 'flux-3-i2v-fal') {
+    const machgenModel = MACHGEN_VIDEO_IDS[modelId];
+    if (modelId === 'happy-horse-t2v-fal' || modelId === 'happy-horse-i2v-fal' || modelId === 'flux-3-t2v-fal' || modelId === 'flux-3-i2v-fal' || (machgenModel && MACHGEN_VIDEO_MODELS[machgenModel].audio)) {
       badges.push('Native audio');
     }
     return badges;
@@ -646,6 +682,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     }
     if (modelId === 'wan-22-5b-local' || modelId === 'ltx-23-local' || modelId === 'ltx-25-local') {
       return 'Runs on your GPU through ComfyUI (download it in Local AI first). Add a start frame for image-to-video, leave it empty for text-to-video. The first run loads the model and takes a while.';
+    }
+    if (MACHGEN_VIDEO_IDS[modelId]) {
+      const keyHint = getMachgenApiKey() ? '' : ' Add your MachGen key in Settings → AI providers first.';
+      if (modelId === 'machgen-minimax-h3-turbo') {
+        return `MiniMax H3 Turbo on MachGen: fast and cheap (about $0.02/s), 5–15 s with native stereo audio. Prompt only for text-to-video, add a start frame (and optional end frame) for image-to-video.${keyHint}`;
+      }
+      return `Runs on MachGen. Prompt only for text-to-video; add a start frame for image-to-video.${keyHint}`;
     }
     if (modelId === 'flux-3-t2v-fal') {
       return 'FLUX.3 renders 5–20 s with native audio in one continuous shot; describe the motion and the sound you want to hear.';
@@ -914,7 +957,8 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       setStatus('Please enter a prompt.');
       return;
     }
-    if (billingMode === 'hosted' && onValidateHostedGeneration) {
+    // MachGen runs on the user's own key, so hosted credits do not apply.
+    if (billingMode === 'hosted' && !MACHGEN_VIDEO_IDS[modelId] && onValidateHostedGeneration) {
       const pricing = VIDEO_MODEL_PRICING[modelId];
       if (pricing) {
         const validation = await onValidateHostedGeneration({
@@ -1212,6 +1256,21 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
             fps: 24,
             images: reference ? [reference] : undefined,
           }, (message) => setStatus(message));
+          break;
+        }
+        case 'machgen-minimax-h3-turbo':
+        case 'machgen-minimax-h3':
+        case 'machgen-ltx-23-pro':
+        case 'machgen-vidu-q3-turbo':
+        case 'machgen-wan22-a14b': {
+          const machgenModel = MACHGEN_VIDEO_IDS[resolvedModelId];
+          if (!machgenModel) throw new Error(`Unknown MachGen model: ${resolvedModelId}`);
+          item = await generateVideoWithMachgen(machgenModel, shapedPrompt, {
+            duration: normalizedDurationSeconds,
+            aspectRatio,
+            startImage: reference || undefined,
+            endImage: reference && supportsEndFrame ? endFrameReference || undefined : undefined,
+          });
           break;
         }
         case 'flux-3-t2v-fal':

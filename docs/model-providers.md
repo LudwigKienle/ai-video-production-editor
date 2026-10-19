@@ -7,6 +7,7 @@
 | Google (Gemini / Imagen / Veo) | API key | Script, prompts, Imagen, Nano Banana, Veo |
 | Replicate | API key | Flux, Z-Image, Qwen, upscaling, Lyria, Demucs, P-Video |
 | fal.ai | API key | Most video models (Kling, Seedance, Wan, LTX, MiniMax, PixVerse, Grok, FLUX.3), GPT Image, Seedream, Krea 2 / 3, Ideogram, FLUX.3 |
+| MachGen | `MGA_<key_id>:<secret>` | MiniMax H3 Turbo and H3, LTX-2.3 Pro, Vidu Q3 Turbo, Wan 2.2 A14B (video); FLUX.2 dev, HiDream O1 (images) |
 | Higgsfield | `KEY_ID:KEY_SECRET` | Soul / Soul Cinema / DoP, and a **second host** for the shared vendor models |
 | Midjourney | your account via Jeff (browser agent) | Concept and storyboard images |
 | Claude Code / Codex | their own CLI login | Assistant agents |
@@ -25,6 +26,25 @@ one entry, not a new function. Field names were checked against fal's model page
 
 Entries today: Kling 3.0 Standard and 4K, MiniMax H3, Hailuo 2.3, PixVerse 6, LTX 2.5 Pro,
 Wan 3.0 and Wan 3.0 Prime. Costs in the pricing table are generated from the same entries.
+
+## MachGen (`src/services/machgenService.ts`)
+
+[MachGen](https://www.machgen.ai) serves open-weights models on its own fast inference
+stack. The app calls its REST API directly with the key from Settings (it never goes
+through the hosted proxy, so hosted credits do not apply):
+
+- `POST /api/v0/upload` uploads a start/end frame or reference and returns an
+  `artifact_path`, used as `@input/<artifact_path>` in `src_image_urls`.
+- `POST /api/v0/generate` takes `model`, `task_type` (T2V, I2V, R2V, T2I, I2I), `prompt`
+  and `video_config` (`duration_secs`, `height`, `aspect_ratio`, `fps`, `audio`) or
+  `image_config` (`width`, `height`), and returns a `task_id`.
+- `GET /api/v0/tasks/{id}` is polled until `COMPLETED` or `FAILED`; the result is
+  downloaded with the key into a local blob.
+
+**MiniMax H3 Turbo** is the fast, cheap default: 480p or 768p, 16:9 / 9:16 / 1:1 / 4:3 /
+3:4 / 21:9, 5–15 s at 24 fps with native stereo audio, $0.02/s ($0.01/s promotion until
+Nov 1, 2026). With a start frame it runs image-to-video; an end frame is used as the
+last frame. In Video pick "MiniMax H3 Turbo (MachGen, fast, audio)".
 
 ## Higgsfield as an alternative host (`src/services/higgsfieldService.ts`)
 

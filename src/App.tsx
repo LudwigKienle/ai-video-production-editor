@@ -525,6 +525,15 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-flux-3-klein-edit', provider: 'fal', model: 'blackforestlabs/flux-3/klein/edit-image', kind: 'edit', unitCost: withMargin(0.009), unitLabel: 'request', label: 'FAL FLUX.3 Klein Edit (1K)' },
     { id: 'fal-flux-3-t2v', provider: 'fal', model: 'blackforestlabs/flux-3/text-to-video', kind: 'video', unitCost: withMargin(0.29), unitLabel: 'second', label: 'FAL FLUX.3 Video T2V (1080p)' },
     { id: 'fal-flux-3-i2v', provider: 'fal', model: 'blackforestlabs/flux-3/image-to-video', kind: 'video', unitCost: withMargin(0.29), unitLabel: 'second', label: 'FAL FLUX.3 Video I2V (1080p)' },
+    // MachGen (machgen.ai) pricebook, October 2026. Images bill per megapixel; these are ~1 MP prices.
+    { id: 'machgen-minimax-h3-turbo', provider: 'machgen', model: 'MiniMax-H3-Turbo', kind: 'video', unitCost: withMargin(0.02), unitLabel: 'second', label: 'MachGen MiniMax H3 Turbo (480/768p; $0.01/s promo until Nov 1)' },
+    { id: 'machgen-minimax-h3', provider: 'machgen', model: 'MiniMax-H3', kind: 'video', unitCost: withMargin(0.04), unitLabel: 'second', label: 'MachGen MiniMax H3 (768p, 1-15 s)' },
+    { id: 'machgen-ltx-23-pro', provider: 'machgen', model: 'LTX-2.3-Pro', kind: 'video', unitCost: withMargin(0.03), unitLabel: 'second', label: 'MachGen LTX-2.3 Pro (1080p)' },
+    { id: 'machgen-vidu-q3-turbo', provider: 'machgen', model: 'Vidu-Q3-Turbo', kind: 'video', unitCost: withMargin(0.04), unitLabel: 'second', label: 'MachGen Vidu Q3 Turbo (720p, 6-10 s)' },
+    { id: 'machgen-wan22-a14b', provider: 'machgen', model: 'Wan2.2-A14B', kind: 'video', unitCost: withMargin(0.036), unitLabel: 'second', label: 'MachGen Wan 2.2 A14B (720p)' },
+    { id: 'machgen-flux2-dev', provider: 'machgen', model: 'FLUX.2-dev', kind: 'image', unitCost: withMargin(0.004), unitLabel: 'image', label: 'MachGen FLUX.2 dev ($0.004/MP)' },
+    { id: 'machgen-flux2-dev-edit', provider: 'machgen', model: 'FLUX.2-dev', kind: 'edit', unitCost: withMargin(0.004), unitLabel: 'image', label: 'MachGen FLUX.2 dev edit ($0.004/MP)' },
+    { id: 'machgen-hidream-o1', provider: 'machgen', model: 'HiDream-O1-Image', kind: 'image', unitCost: withMargin(0.003), unitLabel: 'image', label: 'MachGen HiDream O1 ($0.003/MP)' },
     { id: 'fal-hunyuan3d-v3', provider: 'fal', model: 'fal-ai/hunyuan3d-v3/image-to-3d', kind: 'edit', unitCost: withMargin(0.3), unitLabel: 'request', label: 'FAL Hunyuan3D v3 Image-to-3D' },
     { id: 'fal-trellis-2', provider: 'fal', model: 'fal-ai/trellis-2', kind: 'edit', unitCost: withMargin(0.1), unitLabel: 'request', label: 'FAL Trellis 2 Image-to-3D' },
     { id: 'fal-rodin-v25', provider: 'fal', model: 'fal-ai/hyper3d/rodin/v2.5', kind: 'edit', unitCost: withMargin(0.4), unitLabel: 'request', label: 'FAL Rodin 2.5 Image-to-3D' },
@@ -840,6 +849,7 @@ const hasAnyLocalApiKey = () => {
         localStorage.getItem('worldlabs_api_key') ||
         localStorage.getItem('sonauto_api_key') ||
         localStorage.getItem('sonilo_api_key') ||
+        localStorage.getItem('machgen_api_key') ||
         localStorage.getItem('unsplash_access_key')
     );
 };
@@ -6298,6 +6308,7 @@ function App() {
         worldlabs: 'https://platform.worldlabs.ai/',
         sonauto: 'https://sonauto.ai/developers',
         sonilo: 'https://platform.sonilo.com/dashboard/api-keys',
+        machgen: 'https://www.machgen.ai/profile/api-keys',
         unsplash: 'https://unsplash.com/developers',
     } as const;
 
@@ -6670,7 +6681,7 @@ function App() {
                 properties: {
                     provider: {
                         type: Type.STRING,
-                        enum: ['gemini', 'replicate', 'fal', 'ltx', 'xai', 'elevenlabs', 'worldlabs', 'sonauto', 'sonilo', 'unsplash'],
+                        enum: ['gemini', 'replicate', 'fal', 'ltx', 'xai', 'elevenlabs', 'worldlabs', 'sonauto', 'sonilo', 'machgen', 'unsplash'],
                     },
                 },
                 required: ['provider'],
@@ -7203,6 +7214,7 @@ function App() {
                 worldlabs: Boolean(localStorage.getItem('worldlabs_api_key')),
                 sonauto: Boolean(localStorage.getItem('sonauto_api_key')),
                 sonilo: Boolean(localStorage.getItem('sonilo_api_key')),
+                machgen: Boolean(localStorage.getItem('machgen_api_key')),
                 unsplash: Boolean(localStorage.getItem('unsplash_access_key')),
             };
             return {
@@ -7232,6 +7244,7 @@ function App() {
                     worldlabs: Boolean(localStorage.getItem('worldlabs_api_key')),
                     sonauto: Boolean(localStorage.getItem('sonauto_api_key')),
                     sonilo: Boolean(localStorage.getItem('sonilo_api_key')),
+                    machgen: Boolean(localStorage.getItem('machgen_api_key')),
                     unsplash: Boolean(localStorage.getItem('unsplash_access_key')),
                 },
                 moodboard: (storyBible.categorizedMoodboard?.items?.length || storyBible.moodboard?.length || 0) > 0,

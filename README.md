@@ -105,6 +105,9 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
   - Draw Things on Apple silicon through its API server.
 - New cloud models: FLUX.3 (text-to-image, multi-reference edit, Klein, video
   with native audio) and Krea 3 (text-to-image and reference edit).
+- MachGen as a new provider (Settings → AI providers, `MGA_…` key): MiniMax H3
+  Turbo for fast, cheap 5–15 s clips with native audio (about $0.02/s), plus
+  MiniMax H3, LTX-2.3 Pro, Vidu Q3 Turbo, Wan 2.2 A14B, FLUX.2 dev and HiDream O1.
 - Assistant agents use the maintained ACP adapters (Claude Agent, Codex 2.x).
 
 ## Earlier (September 2026)
@@ -126,13 +129,13 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
 
 | Task | Engines |
 | --- | --- |
-| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, FLUX.3 / FLUX.3 Klein, Krea 3, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, Qwen Image, WAN 2.7, Z-Image, Grok Imagine |
-| Video | Seedance 2.5 / 2.0 / 1.5, Veo 3.1, Kling v3 Pro / O3 / 2.6, FLUX.3 Video, WAN 2.7 / 2.2, LTX 2.3, PixVerse C1, Happy Horse, Creatify Aurora, Grok Imagine |
+| Images | Seedream 5.0 Pro / 4.5, GPT Image 2 / 1.5, Nano Banana 2, Gemini 3 Pro, Imagen 4, FLUX.3 / FLUX.3 Klein, Krea 3, Krea 2 Large / Turbo, Ideogram 4, Flux 1.1 Pro / 2, FLUX.2 dev, HiDream O1, Qwen Image, WAN 2.7, Z-Image, Grok Imagine |
+| Video | Seedance 2.5 / 2.0 / 1.5, Veo 3.1, Kling v3 Pro / O3 / 2.6, MiniMax H3 / H3 Turbo, FLUX.3 Video, Vidu Q3 Turbo, WAN 2.7 / 2.2, LTX 2.3, PixVerse C1, Happy Horse, Creatify Aurora, Grok Imagine |
 | Local (your GPU) | FLUX.3 Klein, Qwen Image 2.1 / Turbo, Z-Image Turbo, FLUX.2 Klein 4B, Wan 2.2 5B, LTX-2.3, LTX-2.5 via ComfyUI; any model in Draw Things; LLMs via Ollama / LM Studio |
 | 3D | Hunyuan3D v3, Trellis 2, Rodin 2.5 / Gen-2, World Labs Marble worlds |
 | Audio | ElevenLabs, Sonauto, Sonilo, Gemini TTS, local mastering tools |
 | Post | Runway Ruby (SDR→HDR), LTX ACES HDR upscale, colour wheels + LUTs, Auto Cut |
-| Providers | fal.ai, Replicate, Google Gemini, xAI, ElevenLabs, Runway, LTX, World Labs, Brave Search, Unsplash, Supabase, Stripe; local: ComfyUI, Draw Things, Ollama, LM Studio |
+| Providers | fal.ai, Replicate, Google Gemini, MachGen, xAI, ElevenLabs, Runway, LTX, World Labs, Brave Search, Unsplash, Supabase, Stripe; local: ComfyUI, Draw Things, Ollama, LM Studio |
 
 Bring your own keys; the app stores them locally. Model APIs move quickly, so
 adapters are maintained integration points rather than permanent contracts.

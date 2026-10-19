@@ -8,6 +8,7 @@ import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } f
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
 import { connectMidjourney, disconnectMidjourney, getMidjourneyConcurrency, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, setMidjourneyConcurrency, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
+import { MACHGEN_API_KEY_STORAGE_KEY } from '../services/machgenService';
 import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
 type AutosaveSettings = {
@@ -62,6 +63,8 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [unsplashKey, setUnsplashKey] = useState('');
     const [higgsfieldKey, setHiggsfieldKey] = useState('');
     const [higgsfieldSaved, setHiggsfieldSaved] = useState(false);
+    const [machgenKey, setMachgenKey] = useState('');
+    const [machgenSaved, setMachgenSaved] = useState(false);
     const [videoProvider, setVideoProvider] = useState<VideoProviderPreference>(() => getVideoProviderPreference());
     const [dropboxClientId, setDropboxClientId] = useState('');
     const [googleDriveClientId, setGoogleDriveClientId] = useState('');
@@ -153,6 +156,11 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (storedHiggsfield) {
             setHiggsfieldKey(storedHiggsfield);
             setHiggsfieldSaved(true);
+        }
+        const storedMachgen = localStorage.getItem(MACHGEN_API_KEY_STORAGE_KEY);
+        if (storedMachgen) {
+            setMachgenKey(storedMachgen);
+            setMachgenSaved(true);
         }
         if (storedDropboxClient) {
             setDropboxClientId(storedDropboxClient);
@@ -326,6 +334,14 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         }
         setVideoProviderPreference(videoProvider);
 
+        if (machgenKey.trim()) {
+            localStorage.setItem(MACHGEN_API_KEY_STORAGE_KEY, machgenKey.trim());
+            setMachgenSaved(true);
+        } else {
+            localStorage.removeItem(MACHGEN_API_KEY_STORAGE_KEY);
+            setMachgenSaved(false);
+        }
+
         if (unsplashKey.trim()) {
             localStorage.setItem(UNSPLASH_ACCESS_KEY_STORAGE_KEY, unsplashKey.trim());
             setUnsplashSaved(true);
@@ -408,6 +424,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         { id: 'worldlabs', label: 'World Labs', value: worldLabsKey, setValue: setWorldLabsKey, saved: worldLabsSaved, setSaved: setWorldLabsSaved, placeholder: 'WLT-…', usedFor: '3D world generation (Marble).', href: 'https://platform.worldlabs.ai/', hrefLabel: 'platform.worldlabs.ai' },
         { id: 'brave', label: 'Brave Search', value: braveSearchKey, setValue: setBraveSearchKey, saved: braveSearchSaved, setSaved: setBraveSearchSaved, placeholder: 'BSA_…', usedFor: 'Web, news and image research for the Studio Agent.', href: 'https://api-dashboard.search.brave.com/', hrefLabel: 'api-dashboard.search.brave.com' },
         { id: 'higgsfield', label: 'Higgsfield', value: higgsfieldKey, setValue: setHiggsfieldKey, saved: higgsfieldSaved, setSaved: setHiggsfieldSaved, placeholder: 'KEY_ID:KEY_SECRET', usedFor: 'Soul / Soul Cinema / DoP, and a second host for Kling 3, MiniMax, Wan 3, LTX 2.5, PixVerse.', href: 'https://console.higgsfield.ai', hrefLabel: 'console.higgsfield.ai' },
+        { id: 'machgen', label: 'MachGen', value: machgenKey, setValue: setMachgenKey, saved: machgenSaved, setSaved: setMachgenSaved, placeholder: 'MGA_<key_id>:<secret>', usedFor: 'MiniMax H3 Turbo (fast, cheap video with audio), MiniMax H3, LTX-2.3 Pro, Vidu Q3 Turbo, Wan 2.2, FLUX.2 dev, HiDream O1.', href: 'https://www.machgen.ai/profile/api-keys', hrefLabel: 'machgen.ai' },
         { id: 'unsplash', label: 'Unsplash', value: unsplashKey, setValue: setUnsplashKey, saved: unsplashSaved, setSaved: setUnsplashSaved, placeholder: 'Unsplash Access Key', usedFor: 'Stock library search. Access Key only, never the Secret Key.', href: 'https://unsplash.com/developers', hrefLabel: 'unsplash.com/developers' },
     ];
     const connectedCount = providers.filter((row) => row.value.trim()).length;

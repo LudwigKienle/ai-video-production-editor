@@ -23,6 +23,7 @@ This document mirrors `api/usage/record.js` billing rates.
   - <https://fal.ai/models/xai/grok-imagine-video/image-to-video>
   - <https://fal.ai/krea-3> (Krea 3: $0.025 per megapixel, output plus references)
   - <https://fal.ai/flux-video-free> (FLUX.3 video: $0.17/s at 720p, $0.29/s at 1080p)
+- MachGen pricebook: <https://www.machgen.ai/pricing> (MiniMax H3 Turbo $0.02/s, $0.01/s promotion until Nov 1, 2026; FLUX.2 dev $0.004/MP; HiDream O1 $0.003/MP). MachGen runs on the user's own key and is never billed as hosted credits; these rates only feed the usage estimate.
 - Sonauto developer pricing: <https://sonauto.ai/developers>
 - Black Forest Labs pricing (Flux family): <https://bfl.ai/pricing>
 - OpenAI image pricing reference (GPT image family): <https://openai.com/api/pricing/>
@@ -67,6 +68,14 @@ Where direct provider list pricing was unavailable, conservative estimates are m
 | `gemini:imagen-4.0-generate-001:image` | 0.040000 | 0.040800 | 0.000000 | 0.000000 |
 | `gemini:veo-3.1-fast-generate-preview:video` | 0.150000 | 0.153000 | 0.000000 | 0.000000 |
 | `gemini:veo-3.1-generate-preview:video` | 0.400000 | 0.408000 | 0.000000 | 0.000000 |
+| `machgen:FLUX.2-dev:edit` | 0.004000 | 0.004080 | 0.000000 | 0.000000 |
+| `machgen:FLUX.2-dev:image` | 0.004000 | 0.004080 | 0.000000 | 0.000000 |
+| `machgen:HiDream-O1-Image:image` | 0.003000 | 0.003060 | 0.000000 | 0.000000 |
+| `machgen:LTX-2.3-Pro:video` | 0.030000 | 0.030600 | 0.000000 | 0.000000 |
+| `machgen:MiniMax-H3-Turbo:video` | 0.020000 | 0.020400 | 0.000000 | 0.000000 |
+| `machgen:MiniMax-H3:video` | 0.040000 | 0.040800 | 0.000000 | 0.000000 |
+| `machgen:Vidu-Q3-Turbo:video` | 0.040000 | 0.040800 | 0.000000 | 0.000000 |
+| `machgen:Wan2.2-A14B:video` | 0.036000 | 0.036720 | 0.000000 | 0.000000 |
 | `replicate:aiunivers/openpose:image` | 0.009000 | 0.009180 | 0.000000 | 0.000000 |
 | `replicate:black-forest-labs/flux-1.1-pro:image` | 0.040000 | 0.040800 | 0.000000 | 0.000000 |
 | `replicate:black-forest-labs/flux-2-klein-9b-base:image` | 0.015000 | 0.015300 | 0.000000 | 0.000000 |

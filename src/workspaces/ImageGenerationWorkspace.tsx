@@ -84,6 +84,7 @@ import {
   testComfyUiConnection,
   uploadComfyImage,
 } from '../services/comfyUiService';
+import { generateImageWithMachgen } from '../services/machgenService';
 import { runLocalModel, sizeForAspect } from '../services/localModelService';
 import { generateImageWithDrawThings } from '../services/drawThingsService';
 
@@ -136,6 +137,8 @@ type ImageModelId =
   | 'krea-2-large-fal'
   | 'krea-2-turbo-fal'
   | 'ideogram-v4-fal'
+  | 'machgen-flux2-dev'
+  | 'machgen-hidream-o1'
   | 'krea-3-fal'
   | 'krea-3-fal-edit'
   | 'flux-3-fal'
@@ -186,6 +189,8 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Painterly, aesthetic-first generation with optional style references' },
   { id: 'krea-2-turbo-fal', label: 'Krea 2 Turbo (FAL)', provider: 'FAL', goodFor: 'Fast Krea look for quick exploration and variations' },
   { id: 'ideogram-v4-fal', label: 'Ideogram 4 (FAL)', provider: 'FAL', goodFor: 'Typography, posters, and design-heavy frames with clean text rendering' },
+  { id: 'machgen-flux2-dev', label: 'FLUX.2 dev (MachGen)', provider: 'MachGen', goodFor: 'Fast open-weights FLUX.2 on MachGen; up to 4 reference images for edits' },
+  { id: 'machgen-hidream-o1', label: 'HiDream O1 (MachGen)', provider: 'MachGen', goodFor: 'Open-weights HiDream O1 on MachGen: detailed text-to-image with strong prompt following' },
   { id: 'krea-3-fal', label: 'Krea 3 (FAL)', provider: 'FAL', goodFor: 'Krea\'s newest model: polished, art-directed stills with a quality (berry) look' },
   { id: 'krea-3-fal-edit', label: 'Krea 3 Edit (FAL)', provider: 'FAL', goodFor: 'Reference-driven edits: restage products, swap materials, keep characters consistent (up to 8 refs)' },
   { id: 'flux-3-fal', label: 'FLUX.3 (FAL)', provider: 'FAL', goodFor: 'Black Forest Labs\' flagship: photoreal detail and strong prompt adherence, up to 4K' },
@@ -243,6 +248,8 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'krea-2-large-fal': ['16:9', '9:16', '1:1', '4:3', '235:100'],
   'krea-2-turbo-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'ideogram-v4-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'machgen-flux2-dev': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'machgen-hidream-o1': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'krea-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'krea-3-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'flux-3-fal': ['16:9', '9:16', '1:1', '4:3', '3:4', '2:1', '21:9', '235:100'],
@@ -295,6 +302,8 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'krea-2-large-fal': 3,
   'krea-2-turbo-fal': 0,
   'ideogram-v4-fal': 0,
+  'machgen-flux2-dev': 4,
+  'machgen-hidream-o1': 0,
   'krea-3-fal': 0,
   'krea-3-fal-edit': 8,
   'flux-3-fal': 0,
@@ -352,6 +361,8 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   'krea-2-large-fal': { provider: 'fal', kind: 'image', model: 'krea/v2/large/text-to-image' },
   'krea-2-turbo-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/krea-2/turbo' },
   'ideogram-v4-fal': { provider: 'fal', kind: 'image', model: 'ideogram/v4' },
+  'machgen-flux2-dev': { provider: 'machgen', kind: 'image', model: 'FLUX.2-dev' },
+  'machgen-hidream-o1': { provider: 'machgen', kind: 'image', model: 'HiDream-O1-Image' },
   'krea-3-fal': { provider: 'fal', kind: 'image', model: 'krea/v3/text-to-image' },
   'krea-3-fal-edit': { provider: 'fal', kind: 'edit', model: 'krea/v3/edit' },
   'flux-3-fal': { provider: 'fal', kind: 'image', model: 'blackforestlabs/flux-3/text-to-image' },
@@ -2308,7 +2319,8 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       setStatus('Add a prompt before generating.');
       return;
     }
-    if (billingMode === 'hosted' && modelId !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(modelId) && onValidateHostedGeneration) {
+    // Local models and MachGen (the user's own key) do not use hosted credits.
+    if (billingMode === 'hosted' && modelId !== 'comfyui' && !LOCAL_IMAGE_MODEL_IDS.has(modelId) && !modelId.startsWith('machgen-') && onValidateHostedGeneration) {
       const pricing = IMAGE_MODEL_PRICING[modelId];
       if (pricing) {
         const validation = await onValidateHostedGeneration({
@@ -2498,6 +2510,14 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
           item = await generateImageWithFalIdeogramV4(shapedPrompt, {
             aspectRatio: qwenMaxAspectRatio,
             renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY',
+          });
+          break;
+        case 'machgen-flux2-dev':
+        case 'machgen-hidream-o1':
+          item = await generateImageWithMachgen(modelId === 'machgen-flux2-dev' ? 'FLUX.2-dev' : 'HiDream-O1-Image', shapedPrompt, {
+            aspectRatio: effectiveAspectRatio,
+            imageSize: imageSize === '4K' ? '4K' : imageSize === '2K' ? '2K' : '1K',
+            references: modelId === 'machgen-flux2-dev' && referenceImages.length > 0 ? referenceImages.slice(0, 4) : undefined,
           });
           break;
         case 'krea-3-fal':
