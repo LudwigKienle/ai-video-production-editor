@@ -142,7 +142,7 @@ export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, un
     // A continuity-refined prompt overrides the prompt at render time; an edit to what the shot
     // shows (prompt, description, camera side) makes it stale — drop it, as the editor UI does.
     const staleRefinement = next.prompt !== current.prompt || next.description !== current.description || next.cameraYaw !== current.cameraYaw;
-    if (staleRefinement && current.continuityRefinedPrompt) {
+    if ((staleRefinement && current.continuityRefinedPrompt) || input.resetContinuity === true) {
       next.continuityRefinedPrompt = undefined;
       next.continuityRefinementSummary = undefined;
       next.continuityRefinementPasses = undefined;
@@ -322,6 +322,7 @@ const SHOT_SCHEMA = {
     cameraAngle: str('Camera angle, e.g. low_angle, eye_level, overhead.'),
     cameraYaw: num('Camera yaw in degrees (-180..180): picks the location view rendered behind the action; 180 = reverse side of the room (use with project_generate_reference_angle).'),
     cameraPitch: num('Camera pitch in degrees (-60..60).'),
+    resetContinuity: { type: 'boolean', description: 'Drop the continuity-refined prompt and review so the next render uses the prompt as written (prompt edits do this automatically).' },
     visualTriggers: strList('Visual cues that must appear.'),
     imageUrl: str('Storyboard frame to attach: https URL or data URL.'),
     imagePath: str('Storyboard frame to attach: local file path.'),

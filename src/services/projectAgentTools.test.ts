@@ -163,4 +163,5 @@ test('upsertShots drops a stale continuity-refined prompt when the shot changes'
   assert.equal(untouched.continuityRefinedPrompt, 'refined old');
   const reversed = upsertShots(base, [{ shot: 1, cameraYaw: 180 }]).shots[0];
   assert.equal(reversed.continuityRefinedPrompt, undefined);
+  assert.equal(upsertShots(base, [{ shot: 1, resetContinuity: true }]).shots[0].continuityRefinedPrompt, undefined);
 });
