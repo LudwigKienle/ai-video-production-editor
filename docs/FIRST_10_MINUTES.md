@@ -11,8 +11,9 @@ Prefer to watch? The [4-minute video setup](https://youtu.be/p99IG1m5ybU) covers
 ### Option A: Prebuilt Desktop Installers (Recommended for Creators)
 If you simply want to run the studio without configuring a Node.js development environment:
 - Download the latest signed package from [GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest).
-- **macOS:** Download the `.dmg` (Apple Silicon or Intel).
+- **macOS:** Download the `.dmg` (Universal binary).
 - **Windows:** Download the `.exe` installer.
+- **Linux:** Download the `.AppImage`.
 - Launch the application, choose or create a local project directory, and enter your provider API keys under Settings.
 
 ### Option B: Running from Source (For Developers)
@@ -43,21 +44,32 @@ When you first open the studio, you are greeted by the macOS-style production sh
 
 The studio organizes production into a single continuous loop:
 ```text
-Script → Director pass → Concept & casting → Storyboard → AI filming → Continuity review → Export
+script -> Director -> concepts -> storyboard -> AI filming
+       -> continuity review -> re-film queue -> edit -> export
 ```
 
+The main surfaces to inspect first:
+
+| Surface | Why it matters |
+| --- | --- |
+| Project | The core script-to-filming production workspace (Project Hub). |
+| Create → Nodes | Graph-style workflow and pipeline builder (Node Space). |
+| Create → Images / Video | Provider-facing generation surfaces for stills and motion clips. |
+| Review / Requests | Feedback, QA, and shot task surfaces. |
+| Deliver → Export | Timeline and handoff utilities for downstream work. |
+
 ### Step 2: Input Your Script or Load the Demo Project
-Navigate to the **Script** tab in the sidebar. You can paste your own screenplay or use the preloaded demo files in `examples/demo-project`:
+Navigate to **Project** in the sidebar (under the Project group). You can paste your own screenplay into the editor or load preloaded demo files from `examples/demo-project`:
 - `script.md`
 - `project-brief.md`
 - `shot-list.md`
 
 ![Script Workspace](assets/screenshots/studio-script.png)
 
-Create a new project named `Rainline` and paste the script into the editor. The Director agent can automatically parse scenes, identify speaking characters, and flag required visual elements.
+The Director agent can automatically parse scenes, identify speaking characters, and flag required visual elements.
 
 ### Step 3: Run the Director Pass & Build the Storyboard
-Switch to the **Storyboard** view. The Director pass turns your screenplay into structured shot cards with camera bodies, lenses, and framing rules.
+Inside **Project**, switch to the **Storyboard** phase. The Director pass turns your screenplay into structured shot cards with camera bodies, lenses, and framing rules.
 
 ![Storyboard Step](assets/screenshots/studio-storyboard.png)
 
@@ -66,17 +78,18 @@ Switch to the **Storyboard** view. The Director pass turns your screenplay into 
 - Use Gemini continuity review to verify visual consistency across shots.
 
 ### Step 4: Concept Generation & AI Filming
-Open the **Filming & Generation** workspace to generate image frames and video shots using integrated providers (fal.ai, Replicate, Gemini, Runway, Kling, Seedance, WAN, LTX).
+Open **Create → Images** to generate character and concept stills, and **Create → Video** to generate motion shots.
 
 ![Image Generation](assets/screenshots/studio-image-gen.png)
 
 ![Video Filming](assets/screenshots/studio-video-gen.png)
 
+- **Providers & Models:** Generate image and motion clips using supported provider integrations (such as fal.ai, Replicate, and Google Gemini) to run models including Kling, Seedance, Wan, LTX, and FLUX according to each provider's catalog.
 - Use **Auto Model** or manually select engines tailored for performance, characters, or landscapes.
 - Turn approved storyboard frames into motion clips with start/end frame interpolation.
 
 ### Step 5: Advanced Visual Pipelines in Node Space
-For non-linear generation and complex multi-model pipelines, switch to **Node Space**.
+For non-linear generation and complex multi-model pipelines, switch to **Create → Nodes** in the sidebar.
 
 ![Node Space Text to Image](assets/screenshots/studio-node-space-text-to-image.png)
 
