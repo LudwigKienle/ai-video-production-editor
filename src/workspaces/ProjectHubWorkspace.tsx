@@ -6839,7 +6839,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         opts?: { keepBaseAsIdentity?: boolean },
     ): Promise<MediaItem> => {
         const modelAspectRatio = resolveModelAspectRatio(aspectRatio);
-        const selectedReferenceModel = modelOverride || referenceImageModel;
+        const requestedReferenceModel = modelOverride || referenceImageModel;
+        // Auto picks a model per prompt, like the Storyboard render.
+        const selectedReferenceModel = requestedReferenceModel === 'auto'
+            ? pickImageModel({ prompt, hasReferences: Boolean(baseImageUrl) }, REFERENCE_MODEL_OPTIONS.map((option) => option.id).filter((id) => id !== 'auto'), 'seedream-v5-pro-fal').model
+            : requestedReferenceModel;
+        if (requestedReferenceModel === 'auto') console.info(`Auto model: ${selectedReferenceModel}`);
         const selectedIsMultiAngleModel = isReferenceModelMultiAngleMode(selectedReferenceModel);
         // Every model reads prompts differently (Midjourney params vs. Gemini prose vs. Seedream directives…).
         prompt = adaptPromptForModel(selectedReferenceModel, prompt, { kind: 'image', aspectRatio, hasReferences: Boolean(baseImageUrl) });
@@ -6997,6 +7002,59 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             image = refs.length > 0
                 ? await generateImageWithSeedreamReferences(prompt, refs, modelAspectRatio, seedreamSize)
                 : await generateImageWithSeedream(prompt, modelAspectRatio, seedreamSize);
+        } else if (selectedReferenceModel === 'gpt-image-2-fal-t2i') {
+            image = await generateImageWithFalGptImage2(prompt, {
+                aspectRatio: modelAspectRatio,
+                numOutputs: 1,
+                quality: 'high',
+                outputFormat: 'png',
+            });
+        } else if (selectedReferenceModel === 'seedream-v5-pro-fal') {
+            image = await generateImageWithFalSeedreamV5Pro(prompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+        } else if (selectedReferenceModel === 'seedream-v5-pro-edit-fal') {
+            const refs = await buildMoodboardReferences(baseImageUrl);
+            if (refs.length > 0) {
+                const edited = await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+                if (!edited.length) {
+                    throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                }
+                image = edited[0];
+            } else {
+                image = await generateImageWithFalSeedreamV5Pro(prompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+            }
+        } else if (selectedReferenceModel === 'krea-2-large-fal' || selectedReferenceModel === 'krea-2-turbo-fal') {
+            const kreaAspect = modelAspectRatio === '3:4' ? '4:5' : modelAspectRatio;
+            const styleRefs = selectedReferenceModel === 'krea-2-large-fal' ? (await buildMoodboardReferences(baseImageUrl)).slice(0, 3) : [];
+            image = await generateImageWithFalKrea2(prompt, {
+                variant: selectedReferenceModel === 'krea-2-large-fal' ? 'large' : 'turbo',
+                aspectRatio: kreaAspect,
+                styleReferences: styleRefs.length > 0 ? styleRefs : undefined,
+            });
+        } else if (selectedReferenceModel === 'ideogram-v4-fal') {
+            image = await generateImageWithFalIdeogramV4(prompt, { aspectRatio: modelAspectRatio, renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY' });
+        } else if (selectedReferenceModel === 'krea-3-fal' || selectedReferenceModel === 'krea-3-edit-fal') {
+            const krea3Options = { aspectRatio: modelAspectRatio, variant: imageSize === '1K' ? 'jam' as const : 'berry' as const };
+            const refs = selectedReferenceModel === 'krea-3-edit-fal' ? await buildMoodboardReferences(baseImageUrl) : [];
+            if (refs.length > 0) {
+                const edited = await editImageWithFalKrea3(prompt, refs.slice(0, 8), krea3Options);
+                if (!edited.length) {
+                    throw new Error('FAL Krea 3 Edit returned no images.');
+                }
+                image = edited[0];
+            } else {
+                image = await generateImageWithFalKrea3(prompt, krea3Options);
+            }
+        } else if (selectedReferenceModel === 'flux-3-fal' || selectedReferenceModel === 'flux-3-edit-fal') {
+            const refs = selectedReferenceModel === 'flux-3-edit-fal' ? await buildMoodboardReferences(baseImageUrl) : [];
+            if (refs.length > 0) {
+                const edited = await editImageWithFalFlux3(prompt, refs.slice(0, 10), toFlux3Options(aspectRatio, imageSize));
+                if (!edited.length) {
+                    throw new Error('FAL FLUX.3 Edit returned no images.');
+                }
+                image = edited[0];
+            } else {
+                image = await generateImageWithFalFlux3(prompt, toFlux3Options(aspectRatio, imageSize));
+            }
         } else {
             image = await generateImageWithNano(prompt, { aspectRatio: modelAspectRatio, imageSize });
         }
@@ -7255,6 +7313,73 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return generateImageWithSeedreamReferences(enrichedPrompt, refs, modelAspectRatio, seedreamSize);
             }
             return generateImageWithSeedream(enrichedPrompt, modelAspectRatio, seedreamSize);
+        }
+
+        if (marketingImageModel === 'gpt-image-2-fal' || marketingImageModel === 'gpt-image-2-fal-t2i') {
+            if (marketingImageModel === 'gpt-image-2-fal' && refs.length > 0) {
+                const edited = await editImageWithFalGptImage2(enrichedPrompt, refs.slice(0, 4), {
+                    aspectRatio: modelAspectRatio,
+                    numOutputs: 1,
+                    quality: 'high',
+                    outputFormat: 'png',
+                });
+                if (!edited.length) {
+                    throw new Error('FAL GPT Image 2 Edit returned no images.');
+                }
+                return edited[0];
+            }
+            return generateImageWithFalGptImage2(enrichedPrompt, {
+                aspectRatio: modelAspectRatio,
+                numOutputs: 1,
+                quality: 'high',
+                outputFormat: 'png',
+            });
+        }
+
+        if (marketingImageModel === 'seedream-v5-pro-fal' || marketingImageModel === 'seedream-v5-pro-edit-fal') {
+            if (marketingImageModel === 'seedream-v5-pro-edit-fal' && refs.length > 0) {
+                const edited = await editImageWithFalSeedreamV5Pro(enrichedPrompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+                if (!edited.length) {
+                    throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                }
+                return edited[0];
+            }
+            return generateImageWithFalSeedreamV5Pro(enrichedPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+        }
+
+        if (marketingImageModel === 'krea-2-large-fal' || marketingImageModel === 'krea-2-turbo-fal') {
+            return generateImageWithFalKrea2(enrichedPrompt, {
+                variant: marketingImageModel === 'krea-2-large-fal' ? 'large' : 'turbo',
+                aspectRatio: modelAspectRatio === '3:4' ? '4:5' : modelAspectRatio,
+                styleReferences: marketingImageModel === 'krea-2-large-fal' && refs.length > 0 ? refs.slice(0, 3) : undefined,
+            });
+        }
+
+        if (marketingImageModel === 'ideogram-v4-fal') {
+            return generateImageWithFalIdeogramV4(enrichedPrompt, { aspectRatio: modelAspectRatio, renderingSpeed: imageSize === '1K' ? 'TURBO' : 'QUALITY' });
+        }
+
+        if (marketingImageModel === 'krea-3-fal' || marketingImageModel === 'krea-3-edit-fal') {
+            const krea3Options = { aspectRatio: modelAspectRatio, variant: imageSize === '1K' ? 'jam' as const : 'berry' as const };
+            if (marketingImageModel === 'krea-3-edit-fal' && refs.length > 0) {
+                const edited = await editImageWithFalKrea3(enrichedPrompt, refs.slice(0, 8), krea3Options);
+                if (!edited.length) {
+                    throw new Error('FAL Krea 3 Edit returned no images.');
+                }
+                return edited[0];
+            }
+            return generateImageWithFalKrea3(enrichedPrompt, krea3Options);
+        }
+
+        if (marketingImageModel === 'flux-3-fal' || marketingImageModel === 'flux-3-edit-fal') {
+            if (marketingImageModel === 'flux-3-edit-fal' && refs.length > 0) {
+                const edited = await editImageWithFalFlux3(enrichedPrompt, refs.slice(0, 10), toFlux3Options(aspectRatio, imageSize));
+                if (!edited.length) {
+                    throw new Error('FAL FLUX.3 Edit returned no images.');
+                }
+                return edited[0];
+            }
+            return generateImageWithFalFlux3(enrichedPrompt, toFlux3Options(aspectRatio, imageSize));
         }
 
         return generateImageWithNano(enrichedPrompt, { aspectRatio: modelAspectRatio, imageSize });
@@ -11215,6 +11340,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     imageMedia = await editImageWithQwen(qwenPrompt, baseImage, {
                         aspectRatio: modelAspectRatio,
                         extraImages,
+                    });
+                } else if (activeReferenceModel === 'gpt-image-2-fal-t2i') {
+                    imageMedia = await generateImageWithFalGptImage2(fullPrompt, {
+                        aspectRatio: modelAspectRatio,
+                        numOutputs: 1,
+                        quality: 'high',
+                        outputFormat: 'png',
                     });
                 } else if (activeReferenceModel === 'gpt-image-2-fal') {
                     if (gptInputs.length === 0) {
