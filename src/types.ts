@@ -1366,6 +1366,8 @@ export type AngleMetadata = {
   angleId?: string;
   yaw?: number;
   pitch?: number;
+  /** What this view shows (e.g. "the elevator side with the staircase"), used as the background text in shot prompts. */
+  description?: string;
 };
 
 export type RelightSettings = {

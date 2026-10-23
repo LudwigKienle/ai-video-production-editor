@@ -98,7 +98,7 @@ import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingServ
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes as splitScriptIntoSceneBlocks } from '../utils/directorScenes';
-import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, environmentPeopleClause, pickEnvironmentViews, pickReferenceImageForYaw, yawDistance } from '../utils/environmentWorldModel';
+import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, describeLocationView, environmentPeopleClause, pickEnvironmentViews, pickReferenceAngleForYaw, pickReferenceImageForYaw, yawDistance } from '../utils/environmentWorldModel';
 import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
@@ -11056,7 +11056,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const images = await editAngleImages(prompt, baseImage, { numOutputs: 1 });
         const url = images[0]?.url;
         if (!url) throw new Error(`No ${yaw}° view came back for ${reference.name}.`);
-        const meta: AngleMetadata = { id: `angle-${Date.now()}`, url, yaw, pitch: 0, label: reverse ? `Reverse (${yaw}°)` : `${yaw}°` };
+        const meta: AngleMetadata = {
+            id: `angle-${Date.now()}`, url, yaw, pitch: 0,
+            label: reverse ? `Reverse (${yaw}°)` : `${yaw}°`,
+            description: note?.trim() || undefined,
+        };
         // A new view for (nearly) the same angle replaces the old one instead of piling up beside it.
         setReferences((prev) => prev.map((ref) => {
             if (ref.id !== reference.id) return ref;
@@ -11284,6 +11288,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const shotEnvironmentRef = alignedShot.environment
                 ? references.find((r) => r.type === 'environment' && r.imageUrl && matchesRefName(r.name, alignedShot.environment || ''))
                 : undefined;
+            // Image models follow the text over the image: say what the turned view shows.
+            const locationViewText = shotEnvironmentRef ? describeLocationView(shotEnvironmentRef.name, pickReferenceAngleForYaw(shotEnvironmentRef, shot.cameraYaw)) : '';
+            if (locationViewText) contextPromptBits.push(locationViewText);
 
             const tagBuckets: Record<string, string[]> = {
                 lighting: [],

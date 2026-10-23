@@ -4,6 +4,7 @@ import type {
   WorldGenerationAssets,
   WorldGenerationModel,
   WorldGenerationProvider,
+  AngleMetadata,
 } from '../types';
 import { getWorldModelLabel, normalizeWorldModelId } from '../services/worldModelProviderRegistry.ts';
 
@@ -131,12 +132,13 @@ export const buildSetDesignAssetForEnvironmentBlockout = (
 });
 
 /** The reference image for a camera yaw: the eye-level angle within 45° of it, else the base image. */
-export const pickReferenceImageForYaw = (
-  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta' | 'multiAngleUrls'>,
+/** The location view a shot at this yaw renders against, with its metadata (null = the default view). */
+export const pickReferenceAngleForYaw = (
+  reference: Pick<ReferenceItem, 'multiAngleMeta' | 'multiAngleUrls'>,
   yaw?: number | null,
-): string | null => {
-  if (typeof yaw !== 'number' || yaw === 0) return reference.imageUrl || null;
-  let best: { url: string; distance: number } | null = null;
+): { url: string; angle: AngleMetadata } | null => {
+  if (typeof yaw !== 'number' || yaw === 0) return null;
+  let best: { url: string; angle: AngleMetadata; distance: number } | null = null;
   (reference.multiAngleMeta || []).forEach((angle, index) => {
     // multiAngleUrls runs parallel to the metadata and holds the copy saved in the project
     // folder; the metadata URL is often the provider's temporary link.
@@ -144,10 +146,23 @@ export const pickReferenceImageForYaw = (
     if (!url || typeof angle.yaw !== 'number' || Math.abs(angle.pitch ?? 0) > 25) return;
     const distance = yawDistance(angle.yaw, yaw);
     // Ties go to the later view: a view rendered again for the same angle supersedes the old one.
-    if (distance <= 45 && (!best || distance <= best.distance)) best = { url, distance };
+    if (distance <= 45 && (!best || distance <= best.distance)) best = { url, angle, distance };
   });
-  return best?.url || reference.imageUrl || null;
+  return best ? { url: (best as { url: string }).url, angle: (best as { angle: AngleMetadata }).angle } : null;
 };
+
+/** Prompt text for the background of a shot rendered against a turned location view. */
+export const describeLocationView = (name: string, picked: { angle: AngleMetadata } | null) => {
+  if (!picked) return '';
+  const yaw = picked.angle.yaw ?? 0;
+  const side = Math.abs(yaw) >= 135 ? 'from the reverse side (what is behind the camera in the main view)' : `turned ${yaw > 0 ? 'right' : 'left'} by ${Math.abs(Math.round(yaw))}°`;
+  return `Background: ${name} seen ${side}${picked.angle.description ? ` — ${picked.angle.description}` : ''}; match the location image for this view, not the main view`;
+};
+
+export const pickReferenceImageForYaw = (
+  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta' | 'multiAngleUrls'>,
+  yaw?: number | null,
+): string | null => pickReferenceAngleForYaw(reference, yaw)?.url || reference.imageUrl || null;
 
 const CROWD_WORDS = /\b(guests?|crowds?|party|partygoers|audience|spectators|patrons|diners|dancers|extras|people|passers-?by|commuters|shoppers|staff|waiters|reporters|press|onlookers|congregation|mourners|soldiers|workers|students|fans)\b/i;
 

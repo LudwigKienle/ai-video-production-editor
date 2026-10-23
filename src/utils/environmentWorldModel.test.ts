@@ -134,3 +134,12 @@ test('the yaw picker prefers the project copy of an angle over the provider link
   const ref = { imageUrl: 'base', multiAngleUrls: ['file:///p/angle_1.png'], multiAngleMeta: [{ id: 'a', url: 'https://fal.media/x.png', yaw: 180, pitch: 0 }] };
   assert.equal(pickReferenceImageForYaw(ref as never, 175), 'file:///p/angle_1.png');
 });
+
+test('a turned location view becomes background text for the shot prompt', async () => {
+  const { describeLocationView, pickReferenceAngleForYaw } = await import('./environmentWorldModel.ts');
+  const ref = { multiAngleUrls: ['file:///a.png'], multiAngleMeta: [{ id: 'a', url: 'x', yaw: 180, pitch: 0, description: 'the elevator doors and the staircase' }] };
+  const text = describeLocationView('Penthouse Ballroom', pickReferenceAngleForYaw(ref as never, 180));
+  assert.match(text, /reverse side/);
+  assert.match(text, /elevator doors/);
+  assert.equal(describeLocationView('Penthouse Ballroom', pickReferenceAngleForYaw(ref as never, 0)), '');
+});
