@@ -290,6 +290,7 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_set_models: 'Choosing models',
   project_generate_shot_images: 'Rendering storyboard frames',
   project_renumber_shots: 'Renumbering shots',
+  project_cancel_job: 'Stopping a job',
   project_review_continuity: 'Reviewing continuity',
   project_generate_reference_angle: 'Rendering a reverse angle',
   project_job_status: 'Checking a job',
@@ -588,6 +589,11 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     name: 'project_generate_reference_angle',
     description: 'Render one new view of a location (or character/prop) from a camera yaw and store it with the reference\'s angles — e.g. yaw 180 for the reverse side of a room for a reverse shot. Shots with that cameraYaw then render against this view.',
     parameters: { type: 'object', properties: { referenceName: str('Reference name.'), referenceId: str('Reference id.'), yaw: num('Camera yaw in degrees, -180..180 (180 = reverse).'), note: str('What the new view must show.') }, required: ['yaw'] },
+  },
+  {
+    name: 'project_cancel_job',
+    description: 'Stop a background job (or all running jobs without jobId) after the shot it is working on; frames already made stay.',
+    parameters: { type: 'object', properties: { jobId: str('Job id; omit to stop every running job.') } },
   },
   {
     name: 'project_job_status',
@@ -1087,6 +1093,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       }
       const results = [];
       for (const shot of shots) {
+        if (typeof args.__isCancelled === 'function' && args.__isCancelled()) break;
         const before = state().shotPrompts.find((entry) => entry.shot === shot);
         if (!before) { results.push({ shot, ok: false, error: `No shot ${shot}.` }); continue; }
         try {
@@ -1154,6 +1161,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (asString(args.model)) await switchModels({ videoModel: asString(args.model) });
       const results = [];
       for (const shot of shots) {
+        if (typeof args.__isCancelled === 'function' && args.__isCancelled()) break;
         const before = state().shotPrompts.find((entry) => entry.shot === shot);
         if (!before) { results.push({ shot, ok: false, error: `No shot ${shot}.` }); continue; }
         try {
@@ -1221,7 +1229,8 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
 type AgentJob = {
   id: string;
   tool: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  cancelRequested?: boolean;
   startedAt: string;
   finishedAt?: string;
   result?: unknown;
@@ -1262,8 +1271,8 @@ export const withBackgroundJobs = (
         framesBefore: shots ? Object.fromEntries(shots.map((shot) => [shot, name === 'project_generate_shot_videos' ? current.find((entry) => entry.shot === shot)?.videoUrl : current.find((entry) => entry.shot === shot)?.imageUrl])) : undefined,
       };
       jobs.set(job.id, job);
-      run(args).then((result) => {
-        job.status = 'done';
+      run({ ...args, __isCancelled: () => job.cancelRequested === true }).then((result) => {
+        job.status = job.cancelRequested ? 'cancelled' : 'done';
         job.result = result;
       }).catch((error) => {
         job.status = 'failed';
@@ -1272,6 +1281,13 @@ export const withBackgroundJobs = (
       return { jobId: job.id, status: 'running', tool: name, note: 'Running in the background — the editor shows each result as it lands. Check with project_job_status.' };
     };
   }
+  wrapped.project_cancel_job = async (args: Record<string, unknown> = {}) => {
+    const id = asString(args.jobId);
+    const targets = id ? [jobs.get(id)].filter((job): job is AgentJob => Boolean(job)) : [...jobs.values()].filter((job) => job.status === 'running');
+    if (id && targets.length === 0) throw new Error(`No job ${id}.`);
+    targets.forEach((job) => { job.cancelRequested = true; });
+    return { cancelled: targets.map((job) => job.id), note: 'The job stops after the shot it is rendering now; finished frames stay.' };
+  };
   wrapped.project_job_status = async (args: Record<string, unknown> = {}) => {
     const id = asString(args.jobId);
     const list = id ? [jobs.get(id)].filter((job): job is AgentJob => Boolean(job)) : [...jobs.values()].slice(-10);

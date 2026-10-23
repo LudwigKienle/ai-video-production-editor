@@ -165,3 +165,25 @@ test('upsertShots drops a stale continuity-refined prompt when the shot changes'
   assert.equal(reversed.continuityRefinedPrompt, undefined);
   assert.equal(upsertShots(base, [{ shot: 1, resetContinuity: true }]).shots[0].continuityRefinedPrompt, undefined);
 });
+
+test('a cancelled background job stops between shots and keeps finished work', async () => {
+  const { withBackgroundJobs } = await import('./projectAgentTools.ts');
+  const rendered: number[] = [];
+  const tools = withBackgroundJobs({
+    project_generate_shot_images: async (args: any) => {
+      for (const shot of args.shots) {
+        if (args.__isCancelled?.()) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        rendered.push(shot);
+      }
+      return { rendered };
+    },
+  }, () => []);
+  const { jobId } = await tools.project_generate_shot_images({ shots: [1, 2, 3, 4, 5, 6] }) as { jobId: string };
+  await new Promise((resolve) => setTimeout(resolve, 12));
+  await tools.project_cancel_job({ jobId });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const status = await tools.project_job_status({ jobId }) as { jobs: Array<{ status: string }> };
+  assert.equal(status.jobs[0].status, 'cancelled');
+  assert.ok(rendered.length > 0 && rendered.length < 6);
+});
