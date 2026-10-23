@@ -4,7 +4,7 @@
  * project_director_* tools. Pure functions: no browser or React imports.
  */
 import type { ReferenceItem, ShotPrompt } from '../types';
-import { splitScriptIntoScenes, targetShotCount, type ScriptSceneBlock } from './directorScenes.ts';
+import { isSceneHeading, splitScriptIntoScenes, targetShotCount, type ScriptSceneBlock } from './directorScenes.ts';
 
 export const DIRECTOR_SHOT_TYPES = ['closeup', 'extreme_closeup', 'portrait', 'medium', 'full_body', 'wide', 'extreme_wide', 'low_angle', 'overhead', 'ots', 'b_roll'] as const;
 export const DIRECTOR_LIGHTING = ['golden', 'studio', 'cinematic', 'neon', 'dramatic', 'fantasy', 'natural'] as const;
@@ -51,10 +51,15 @@ export const charactersInScene = (scene: ScriptSceneBlock, references: Reference
   const cues: string[] = [];
   const action: string[] = [];
   for (const block of blocks) {
-    const lines = block.split('\n').filter((line) => line.trim());
+    // The slugline names places ("VICTOR'S PENTHOUSE"), not people.
+    const lines = block.split('\n').filter((line) => line.trim() && !isSceneHeading(line.trim()));
     if (lines.length === 0) continue;
-    if (lines.length > 1 && CUE_LINE.test(lines[0]) && !/^\s*(INT|EXT|EST|I\/E)\b/.test(lines[0])) cues.push(lines[0]);
-    else action.push(block);
+    // A voice-over or off-screen cue ("HARRIET (V.O.)") is heard, not seen.
+    if (lines.length > 1 && CUE_LINE.test(lines[0]) && !/^\s*(INT|EXT|EST|I\/E)\b/.test(lines[0])) {
+      if (!/\((V\.?\s?O|O\.?\s?S|O\.?\s?C)\.?\)/i.test(lines[0])) cues.push(lines[0]);
+      continue;
+    }
+    action.push(block);
   }
   const cueText = cues.join('\n');
   const actionText = action.join('\n');
@@ -62,8 +67,10 @@ export const charactersInScene = (scene: ScriptSceneBlock, references: Reference
     .filter((ref) => ref.type === 'character')
     .filter((ref) => {
       const parts = [ref.name, ref.name.trim().split(/\s+/)[0]].filter((part) => part && part.length >= 3).map(escapeRegex);
-      const pattern = new RegExp(`\\b(${parts.join('|')})\\b`, 'i');
-      return pattern.test(cueText) || pattern.test(actionText);
+      // A name in capitals is a screenplay entrance ("DAMIEN's shoe"); in normal case a possessive ("Victor's men") is only a mention.
+      const capitals = new RegExp(`\\b(${parts.map((part) => part.toUpperCase()).join('|')})\\b`);
+      const named = new RegExp(`\\b(${parts.join('|')})\\b(?!['’]s\\b)`, 'i');
+      return capitals.test(cueText) || capitals.test(actionText) || named.test(actionText);
     })
     .map((ref) => ref.name);
 };
@@ -243,6 +250,16 @@ export const buildSceneShots = (scene: ScriptSceneBlock, inputs: Array<Record<st
     const shotType = str(input.shotType) || str(input.shotTypePresetId);
     if (shotType && !(DIRECTOR_SHOT_TYPES as readonly string[]).includes(shotType)) warnings.push(`Shot ${index + 1}: shot type "${shotType}" is not one of ${DIRECTOR_SHOT_TYPES.join(', ')}.`);
     const lighting = str(input.lighting) || str(input.lightingPresetId);
+    // Wardrobe per shot: { "Nora Vale": "Boardroom black dress" } → outfitSelections { characterId: outfitId }.
+    const outfitSelections: Record<string, string> = {};
+    if (input.outfits && typeof input.outfits === 'object' && !Array.isArray(input.outfits)) {
+      for (const [who, outfitName] of Object.entries(input.outfits as Record<string, unknown>)) {
+        const character = references.find((ref) => ref.type === 'character' && canonical(who, [ref.name]).known);
+        const outfit = character?.outfits?.find((item) => typeof outfitName === 'string' && item.name.toLowerCase() === outfitName.trim().toLowerCase());
+        if (character && outfit) outfitSelections[character.id] = outfit.id;
+        else warnings.push(`Shot ${index + 1}: outfit "${String(outfitName)}" for "${who}" not found.`);
+      }
+    }
     const move = str(input.cameraMovement);
     return {
       shot: index + 1,
@@ -255,6 +272,7 @@ export const buildSceneShots = (scene: ScriptSceneBlock, inputs: Array<Record<st
       characters,
       environment: environment.value,
       ...(products.length ? { products } : {}),
+      ...(Object.keys(outfitSelections).length ? { outfitSelections } : {}),
       ...(shotType ? { shotTypePresetId: shotType } : {}),
       ...(lighting ? { lightingPresetId: lighting } : {}),
       ...(str(input.cameraAngle) ? { cameraAngle: str(input.cameraAngle) } : {}),

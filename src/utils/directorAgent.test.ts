@@ -117,3 +117,23 @@ test('microdrama target shots come from the timestamps', () => {
   assert.equal(sceneTargetShots('no timestamps here', 'microdrama'), 14);
   assert.ok(sceneTargetShots('short', 'feature') >= 3);
 });
+
+test('sluglines and possessives are not entrances', () => {
+  const refs = [...references, ref('character', 'Victor Ashcroft')];
+  const scene = { sceneNumber: 8, slugline: "INT. VICTOR'S PENTHOUSE RESIDENCE — NIGHT", text: "INT. VICTOR'S PENTHOUSE RESIDENCE — NIGHT\n\nCeleste watches the fire. Through the glass: Victor's men.\n\nCELESTE\nNo will." };
+  assert.deepEqual(charactersInScene(scene, refs), ['Celeste Ashcroft']);
+});
+
+test('per-shot outfits become outfitSelections', () => {
+  const [ballroom] = splitScriptIntoScenes(script);
+  const nora = { ...ref('character', 'Nora Vale'), outfits: [{ id: 'o1', name: 'Night-shift uniform', prompt: '' }, { id: 'o2', name: 'Boardroom black dress', prompt: '' }] };
+  const { shots, warnings } = buildSceneShots(ballroom, [{ prompt: 'Nora', characters: ['Nora Vale'], outfits: { Nora: 'boardroom black dress', 'Nora Vale': 'Ballgown' } }], [nora]);
+  assert.deepEqual(shots[0].outfitSelections, { 'Nora Vale': 'o2' });
+  assert.ok(warnings.some((w) => w.includes('Ballgown')));
+});
+
+test('voice-over cues are not on screen', () => {
+  const refs = [...references, ref('character', 'Harriet Lane')];
+  const scene = { sceneNumber: 7, slugline: 'INT. LOBBY — NIGHT', text: 'INT. LOBBY — NIGHT\n\nNora at the microphones.\n\nHARRIET (V.O.)\nThe will is gone.' };
+  assert.deepEqual(charactersInScene(scene, refs), ['Nora Vale']);
+});

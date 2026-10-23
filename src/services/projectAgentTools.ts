@@ -517,6 +517,7 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
               characters: strList('Cast names in frame.'),
               environment: str('Location name.'),
               props: strList('Prop/product names in frame.'),
+              outfits: { type: 'object', description: 'Wardrobe per character in frame, e.g. {"Nora Vale": "Boardroom black dress"} (outfit names from the character\'s wardrobe). The outfit image is sent as a reference when the frame is rendered.' },
               visualTriggers: strList('Visual cues that must appear.'),
               rationale: str('What the shot does for the story or the edit.'),
             },
