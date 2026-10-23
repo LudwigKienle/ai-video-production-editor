@@ -121,3 +121,13 @@ test('style guides differ per family', () => {
   assert.match(promptStyleGuide('veo-3.1-fast-generate-preview', 'video'), /says: "exact line"/);
   assert.match(promptStyleGuide('midjourney', 'image'), /--ar/);
 });
+
+test('a subject sentence that ends in an aspect clause keeps its subject', () => {
+  const prompt = 'Photoreal portrait of a 27-year-old woman, dark hair in a tight bun, grey janitorial uniform, vertical 9:16 framing';
+  for (const model of ['midjourney', 'nano', 'flux-3-fal', 'seedream-v5-pro-fal']) {
+    const out = adaptPromptForModel(model, prompt, { kind: 'image', aspectRatio: '9:16' });
+    assert.match(out, /27-year-old woman/, model);
+    assert.match(out, /janitorial uniform/, model);
+    assert.doesNotMatch(out, /9:16/, model);
+  }
+});

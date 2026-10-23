@@ -192,7 +192,8 @@ const handleRpc = async (message, context = {}) => {
         const content = result && Array.isArray(result.__mcpContent) ? result.__mcpContent : [{ type: 'text', text: textResult(result) }];
         return rpcResult(id, { content, isError: false });
       } catch (error) {
-        return rpcResult(id, { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true });
+        const message = (error instanceof Error ? error.message : String(error)).replace(/data:[^"'\s]{80,}/g, 'data:…');
+        return rpcResult(id, { content: [{ type: 'text', text: message.length > 2000 ? `${message.slice(0, 2000)}…` : message }], isError: true });
       }
     }
     default:

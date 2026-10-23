@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createProjectAgentExecutor, describeMediaUrl, mergeWorld, upsertReference, upsertShots, withImageVersion, type ProjectAgentState } from './projectAgentTools.ts';
+import { createProjectAgentExecutor, describeMediaUrl, mergeWorld, upsertOutfits, upsertReference, upsertShots, withImageVersion, type ProjectAgentState } from './projectAgentTools.ts';
 
 const ids = () => { let n = 0; return () => `ref-${++n}`; };
 
@@ -114,4 +114,20 @@ test('mergeWorld fills fields and merges factions, places and glossary by name',
   assert.equal(second.environments[0].containerType, 'city');
   assert.equal(second.glossary.length, 1);
   assert.equal(second.glossary[0].meaning, '51% of Ashcroft Global');
+});
+
+test('upsertOutfits adds by name, updates in place and can replace the wardrobe', () => {
+  let n = 0;
+  const id = () => `o-${++n}`;
+  const nora = { id: 'n', type: 'character' as const, name: 'Nora Vale', description: '', prompt: '', imageUrl: 'x', isGenerating: false };
+  const first = upsertOutfits(nora, [{ name: 'Night uniform', prompt: 'grey uniform' }, { name: 'Black dress' }], id);
+  assert.deepEqual(first.outfits.map((o) => o.name), ['Night uniform', 'Black dress']);
+  assert.equal(first.outfits[1].prompt, 'Black dress');
+  const second = upsertOutfits({ ...nora, outfits: first.outfits }, [{ name: 'night UNIFORM', description: 'E1–E9' }], id);
+  assert.equal(second.outfits.length, 2);
+  assert.equal(second.outfits[0].prompt, 'grey uniform');
+  assert.equal(second.outfits[0].description, 'E1–E9');
+  assert.deepEqual(second.touched, ['o-1']);
+  const replaced = upsertOutfits({ ...nora, outfits: second.outfits }, [{ name: 'Red dress', prompt: 'blood-red gown' }], id, true);
+  assert.deepEqual(replaced.outfits.map((o) => o.name), ['Red dress']);
 });

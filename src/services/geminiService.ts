@@ -6,6 +6,7 @@ import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
 import { batchDirectorChunks, orderDirectorShots, splitScenesForDirector, splitScriptIntoScenes, targetShotCount } from '../utils/directorScenes';
 import type { DirectorSceneChunk } from '../utils/directorScenes';
+import { DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_FORMAT_RULES, DIRECTOR_LIGHTING, DIRECTOR_MOVE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_SHOT_TYPES, DIRECTOR_TEXT_RULE } from '../utils/directorAgent';
 import { trackTask } from './taskCenter';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
@@ -4279,6 +4280,8 @@ export type DirectorContext = {
     environments?: DirectorNamedItem[];
     props?: DirectorNamedItem[];
     aspectRatio?: string;
+    /** Production format id (microdrama, commercial …): adds that format's Director rules. */
+    productionFormat?: string;
 };
 
 const directorNamedList = (title: string, items?: DirectorNamedItem[]) => {
@@ -4333,16 +4336,17 @@ ${contextBlock}
 ${previousTail ? `Continuity: the previous batch ended with these shots. Keep characters, wardrobe, props, screen direction and time of day consistent with them.\n${previousTail}\n` : ''}
 Rules:
 1. Cover every scene listed below. "sceneNumber" MUST be the number from its "### SCENE n" header, never a scene number written inside the script text.
-2. Aim for about the target shot count of each scene (more for dialogue and action, fewer for simple transitions). List shots in screen order. For a scene split into parts, cover only what happens in that part.
-3. Coverage: open a new location or a time jump with an establishing or wide shot. Cover dialogue with a master or two-shot plus over-the-shoulder shots from both sides and close-ups on the key lines. Add inserts (extreme_closeup or b_roll) for important props, hands and reveals. Vary shot sizes. Respect the 180° line inside a scene.
-4. "characters", "environment" and "props": use the exact names from the cast, locations and props lists for what is visible in the shot. Leave out anyone who is not in frame.
-5. "prompt": one self-contained English image prompt for a single still frame: subject and action, framing and lens feel, composition, lighting, location details and mood. No camera moves, dialogue or shot numbers in it.
-6. "description" and "rationale" are written in the language of the script. "rationale" says what the shot does for the story or the edit.
-7. "cameraMovement": static, pan, tilt, dolly in, dolly out, tracking, handheld, crane or drone.
+2. ${DIRECTOR_COUNT_RULE}
+3. ${DIRECTOR_COVERAGE_RULE}
+4. ${DIRECTOR_NAMES_RULE}
+5. ${DIRECTOR_PROMPT_RULE}
+6. ${DIRECTOR_TEXT_RULE}
+7. ${DIRECTOR_MOVE_RULE}
+${(DIRECTOR_FORMAT_RULES[context?.productionFormat || ''] || []).map((rule, index) => `${8 + index}. ${rule}`).join('\n')}
 
 Authorized presets:
-- ShotType: closeup, extreme_closeup, portrait, medium, full_body, wide, extreme_wide, low_angle, overhead, ots, b_roll
-- Lighting: golden, studio, cinematic, neon, dramatic, fantasy, natural
+- ShotType: ${DIRECTOR_SHOT_TYPES.join(', ')}
+- Lighting: ${DIRECTOR_LIGHTING.join(', ')}
 
 Return JSON only:
 {

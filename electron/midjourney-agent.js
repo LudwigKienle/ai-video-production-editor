@@ -20,6 +20,7 @@ const RENDER_TIMEOUT_MS = 8 * 60 * 1000;  // job id known → images on the CDN
 const STALL_TIMEOUT_MS = 4 * 60 * 1000;   // no progress change at all
 const RUN_TIMEOUT_MS = 20 * 1000;         // one page call
 const POLL_MS = 3000;
+const CDN_PROBE_MS = 45 * 1000;           // job card not found on the page: ask the CDN directly
 // Prefix on the error message so the renderer can tell a moderation block from a page failure (IPC only carries the message).
 const MODERATION_PREFIX = '[moderated]';
 const USER_AGENT =
@@ -661,22 +662,35 @@ const attachNetworkTap = (w) => {
   }
 };
 
-// The first submit response after our Enter belongs to us: the lane is serialized.
+const objectPromptText = (obj) => [obj.prompt, obj.full_command, obj.fullCommand, obj.text, obj.content]
+  .filter((value) => typeof value === 'string').join(' ').toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Our job id from the API traffic after our Enter. Job lists (recent jobs, feeds) also carry ids the
+ * page has not rendered yet, so an id only counts when its object's prompt matches ours, or when it is
+ * the single id in the response to the submit request itself.
+ */
 const jobIdFromApi = (job, knownIds) => {
   const claimed = claimedJobIds();
+  const snippet = promptSnippet(job.prompt);
   for (const entry of apiLog) {
     if (entry.at < job.submittedAt - 1000) continue;
     if (!/submit|imagine|jobs?\b|create/i.test(entry.url)) continue;
     let moderation = null;
-    let found = null;
+    const matching = [];
+    const unmatched = new Set();
     walkJson(entry.data, (obj) => {
       const text = [obj.message, obj.error, obj.reason, obj.detail].filter((v) => typeof v === 'string').join(' ');
       if (text && MODERATION_RX.test(text)) moderation = moderation || text;
       const id = objectJobId(obj);
-      if (id && !knownIds.has(id) && !claimed.has(id) && !found) found = id;
+      if (!id || knownIds.has(id) || claimed.has(id)) return;
+      const promptText = objectPromptText(obj);
+      if (snippet && promptText.includes(snippet)) matching.push(id);
+      else if (!promptText) unmatched.add(id);
     });
     if (moderation) throw moderationError(moderation.slice(0, 300));
-    if (found) return found;
+    if (matching.length) return matching[0];
+    if (/submit/i.test(entry.url) && unmatched.size === 1) return [...unmatched][0];
   }
   return null;
 };
@@ -714,10 +728,9 @@ const resolveJobId = async (job, knownIds) => {
     const cards = await run(PAGE_SCRIPTS.jobCards).catch(() => ({}));
     const claimed = claimedJobIds();
     const fresh = Object.keys(cards).filter((id) => !knownIds.has(id) && !claimed.has(id));
-    if (fresh.length) {
-      const matching = fresh.find((id) => snippet && (cards[id].text || '').toLowerCase().includes(snippet));
-      return matching || fresh[0];
-    }
+    // Only a new card that shows our prompt is ours; older cards keep loading in as the page scrolls.
+    const matching = fresh.find((id) => snippet && (cards[id].text || '').toLowerCase().replace(/\s+/g, ' ').includes(snippet));
+    if (matching) return matching;
     await sleep(1500);
   }
   const shot = await screenshot('submit-timeout');
@@ -882,6 +895,17 @@ const downloadJob = async (job) => {
   return images;
 };
 
+/** The page's job cards can miss a job (layout change, scrolled away); its first image on the CDN is proof it finished. */
+const cdnHasImages = async (job) => {
+  job.lastCdnProbeAt = Date.now();
+  try {
+    await fetchCdnImage(`https://${CDN_HOST}/${job.jobId}/0_0.png`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const trackTick = async () => {
   if (ticking) return;
   ticking = true;
@@ -905,7 +929,12 @@ const trackTick = async () => {
       }
       if (job.apiFailed) { failJob(job, new Error(`Midjourney reported: ${job.apiFailed}`)); continue; }
       const now = Date.now();
-      const looksDone = job.apiDone
+      const stallDue = now - job.lastChangeAt > STALL_TIMEOUT_MS;
+      const cdnDone = job.jobId && !card && (stallDue || now - (job.lastCdnProbeAt || job.submittedAt) > CDN_PROBE_MS)
+        ? await cdnHasImages(job)
+        : false;
+      const looksDone = cdnDone
+        || job.apiDone
         || (card && card.percent === null && job.imageCount >= 4)
         || (card && card.percent === null && job.imageCount >= 1 && now - job.lastChangeAt > 10000)
         || (job.percent !== null && job.percent >= 100 && now - job.lastChangeAt > 4000);

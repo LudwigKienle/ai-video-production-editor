@@ -6,8 +6,13 @@
  *
  * The merge logic is pure (and unit-tested); `createProjectAgentTools` wires it to App state.
  */
-import type { ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
+import type { CharacterOutfit, ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
 import { createDefaultWorldbuildingState } from '../data/worldbuildingTypes.ts';
+import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes } from '../utils/directorScenes.ts';
+import {
+  buildSceneShots, DIRECTOR_CAMERA_MOVES, DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_FORMAT_RULES, DIRECTOR_LIGHTING,
+  DIRECTOR_MOVE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_SHOT_TYPES, DIRECTOR_TEXT_RULE, reviewScene, reviewStoryboard, summarizeDirectorScenes,
+} from '../utils/directorAgent.ts';
 
 export type ProjectAgentPhase = 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing';
 export const PROJECT_AGENT_PHASES: ProjectAgentPhase[] = ['script', 'worldbuilding', 'director', 'concept', 'scene_wall', 'storyboard', 'filming', 'review', 'marketing'];
@@ -28,6 +33,12 @@ export const describeMediaUrl = (url?: string | null) => {
 
 const clean = <T extends Record<string, unknown>>(value: T): Partial<T> =>
   Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
+
+/** Provider errors can echo the whole request (base64 images and all); keep what a person can read. */
+export const shortError = (error: unknown, max = 400) => {
+  const text = (error instanceof Error ? error.message : String(error)).replace(/"input"\s*:\s*\{[\s\S]*$/, '"input": …').replace(/data:[^"'\s]{80,}/g, 'data:…');
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
 
 const asString = (value: unknown) => (typeof value === 'string' ? value : undefined);
 const asStringArray = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined);
@@ -69,6 +80,8 @@ export const upsertReference = (references: ReferenceItem[], input: Record<strin
     prompt: asString(input.prompt),
     tags: asStringArray(input.tags),
     consistencyNotes: asString(input.consistencyNotes),
+    baseReferenceMode: (['auto', 'neutral', 'outfit'] as const).find((mode) => mode === input.baseReferenceMode),
+    characterPerspective: (['auto', 'close_up', 'full_body', 'side', 'profile_full', 'back'] as const).find((value) => value === input.perspective),
   });
   const image = mediaFrom(input, 'image');
   if (existing) {
@@ -179,6 +192,27 @@ export const mergeWorld = (prev: WorldbuildingState | undefined, input: Record<s
   return { ...base, factions, environments, glossary };
 };
 
+/** Add or edit a character's outfits by name; replace drops the outfits not passed. */
+export const upsertOutfits = (character: ReferenceItem, inputs: Array<Record<string, unknown>>, makeId: () => string, replace = false) => {
+  const current = replace ? [] : [...(character.outfits || [])];
+  const touched: string[] = [];
+  for (const input of inputs) {
+    const name = asString(input.name)?.trim();
+    if (!name) continue;
+    const index = current.findIndex((outfit) => sameName(outfit.name, name));
+    const patch = clean({ description: asString(input.description), prompt: asString(input.prompt) });
+    if (index >= 0) {
+      current[index] = { ...current[index], ...patch };
+      touched.push(current[index].id);
+    } else {
+      const outfit: CharacterOutfit = { id: makeId(), name, description: patch.description, prompt: patch.prompt || patch.description || name, clothingReferenceUrls: [], cameraYaw: 0, cameraPitch: 0 };
+      current.push(outfit);
+      touched.push(outfit.id);
+    }
+  }
+  return { outfits: current, touched };
+};
+
 export const summarizeReference = (ref: ReferenceItem, full = false) => clean({
   id: ref.id,
   type: ref.type,
@@ -189,6 +223,7 @@ export const summarizeReference = (ref: ReferenceItem, full = false) => clean({
   imageUrl: describeMediaUrl(ref.imageUrl),
   imageVersions: full && ref.imageVersions?.length ? ref.imageVersions.length : undefined,
   angleCount: ref.multiAngleUrls?.length || undefined,
+  outfits: ref.outfits?.length ? ref.outfits.map((outfit) => clean({ id: full ? outfit.id : undefined, name: outfit.name, description: full ? outfit.description : undefined, imageUrl: describeMediaUrl(outfit.imageUrl) })) : undefined,
 });
 
 export const summarizeShot = (shot: ShotPrompt, full = false) => clean({
@@ -227,6 +262,15 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_new: 'Starting a new project',
   project_open: 'Opening a project',
   project_list_models: 'Checking models',
+  project_list_outfit_models: 'Checking outfit models',
+  project_set_outfit_model: 'Choosing the outfit model',
+  project_upsert_outfits: 'Designing outfits',
+  project_generate_outfits: 'Rendering outfits',
+  project_plan_outfits: 'Planning outfits',
+  project_director_guide: 'Reading the Director rules',
+  project_director_scenes: 'Breaking the script into scenes',
+  project_director_write_scene: 'Directing a scene',
+  project_director_review: 'Reviewing coverage',
   project_set_models: 'Choosing models',
   project_generate_shot_images: 'Rendering storyboard frames',
   project_generate_shot_videos: 'Filming shots',
@@ -333,7 +377,9 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
         description: str('Who or what it is: look, wardrobe, personality, materials.'),
         prompt: str('Image prompt for generating its reference image.'),
         tags: strList('Tags.'),
-        consistencyNotes: str('Details that must stay consistent across shots.'),
+        consistencyNotes: str('Visual traits that are ALWAYS true (e.g. "emerald ring on a gold chain"). They are appended to every image prompt of this reference, so no episode lists or alternative outfits.'),
+        baseReferenceMode: str('Characters only: "outfit" renders the signature look as described (best for series leads), "neutral" a neutral base layer in T-pose for wardrobe work, "auto" lets the editor decide.'),
+        perspective: str('Characters only: framing of the reference image — auto, close_up, full_body, side, profile_full or back.'),
         imageUrl: str('Reference image: https URL or data URL.'),
         imagePath: str('Reference image: local file path.'),
       },
@@ -395,6 +441,96 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     name: 'project_new',
     description: 'Start a new, empty project: the open project is saved and closed first. Use this before writing a new script, world or storyboard unless the user asked you to work in the open project. Pass folderPath to save the new project right away.',
     parameters: { type: 'object', properties: { folderPath: str('Folder for the new project (absolute path or ~/…).'), name: str('Project name.') } },
+  },
+  {
+    name: 'project_list_outfit_models',
+    description: 'Models that can dress a character from its base reference image (edit models such as Nano Banana 2.1, Seedream 5 Pro Edit, FLUX.3 Edit, GPT Image 2), the selected one, and what "same" resolves to.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'project_set_outfit_model',
+    description: 'Select the outfit model in the editor (id from project_list_outfit_models).',
+    parameters: { type: 'object', properties: { model: str('Outfit model id.') }, required: ['model'] },
+  },
+  {
+    name: 'project_upsert_outfits',
+    description: 'Write a character\'s wardrobe (the Concept → Wardrobe tab): outfits by name with a description (when/why it is worn) and an image prompt describing only the clothes, hair and accessories. Existing outfits with the same name are updated; replace=true drops the others.',
+    parameters: {
+      type: 'object',
+      properties: {
+        referenceName: str('Character name.'),
+        referenceId: str('Character id (instead of the name).'),
+        outfits: { type: 'array', items: { type: 'object', properties: { name: str('Outfit name, e.g. "Night-shift uniform".'), description: str('When it is worn (episodes, scenes, story meaning).'), prompt: str('The clothes, hair, makeup and accessories only — the face comes from the base reference.') } }, description: 'Outfits.' },
+        replace: { type: 'boolean', description: 'Replace the whole wardrobe.' },
+      },
+      required: ['outfits'],
+    },
+  },
+  {
+    name: 'project_generate_outfits',
+    description: 'Render outfit images for a character from its base reference image (the identity anchor) with the outfit model, one after another. Pass outfit names, or leave them out to render every outfit without an image (all: true re-renders all). Spends provider credits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        referenceName: str('Character name.'),
+        referenceId: str('Character id.'),
+        outfits: strList('Outfit names to render.'),
+        all: { type: 'boolean', description: 'Re-render every outfit.' },
+        model: str('Optional outfit model id to switch to first.'),
+      },
+    },
+  },
+  {
+    name: 'project_plan_outfits',
+    description: 'Let the editor plan a character\'s outfits from the script (its own wardrobe planner) and render them from the base reference. Use project_upsert_outfits instead to design them yourself.',
+    parameters: { type: 'object', properties: { referenceName: str('Character name.'), referenceId: str('Character id.'), count: num('How many outfits (1–8).') } },
+  },
+  {
+    name: 'project_director_guide',
+    description: 'How to direct this project\'s storyboard like the editor\'s Director: coverage rules, the production format\'s extra rules (e.g. microdrama hook/jolts/freeze), allowed shot types, lighting and camera moves, and the exact cast/location/prop names to use. Read this before project_director_write_scene.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'project_director_scenes',
+    description: 'The script split into scenes exactly as the editor\'s Director splits it: scene number, slugline, target shot count, dialogue yes/no, cast, location and props detected in the scene, and how many shots/frames it already has. Pass sceneNumber to also get that scene\'s full text.',
+    parameters: { type: 'object', properties: { sceneNumber: num('Scene to return with its full text.') } },
+  },
+  {
+    name: 'project_director_write_scene',
+    description: 'Write the shot list of ONE scene (in screen order). Replaces only that scene\'s shots; other scenes keep their shots, frames and videos. Shots are numbered "scene.shot", get the scene\'s slugline, and names are snapped to the concept references. Refuses to replace shots that already have frames or videos unless replaceFrames is true. Returns warnings and a coverage review of the scene.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sceneNumber: num('Scene number from project_director_scenes.'),
+        shots: {
+          type: 'array',
+          description: 'Shots in screen order.',
+          items: {
+            type: 'object',
+            properties: {
+              description: str('What happens (in the script\'s language).'),
+              prompt: str('Self-contained English image prompt for the still frame.'),
+              shotType: str(`One of: ${DIRECTOR_SHOT_TYPES.join(', ')}.`),
+              lighting: str(`One of: ${DIRECTOR_LIGHTING.join(', ')}.`),
+              cameraAngle: str('e.g. eye-level, low angle, high angle, overhead, dutch.'),
+              cameraMovement: str(`One of: ${DIRECTOR_CAMERA_MOVES.join(', ')}.`),
+              characters: strList('Cast names in frame.'),
+              environment: str('Location name.'),
+              props: strList('Prop/product names in frame.'),
+              visualTriggers: strList('Visual cues that must appear.'),
+              rationale: str('What the shot does for the story or the edit.'),
+            },
+          },
+        },
+        replaceFrames: { type: 'boolean', description: 'Also replace existing shots of this scene that already have frames or videos.' },
+      },
+      required: ['sceneNumber', 'shots'],
+    },
+  },
+  {
+    name: 'project_director_review',
+    description: 'Check the storyboard against the script scene by scene: missing scenes, shot count vs. target, establishing/close-up/over-the-shoulder coverage, the format\'s rules (microdrama hook and freeze), script characters missing from the shots, names not in the concept lists, shots without location, and shots that belong to no scene.',
+    parameters: { type: 'object', properties: { sceneNumber: num('Only this scene.') } },
   },
   {
     name: 'project_list_models',
@@ -491,6 +627,10 @@ export type ProjectAgentAutomation = {
   generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
   generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
   generateReferenceImage: (payload: { referenceId: string; instruction?: string }) => Promise<{ detail: string }>;
+  getOutfitModels: () => { current: string; resolved: string; options: Array<{ id: string; label: string; group: string }> };
+  setOutfitModel: (model: string) => void;
+  renderOutfit: (payload: { characterId: string; outfitId: string }) => Promise<{ detail: string }>;
+  planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
 };
 
 export type ProjectAgentContext = {
@@ -732,6 +872,142 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       return { ok: true, closed: before.projectPath || before.projectName || null, saved };
     },
 
+    project_list_outfit_models: async () => {
+      const models = (await ctx.automation('concept')).getOutfitModels();
+      return { selected: models.current, resolvesTo: models.resolved, options: models.options };
+    },
+
+    project_set_outfit_model: async (args: Record<string, unknown>) => {
+      const model = asString(args.model);
+      if (!model) throw new Error('Pass model.');
+      (await ctx.automation('concept')).setOutfitModel(model);
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await ctx.settle();
+        const current = (await ctx.automation('concept')).getOutfitModels();
+        if (current.current === model) return { ok: true, selected: current.current, resolvesTo: current.resolved };
+      }
+      throw new Error('The editor did not switch the outfit model in time.');
+    },
+
+    project_upsert_outfits: async (args: Record<string, unknown>) => {
+      const refs = state().references;
+      const character = findReference(refs, { id: asString(args.referenceId), name: asString(args.referenceName), type: 'character' });
+      if (!character) throw new Error('No character with that id or name.');
+      const inputs = Array.isArray(args.outfits) ? args.outfits.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
+      if (inputs.length === 0) throw new Error('Pass outfits.');
+      const result = upsertOutfits(character, inputs, () => `outfit-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, args.replace === true);
+      const next = refs.map((ref) => (ref.id === character.id ? { ...ref, outfits: result.outfits } : ref));
+      pending.references = next;
+      ctx.setReferences(() => next);
+      settle();
+      return { ok: true, character: character.name, outfits: result.outfits.map((outfit) => ({ id: outfit.id, name: outfit.name, hasImage: Boolean(outfit.imageUrl) })) };
+    },
+
+    project_generate_outfits: async (args: Record<string, unknown>) => {
+      const model = asString(args.model);
+      if (model) {
+        (await ctx.automation('concept')).setOutfitModel(model);
+        for (let attempt = 0; attempt < 30 && (await ctx.automation('concept')).getOutfitModels().current !== model; attempt += 1) await ctx.settle();
+      }
+      await ctx.settle();
+      const character = findReference(ctx.getState().references, { id: asString(args.referenceId), name: asString(args.referenceName), type: 'character' });
+      if (!character) throw new Error('No character with that id or name.');
+      if (!character.imageUrl) throw new Error(`${character.name} has no base reference image yet (project_generate_reference_image).`);
+      const names = asStringArray(args.outfits);
+      const targets = (character.outfits || []).filter((outfit) => (names?.length ? names.some((name) => sameName(name, outfit.name)) : args.all === true || !outfit.imageUrl));
+      if (targets.length === 0) throw new Error('No outfits to render (add them with project_upsert_outfits, or pass all: true).');
+      const results = [];
+      for (const outfit of targets) {
+        try {
+          const { detail } = await (await ctx.automation('concept')).renderOutfit({ characterId: character.id, outfitId: outfit.id });
+          await ctx.settle();
+          const after = findReference(ctx.getState().references, { id: character.id })?.outfits?.find((item) => item.id === outfit.id);
+          results.push({ outfit: outfit.name, ok: true, detail, imageUrl: describeMediaUrl(after?.imageUrl) });
+        } catch (error) {
+          results.push({ outfit: outfit.name, ok: false, error: shortError(error) });
+        }
+      }
+      return { character: character.name, results };
+    },
+
+    project_plan_outfits: async (args: Record<string, unknown>) => {
+      const character = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName), type: 'character' });
+      if (!character) throw new Error('No character with that id or name.');
+      const { detail } = await (await ctx.automation('concept')).planOutfits({ characterId: character.id, count: asNumber(args.count) });
+      await ctx.settle();
+      const after = findReference(ctx.getState().references, { id: character.id });
+      return { ok: true, detail, outfits: (after?.outfits || []).map((outfit) => ({ name: outfit.name, imageUrl: describeMediaUrl(outfit.imageUrl) })) };
+    },
+
+    project_director_guide: async () => {
+      const s = state();
+      const format = s.storyBible.productionFormat || 'feature';
+      const names = (type: ReferenceItem['type'][]) => s.references.filter((ref) => type.includes(ref.type)).map((ref) => ref.name);
+      return {
+        format,
+        workflow: [
+          'project_director_scenes → pick a scene → project_director_scenes {sceneNumber} for its text.',
+          'Write its shots and call project_director_write_scene; read the review and fix issues.',
+          'Repeat scene by scene, then project_director_review for the whole storyboard.',
+          'Render frames with project_generate_shot_images when the user wants them.',
+        ],
+        rules: [DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_TEXT_RULE, DIRECTOR_MOVE_RULE],
+        formatRules: DIRECTOR_FORMAT_RULES[format] || [],
+        productionGuidelines: s.storyBible.productionGuidelines || undefined,
+        presets: { shotType: DIRECTOR_SHOT_TYPES, lighting: DIRECTOR_LIGHTING, cameraMovement: DIRECTOR_CAMERA_MOVES },
+        cast: names(['character']),
+        locations: names(['environment']),
+        props: names(['prop', 'product']),
+      };
+    },
+
+    project_director_scenes: async (args: Record<string, unknown>) => {
+      const s = state();
+      if (!s.storyBible.script?.trim()) throw new Error('The project has no script yet (project_update_story).');
+      const scenes = summarizeDirectorScenes(s.storyBible.script, s.references, s.shotPrompts, s.storyBible.productionFormat);
+      const sceneNumber = asNumber(args.sceneNumber);
+      if (sceneNumber === undefined) return { sceneCount: scenes.length, scenes };
+      const scene = splitScriptIntoScenes(s.storyBible.script).find((entry) => entry.sceneNumber === sceneNumber);
+      if (!scene) throw new Error(`No scene ${sceneNumber}; the script has ${scenes.length}.`);
+      return { ...scenes.find((entry) => entry.sceneNumber === sceneNumber), text: scene.text };
+    },
+
+    project_director_write_scene: async (args: Record<string, unknown>) => {
+      const s = state();
+      const sceneNumber = asNumber(args.sceneNumber);
+      const scene = splitScriptIntoScenes(s.storyBible.script || '').find((entry) => entry.sceneNumber === sceneNumber);
+      if (!scene) throw new Error('Unknown sceneNumber; see project_director_scenes.');
+      const inputs = Array.isArray(args.shots) ? args.shots.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
+      if (inputs.length === 0) throw new Error('Pass the scene\'s shots.');
+      const replaced = shotsReplacedByMerge(s.shotPrompts, [scene.sceneNumber]);
+      const withMedia = replaced.filter((shot) => shot.imageUrl || shot.videoUrl);
+      if (withMedia.length && args.replaceFrames !== true) {
+        throw new Error(`Scene ${scene.sceneNumber} has ${withMedia.length} shot(s) with frames or videos. Ask the user, then pass replaceFrames: true to replace them.`);
+      }
+      const { shots, warnings } = buildSceneShots(scene, inputs, s.references);
+      const merged = mergeShotsIntoScenes(s.shotPrompts, shots, [scene.sceneNumber]);
+      pending.shotPrompts = merged;
+      ctx.setShotPrompts(() => merged);
+      settle();
+      const review = reviewScene(scene, merged.filter((shot) => shot.sceneNumber === scene.sceneNumber), s.references, s.storyBible.productionFormat);
+      return { ok: true, sceneNumber: scene.sceneNumber, slugline: scene.slugline, shotCount: shots.length, replacedShots: replaced.length, totalShots: merged.length, warnings, review };
+    },
+
+    project_director_review: async (args: Record<string, unknown>) => {
+      const s = state();
+      if (!s.storyBible.script?.trim()) throw new Error('The project has no script yet.');
+      const result = reviewStoryboard(s.storyBible.script, s.shotPrompts, s.references, s.storyBible.productionFormat);
+      const sceneNumber = asNumber(args.sceneNumber);
+      const scenes = sceneNumber === undefined ? result.scenes : result.scenes.filter((scene) => scene.sceneNumber === sceneNumber);
+      return {
+        format: s.storyBible.productionFormat || 'feature',
+        scenesOk: scenes.filter((scene) => scene.ok).length,
+        scenesWithIssues: scenes.filter((scene) => !scene.ok).length,
+        scenes,
+        orphanShots: result.orphanShots.length ? result.orphanShots : undefined,
+      };
+    },
+
     project_list_models: async () => {
       const models = (await ctx.automation()).getModels();
       return {
@@ -766,7 +1042,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
             ? { shot, ok: true, detail, imageUrl: describeMediaUrl(after?.imageUrl) }
             : { shot, ok: false, error: 'No new frame was produced (check the shot prompt and the selected model).' });
         } catch (error) {
-          results.push({ shot, ok: false, error: error instanceof Error ? error.message : String(error) });
+          results.push({ shot, ok: false, error: shortError(error) });
         }
       }
       return { results, hint: 'Use project_view_image to look at a frame.' };
@@ -789,7 +1065,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
             ? { shot, ok: true, detail, videoUrl: describeMediaUrl(after?.videoUrl) }
             : { shot, ok: false, error: before.imageUrl || before.startFrameUrl ? 'No new video was produced.' : 'The shot has no storyboard frame yet; render it first (project_generate_shot_images).' });
         } catch (error) {
-          results.push({ shot, ok: false, error: error instanceof Error ? error.message : String(error) });
+          results.push({ shot, ok: false, error: shortError(error) });
         }
       }
       return { results };

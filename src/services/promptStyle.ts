@@ -142,7 +142,20 @@ type Bucketed = Record<PromptSlot, string[]>;
 
 const bucket = (prompt: string): Bucketed => {
   const buckets: Bucketed = { text: [], subject: [], camera: [], lighting: [], style: [], aspect: [], audio: [], reference: [], continuity: [], negative: [] };
-  for (const chunk of splitPrompt(prompt)) buckets[classifyChunk(chunk)].push(chunk);
+  for (const chunk of splitPrompt(prompt)) {
+    const slot = classifyChunk(chunk);
+    if (slot !== 'aspect') {
+      buckets[slot].push(chunk);
+      continue;
+    }
+    // "Portrait of a woman …, grey uniform, vertical 9:16 framing" is a subject sentence with an aspect clause:
+    // only the aspect clauses go to the aspect bucket; the rest is classified on its own instead of being dropped.
+    const clauses = stripTerminal(chunk).split(/\s*[,;]\s*/).filter(Boolean);
+    const aspectClauses = clauses.filter((clause) => RX.aspect.test(clause));
+    const rest = clauses.filter((clause) => !RX.aspect.test(clause)).join(', ');
+    buckets.aspect.push(aspectClauses.join(', ') || chunk);
+    if (rest.split(/\s+/).length >= 3) buckets[classifyChunk(rest)].push(rest);
+  }
   return buckets;
 };
 

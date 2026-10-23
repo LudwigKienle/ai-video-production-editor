@@ -155,6 +155,13 @@ export type ProjectHubStudioAutomationBindings = {
     generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
     generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
     generateReferenceImage: (payload: { referenceId: string; instruction?: string }) => Promise<{ detail: string }>;
+    /** Outfit model picker; "same" resolves to the image model's edit sibling (or Seedream). */
+    getOutfitModels: () => { current: string; resolved: string; options: Array<{ id: string; label: string; group: string }> };
+    setOutfitModel: (model: string) => void;
+    /** Render one outfit: the character's base reference image (+ clothing refs) through the outfit model. */
+    renderOutfit: (payload: { characterId: string; outfitId: string }) => Promise<{ detail: string }>;
+    /** The hub's own planner: outfits from the script, then renders them. */
+    planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
 };
 
 export type ProjectHubModelOption = { id: string; label: string; provider: string; goodFor?: string };
@@ -9057,7 +9064,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         setReferences(prev => prev.map(ref => ref.id === referenceId ? { ...ref, isGenerating: true } : ref));
         try {
             const basePrompt = composeReferencePrompt(reference, { includeCamera: options?.includeCamera ?? isMultiAngleModel });
-            const imagePrompt = [stylePrompt, basePrompt, options?.promptSuffix].filter(Boolean).join('. ');
+            // Subject first: Midjourney and most image models weight the opening words most.
+            const imagePrompt = [basePrompt, options?.promptSuffix, stylePrompt].filter(Boolean).join('. ');
             const { image, angleUrls } = await generateReferenceImageWithAngles(
                 reference,
                 imagePrompt,
@@ -9738,11 +9746,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const garmentSlotCount = garmentPieces.length;
         const hasSwimsuitBase = Boolean(character.swimsuitBaseUrl);
         return [
-            stylePrompt,
             outfit.prompt,
             garmentPromptSummary ? `garment slots: ${garmentPromptSummary}` : '',
+            'single character only, no other people',
+            'reference sheet style, plain seamless white or neutral studio background, no scene environment',
+            `identity from the base reference: ${basePrompt}`,
+            'replace the clothing shown in the base reference image with the target outfit',
             contextNotes,
-            basePrompt,
             'full body shot to show outfit',
             'same character identity and face, consistent hair, proportions, skin tone, and body type',
             hasSwimsuitBase
@@ -9761,10 +9771,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 ? 'if any outfit reference contains a person or mannequin, ignore body, face, pose, and skin; extract only garment shape, fabric, color, print, and details'
                 : '',
             'never replace the base character identity with any person from outfit references',
-            'reference sheet style, plain seamless white or neutral studio background, no scene environment',
             'straight standing full-body t-pose, arms extended horizontally, neutral expression',
             'no camera tilt or dramatic perspective, centered subject framing',
-            'final image must show the character wearing the complete outfit, not only swimwear'
+            'final image must show the character wearing the complete outfit, not only swimwear',
+            stylePrompt ? `rendering look (lighting and colour only): ${stylePrompt}` : '',
         ].filter(Boolean).join('. ');
     };
 
@@ -10104,7 +10114,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             : requestedCount;
         setReferences(prev => prev.map(ref => ref.id === characterId ? { ...ref, isGeneratingOutfits: true } : ref));
         try {
-            const basePrompt = composeReferencePrompt(character, { includeCamera: false });
+            const basePrompt = composeReferencePrompt({ ...character, characterPerspective: 'full_body' }, { includeCamera: false });
             const outfitPlan = await generateCharacterOutfitPlan({
                 name: character.name,
                 description: character.description || character.prompt,
@@ -10133,9 +10143,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             for (const outfit of outfits) {
                 try {
                     const contextNotes = [
-                        outfit.description ? `Context: ${outfit.description}` : '',
                         character.designNotes ? `Design notes: ${character.designNotes}` : '',
-                        storyBible.logline ? `Story context: ${storyBible.logline}` : '',
                     ].filter(Boolean).join('. ');
                     const outfitPrompt = buildOutfitRenderPrompt(character, outfit, basePrompt, contextNotes);
                     const imageMedia = await generateOutfitImage(character, outfit, outfitPrompt);
@@ -10158,11 +10166,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         if (!character || !outfit) return;
         updateCharacterOutfit(characterId, outfitId, { isGenerating: true });
         try {
-            const basePrompt = composeReferencePrompt(character, { includeCamera: false });
+            const basePrompt = composeReferencePrompt({ ...character, characterPerspective: 'full_body' }, { includeCamera: false });
             const contextNotes = [
-                outfit.description ? `Context: ${outfit.description}` : '',
                 character.designNotes ? `Design notes: ${character.designNotes}` : '',
-                storyBible.logline ? `Story context: ${storyBible.logline}` : '',
             ].filter(Boolean).join('. ');
             const outfitPrompt = buildOutfitRenderPrompt(character, outfit, basePrompt, contextNotes);
             const imageMedia = await generateOutfitImage(character, outfit, outfitPrompt);
@@ -12860,6 +12866,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 props: namedRefs(['prop', 'product']),
                 references: moodboardRefs.length ? moodboardRefs : undefined,
                 aspectRatio: referenceAspectRatio,
+                productionFormat: storyBible.productionFormat,
             };
             const treatment = await generateViMaxStoryboardSceneByScene(
                 scriptForDirector,
@@ -13136,8 +13143,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return targets;
     };
 
-    const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel });
-    agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel };
+    const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
+    agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
 
     /** Run a hub action and turn the error it would only show in the UI into a thrown error. */
     const runReportingErrors = async (action: () => Promise<unknown>) => {
@@ -13176,6 +13183,40 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             generateShotVideo: async ({ shot }) => {
                 await runReportingErrors(() => agentHandlersRef.current.handleGenerateShotVideo(shot));
                 return { detail: `Shot ${shot} filmed with ${FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === agentHandlersRef.current.videoModel)?.label || agentHandlersRef.current.videoModel}.` };
+            },
+            getOutfitModels: () => ({
+                current: agentHandlersRef.current.outfitImageModel,
+                resolved: agentHandlersRef.current.resolveOutfitModel(),
+                options: OUTFIT_MODEL_OPTIONS.map((option) => ({ id: option.id, label: option.label, group: option.group || 'auto' })),
+            }),
+            setOutfitModel: (model) => {
+                if (!OUTFIT_MODEL_OPTIONS.some((option) => option.id === model)) throw new Error(`Unknown outfit model: ${model}. Use project_list_outfit_models.`);
+                setOutfitImageModel(model as OutfitImageModel);
+            },
+            renderOutfit: async ({ characterId, outfitId }) => {
+                const handlers = agentHandlersRef.current;
+                const character = handlers.references.find((ref) => ref.id === characterId);
+                const outfit = character?.outfits?.find((item) => item.id === outfitId);
+                if (!character || !outfit) throw new Error('Unknown character or outfit.');
+                if (!character.imageUrl) throw new Error(`${character.name} has no base reference image yet; render it first.`);
+                handlers.updateCharacterOutfit(characterId, outfitId, { isGenerating: true });
+                try {
+                    const basePrompt = composeReferencePrompt({ ...character, characterPerspective: 'full_body' }, { includeCamera: false });
+                    const contextNotes = [
+                        character.designNotes ? `Design notes: ${character.designNotes}` : '',
+                    ].filter(Boolean).join('. ');
+                    const outfitPrompt = handlers.buildOutfitRenderPrompt(character, outfit, basePrompt, contextNotes);
+                    const imageMedia = await handlers.generateOutfitImage(character, outfit, outfitPrompt);
+                    handlers.updateCharacterOutfit(characterId, outfitId, { imageUrl: imageMedia.url, isGenerating: false, multiAngleUrls: undefined, multiAngleMeta: undefined });
+                } catch (error) {
+                    handlers.updateCharacterOutfit(characterId, outfitId, { isGenerating: false });
+                    throw error;
+                }
+                return { detail: `${outfit.name} rendered from ${character.name}'s base reference with ${outfitModelLabel(handlers.resolveOutfitModel())}.` };
+            },
+            planOutfits: async ({ characterId, count }) => {
+                await runReportingErrors(() => agentHandlersRef.current.handleGenerateCharacterOutfits(characterId, { count }));
+                return { detail: 'Outfits planned from the script and rendered.' };
             },
             generateReferenceImage: async ({ referenceId, instruction }) => {
                 await runReportingErrors(() => agentHandlersRef.current.regenerateReferenceImage(referenceId, instruction ? { promptSuffix: instruction } : undefined));
