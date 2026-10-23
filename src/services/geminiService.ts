@@ -8,6 +8,7 @@ import { batchDirectorChunks, orderDirectorShots, splitScenesForDirector, splitS
 import type { DirectorSceneChunk } from '../utils/directorScenes';
 import { DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_FORMAT_RULES, DIRECTOR_LIGHTING, DIRECTOR_MOVE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_SHOT_TYPES, DIRECTOR_TEXT_RULE } from '../utils/directorAgent';
 import { trackTask } from './taskCenter';
+import { parseVisualContinuityVerdict, type VisualContinuityVerdict } from '../utils/visualContinuity';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
 
@@ -3012,6 +3013,30 @@ Prompt: ${payload.currentShot.prompt || 'n/a'}
     }
 };
 
+/**
+ * Visual continuity review of one frame (see utils/visualContinuity): the frame, its neighbours
+ * on screen and the cast/outfit/location references go in as images; a structured verdict comes back.
+ */
+export const reviewShotVisualContinuity = async (
+    prompt: string,
+    images: Array<{ base64: string; mimeType: string; label: string }>,
+): Promise<{ verdict: VisualContinuityVerdict; model: string }> => {
+    if (shouldUseReplicateForGoogleModels()) throw new Error('Visual continuity review needs the Gemini API.');
+    const ai = getAiClient();
+    const parts: any[] = [{ text: `${prompt}\n\nJSON fields: score, status, summary, issues[{category, severity, message}], promptFix, needsReverseAngle, reverseYaw, reverseReason.` }];
+    images.forEach((image, index) => {
+        parts.push({ text: `Image ${index + 1}: ${image.label}` });
+        parts.push({ inlineData: { data: image.base64, mimeType: image.mimeType || 'image/png' } });
+    });
+    const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
+        model: GEMINI_TEXT_MODEL_FLASH,
+        contents: [{ role: 'user', parts }],
+        config: { responseMimeType: 'application/json' },
+    }));
+    recordUsage({ provider: 'gemini', model: GEMINI_TEXT_MODEL_FLASH, kind: 'analysis', units: 1, unitLabel: 'request', note: 'Visual continuity review' });
+    return { verdict: parseVisualContinuityVerdict(parseJsonFromText(response.text || '{}', 'VisualContinuityReview')), model: GEMINI_TEXT_MODEL_FLASH };
+};
+
 export const refineStoryboardPromptForContinuity = async (payload: {
     script: string;
     projectTitle?: string;
@@ -3074,11 +3099,15 @@ export const refineStoryboardPromptForContinuity = async (payload: {
         topAnchors: payload.review.topAnchors || [],
         issues: payload.review.issues.map((issue) => ({
             kind: issue.kind,
+            category: issue.category || null,
             severity: issue.severity,
             message: issue.message,
             anchorName: issue.anchorName || null,
             comparedShot: issue.comparedShot || null,
         })),
+        // Concrete correction from the visual review: work it into the rewritten prompt.
+        fix: payload.review.promptFix || null,
+        reverseAngle: payload.review.reverseAngle || null,
     };
 
     const content = `You are a storyboard continuity prompt refiner.

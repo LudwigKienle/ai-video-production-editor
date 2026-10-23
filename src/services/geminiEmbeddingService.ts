@@ -8,6 +8,7 @@ import type {
   StoryBible,
 } from '../types';
 import { getBase64FromUrl } from '../utils/helpers';
+import { previousInScreenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
 import { recordUsage } from '../utils/usageTracker';
 import { prepareVideoFileDataForGemini } from './geminiService';
 
@@ -335,9 +336,8 @@ const buildResearchCandidates = (storyBible: StoryBible): ContextCandidate[] => 
 };
 
 const buildPreviousShotCandidates = (shotPrompts: ShotPrompt[], targetShot: ShotPrompt): ContextCandidate[] =>
-  shotPrompts
-    .filter((entry) => entry.shot < targetShot.shot && Boolean(entry.imageUrl || entry.sketchUrl))
-    .sort((a, b) => b.shot - a.shot)
+  shotsBeforeInScreenOrder(shotPrompts, targetShot.shot)
+    .filter((entry) => Boolean(entry.imageUrl || entry.sketchUrl))
     .slice(0, MAX_PREVIOUS_SHOT_CANDIDATES)
     .map((entry) => ({
       id: `shot-${entry.shot}`,
@@ -359,9 +359,8 @@ const buildPreviousShotCandidates = (shotPrompts: ShotPrompt[], targetShot: Shot
     }));
 
 const buildPreviousShotVideoCandidates = (shotPrompts: ShotPrompt[], targetShot: ShotPrompt): ContextCandidate[] =>
-  shotPrompts
-    .filter((entry) => entry.shot < targetShot.shot && Boolean(entry.videoUrl || entry.motionReferenceUrl))
-    .sort((a, b) => b.shot - a.shot)
+  shotsBeforeInScreenOrder(shotPrompts, targetShot.shot)
+    .filter((entry) => Boolean(entry.videoUrl || entry.motionReferenceUrl))
     .slice(0, MAX_PREVIOUS_SHOT_CANDIDATES)
     .map((entry) => ({
       id: `shot-video-${entry.shot}`,
@@ -1158,10 +1157,7 @@ export const reviewGeminiContinuityForRenderedShots = async (
   const reviewMode = options.mode || 'rendered';
 
   for (const shot of renderedShots) {
-    const previousShot =
-      [...options.shotPrompts]
-        .filter((entry) => entry.shot < shot.shot && Boolean(entry.videoUrl || entry.imageUrl || entry.startFrameUrl))
-        .sort((a, b) => b.shot - a.shot)[0] || null;
+    const previousShot = previousInScreenOrder(options.shotPrompts, shot.shot, { where: (entry) => Boolean(entry.videoUrl || entry.imageUrl || entry.startFrameUrl) });
 
     const includeStartFrameCandidate = reviewMode !== 'storyboard' || Boolean(shot.startFrameUrl || shot.sketchUrl || shot.videoUrl);
     const candidates = uniqueBy(

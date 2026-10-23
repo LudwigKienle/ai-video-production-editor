@@ -94,7 +94,7 @@ const VIEW_SLOT_YAW: Record<EnvironmentViewSlot, number> = { front: 0, right: 90
 /** World Labs multi-image azimuths, clockwise from the front view. */
 export const MARBLE_VIEW_AZIMUTH: Record<EnvironmentViewSlot, 0 | 90 | 180 | 270> = { front: 0, right: 90, back: 180, left: 270 };
 
-const yawDistance = (a: number, b: number) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+export const yawDistance = (a: number, b: number) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
 
 /**
  * The views a 3D generator can use: the base image as the front, and for each other side

@@ -1289,6 +1289,8 @@ export type ShotContinuityIssue = {
   score: number;
   anchorName?: string;
   comparedShot?: number;
+  /** Visual review category: identity, wardrobe, props, location, lighting, screen_direction, eyeline, staging, text, framing. */
+  category?: string;
 };
 
 export type ShotContinuityReview = {
@@ -1305,6 +1307,10 @@ export type ShotContinuityReview = {
     kind: ShotContinuityIssue['kind'];
   }>;
   issues: ShotContinuityIssue[];
+  /** Concrete prompt addition that fixes the issues (visual review). */
+  promptFix?: string;
+  /** The shot needs the opposite side of the location: render from this camera yaw. */
+  reverseAngle?: { yaw: number; reason?: string };
 };
 
 export type GarmentCategory = 'top' | 'bottom' | 'shoes' | 'outerwear' | 'accessory' | 'headwear';

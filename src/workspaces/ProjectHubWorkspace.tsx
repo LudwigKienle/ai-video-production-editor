@@ -2,7 +2,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
 import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
+import { nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
+import { buildVisualContinuityPrompt, toShotContinuityReview, type ContinuityImageRole } from '../utils/visualContinuity';
 import {
+    reviewShotVisualContinuity,
     generateProductionGuidelines,
     generateScriptWithMode,
     generateReferenceDetails,
@@ -95,7 +98,7 @@ import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingServ
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes as splitScriptIntoSceneBlocks } from '../utils/directorScenes';
-import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews, pickReferenceImageForYaw } from '../utils/environmentWorldModel';
+import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews, pickReferenceImageForYaw, yawDistance } from '../utils/environmentWorldModel';
 import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
@@ -165,6 +168,10 @@ export type ProjectHubStudioAutomationBindings = {
     /** Storyboard continuity auto-refine (Gemini reviews each frame and re-renders up to 3 times). */
     getStoryboardOptions: () => { autoRefine: boolean };
     setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
+    /** Visual continuity review of rendered frames (screen-order neighbours + references); stores the review on each shot. */
+    reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review: ShotContinuityReview }>>;
+    /** One new view of a reference from a camera yaw (180 = reverse side), stored with its angles. */
+    generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
 };
 
 export type ProjectHubModelOption = { id: string; label: string; provider: string; goodFor?: string };
@@ -4120,6 +4127,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const [error, setErrorState] = useState<string | null>(null);
     // The latest error, readable right away: agent bindings report it instead of a silent "done".
     const lastErrorRef = useRef<string | null>(null);
+    const pendingReverseRendersRef = useRef<Set<number>>(new Set());
     const setError = useCallback((value: string | null) => {
         lastErrorRef.current = value;
         setErrorState(value);
@@ -4560,7 +4568,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     }, [storyBible.directorPersonas]);
     const personaPresets = storyBible.directorPersonaPresets || [];
     const previousShotMap = useMemo(() => {
-        const sorted = [...shotPrompts].sort((a, b) => a.shot - b.shot);
+        const sorted = screenOrder(shotPrompts);
         const map = new Map<number, ShotPrompt | undefined>();
         let prev: ShotPrompt | undefined;
         sorted.forEach((shot) => {
@@ -6340,9 +6348,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return best;
     };
     const getPreviousCharacterShotForContinuity = (shot: ShotPrompt, character: ReferenceItem) => {
-        const orderedShots = [...shotPrompts]
-            .filter((entry) => entry.shot < shot.shot)
-            .sort((left, right) => right.shot - left.shot);
+        const orderedShots = shotsBeforeInScreenOrder(shotPrompts, shot.shot);
         return orderedShots.find((entry) => (
             entry.characters || []
         ).some((name) => matchesRefName(name, character.name))) || null;
@@ -10884,9 +10890,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             throw new Error('Add a Gemini API key in Settings to enable Gemini Context Memory.');
         }
 
-        const previousShot = [...shotPrompts]
-            .filter((entry) => entry.shot < shotNumber)
-            .sort((a, b) => b.shot - a.shot)[0] || null;
+        const previousShot = previousInScreenOrder(shotPrompts, shotNumber);
 
         setGeminiContextShotId(shotNumber);
         try {
@@ -10928,7 +10932,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
     const canAutoResolveFilmingMotionReference = useCallback((shot: ShotPrompt) => {
         if (!useGeminiContextMemory || !isGeminiEmbedding2Configured()) return false;
-        return shotPrompts.some((entry) => entry.shot < shot.shot && Boolean(entry.motionReferenceUrl || entry.videoUrl));
+        return shotsBeforeInScreenOrder(shotPrompts, shot.shot).some((entry) => Boolean(entry.motionReferenceUrl || entry.videoUrl));
     }, [shotPrompts, useGeminiContextMemory]);
 
     const handleSuggestGeminiFilmingContextForShot = useCallback(async (shotNumber: number) => {
@@ -10978,6 +10982,87 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
     }, [mergeShotContextReferences, previousShotMap, references, setShotPrompts, shotPrompts, storyBible, upsertGeminiFilmingContextNote]);
 
+    /**
+     * Visual continuity review of one frame (the shot's own or a candidate): Gemini looks at it next to
+     * the frames before and after it ON SCREEN and the cast / outfit / location references.
+     */
+    const reviewShotFrameVisually = async (shotNumber: number, options?: { candidateUrl?: string; shots?: ShotPrompt[] }): Promise<ShotContinuityReview> => {
+        const list = options?.shots || shotPrompts;
+        const shot = list.find((entry) => entry.shot === shotNumber);
+        const frameUrl = options?.candidateUrl || shot?.imageUrl;
+        if (!shot || !frameUrl) throw new Error(`Shot ${shotNumber} has no frame to review.`);
+        const label = (entry: ShotPrompt) => entry.shotLabel || (Number.isFinite(entry.sceneNumber) ? `${entry.sceneNumber}.${entry.sceneShotNumber ?? entry.shot}` : String(entry.shot));
+        const hasFrame = (entry: ShotPrompt) => Boolean(entry.imageUrl) && entry.shot !== shotNumber;
+        const previous = previousInScreenOrder(list, shotNumber, { where: hasFrame });
+        const next = nextInScreenOrder(list, shotNumber, { where: hasFrame, sameScene: true });
+        const aligned = alignShotToConcept(shot, references);
+        const sources: Array<{ role: ContinuityImageRole; url: string; label: string }> = [{ role: 'current', url: frameUrl, label: `current frame — shot ${label(shot)}` }];
+        if (previous?.imageUrl) sources.push({ role: 'previous', url: previous.imageUrl, label: `previous shot on screen — ${label(previous)}` });
+        if (next?.imageUrl) sources.push({ role: 'next', url: next.imageUrl, label: `next shot on screen — ${label(next)}` });
+        resolveShotReferenceImages(shot, aligned, shot.outfitSelections).slice(0, 6).forEach((item) => {
+            sources.push({ role: item.kind === 'environment' ? 'location' : item.kind, url: item.url, label: `${item.kind} reference — ${item.label}` });
+        });
+        const loaded = (await Promise.all(sources.map(async (source) => {
+            try {
+                const image = await getBase64FromUrl(source.url);
+                return { ...source, base64: image.base64, mimeType: image.mimeType };
+            } catch {
+                return null;
+            }
+        }))).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+        if (!loaded.some((entry) => entry.role === 'current')) throw new Error('Could not load the frame for review.');
+        const scene = splitScriptIntoSceneBlocks(storyBible.script || '').find((block) => block.sceneNumber === shot.sceneNumber);
+        const prompt = buildVisualContinuityPrompt({
+            shot: {
+                label: label(shot),
+                description: shot.description,
+                prompt: shot.prompt,
+                shotType: shot.shotTypePresetId,
+                cameraAngle: shot.cameraAngle,
+                cameraYaw: shot.cameraYaw,
+                characters: aligned.characters || [],
+                environment: aligned.environment,
+                props: aligned.products,
+                wardrobe: getOutfitLabelsForShot(shot),
+            },
+            previous: previous ? { label: label(previous), description: previous.description, sameScene: previous.sceneNumber === shot.sceneNumber, shotType: previous.shotTypePresetId, characters: previous.characters } : null,
+            next: next ? { label: label(next), description: next.description, sameScene: true } : null,
+            sceneText: scene?.text,
+            aspectRatio: referenceAspectRatio,
+            images: loaded.map(({ role, label: imageLabel }) => ({ role, label: imageLabel })),
+        });
+        const { verdict, model } = await reviewShotVisualContinuity(prompt, loaded.map(({ base64, mimeType, label: imageLabel }) => ({ base64, mimeType, label: imageLabel })));
+        return toShotContinuityReview(verdict, { comparedShot: previous?.shot, model: `${model} (visual)` });
+    };
+
+    /** One new view of a reference from a camera yaw (e.g. 180° = the reverse side of a room), stored with its angles. */
+    const generateReferenceAngleForYaw = async (reference: ReferenceItem, yaw: number, note?: string) => {
+        if (!reference.imageUrl) throw new Error(`${reference.name} has no base image yet.`);
+        const baseImage = await getBase64FromUrl(reference.imageUrl);
+        const reverse = Math.abs(yaw) >= 135;
+        const prompt = [
+            composeReferencePrompt(reference, { includeCamera: false }),
+            formatCameraAngleHintFromAngles(yaw, 0),
+            reverse
+                ? 'reverse angle: the camera has turned around to show the opposite side of the same space — what was behind the camera in the reference'
+                : 'the camera has moved around the same space to this new direction',
+            note || '',
+            reference.type === 'environment' ? 'empty set, no people' : 'same character, same outfit',
+            'same exact identity, architecture, materials, colours and lighting as the reference',
+            stylePrompt,
+        ].filter(Boolean).join('. ');
+        const images = await editAngleImages(prompt, baseImage, { numOutputs: 1 });
+        const url = images[0]?.url;
+        if (!url) throw new Error(`No ${yaw}° view came back for ${reference.name}.`);
+        const meta: AngleMetadata = { id: `angle-${Date.now()}`, url, yaw, pitch: 0, label: reverse ? `Reverse (${yaw}°)` : `${yaw}°` };
+        setReferences((prev) => prev.map((ref) => (ref.id === reference.id ? {
+            ...ref,
+            multiAngleUrls: [...(ref.multiAngleUrls || []), url],
+            multiAngleMeta: [...(ref.multiAngleMeta || []), meta],
+        } : ref)));
+        return url;
+    };
+
     const handleRunGeminiContinuityReview = useCallback(async (
         targetShots?: number[],
         options?: { silent?: boolean; nextShots?: ShotPrompt[]; mode?: 'rendered' | 'storyboard' },
@@ -11006,13 +11091,33 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         }
 
         try {
-            const result = await reviewGeminiContinuityForRenderedShots({
-                storyBible,
-                references,
-                shotPrompts: sourceShots,
-                targetShots,
-                mode: options?.mode,
-            });
+            // Visual review (looks at the frames); the embedding similarity review is only the fallback.
+            let result: Awaited<ReturnType<typeof reviewGeminiContinuityForRenderedShots>>;
+            try {
+                const shotReviews: Array<{ shot: number; review: ShotContinuityReview }> = [];
+                for (const entry of reviewableShots) {
+                    if (!entry.imageUrl) continue;
+                    shotReviews.push({ shot: entry.shot, review: await reviewShotFrameVisually(entry.shot, { shots: sourceShots }) });
+                }
+                if (shotReviews.length === 0) throw new Error('No frames for the visual review.');
+                const drifting = shotReviews.filter((entry) => entry.review.status !== 'aligned').length;
+                result = {
+                    ok: true,
+                    model: shotReviews[0].review.model || 'gemini (visual)',
+                    reviewedCount: shotReviews.length,
+                    summary: drifting ? `${drifting} of ${shotReviews.length} shot(s) need attention.` : `All ${shotReviews.length} shot(s) cut cleanly.`,
+                    shotReviews,
+                };
+            } catch (visualError) {
+                console.warn('Visual continuity review unavailable, using embedding similarity.', visualError);
+                result = await reviewGeminiContinuityForRenderedShots({
+                    storyBible,
+                    references,
+                    shotPrompts: sourceShots,
+                    targetShots,
+                    mode: options?.mode,
+                });
+            }
 
             if (!result.ok) {
                 throw new Error(result.error || 'Gemini Continuity Review failed.');
@@ -11038,9 +11143,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, isGenerating: true, isEditing: false } : s));
 
         try {
-            const previousShot = [...shotPrompts]
-                .filter(s => s.shot < shotNumber)
-                .sort((a, b) => b.shot - a.shot)[0];
+            // The shot before this one on screen (not the next-lower shot number).
+            const previousShot = previousInScreenOrder(shotPrompts, shotNumber) || undefined;
             let usePreviousShotContext = shot.usePreviousShotContext;
             let previousShotReason = shot.previousShotContextReason;
 
@@ -11559,6 +11663,25 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
 
                 if (!shouldAutoRefineStoryboardContinuity || !review || review.status === 'aligned' || attempt >= totalAttempts) {
                     break;
+                }
+
+                // The review wants the reverse side of the location (180° rule): make sure that view
+                // exists, point the shot at it and re-render once this render has finished.
+                if (review.reverseAngle && alignedShot.environment && shot.cameraYaw !== review.reverseAngle.yaw) {
+                    const environmentRef = references.find((ref) => ref.type === 'environment' && matchesRefName(ref.name, alignedShot.environment || ''));
+                    if (environmentRef?.imageUrl) {
+                        const yaw = review.reverseAngle.yaw;
+                        try {
+                            const hasView = (environmentRef.multiAngleMeta || []).some((angle) => angle.url && typeof angle.yaw === 'number' && yawDistance(angle.yaw, yaw) <= 45);
+                            if (!hasView) await generateReferenceAngleForYaw(environmentRef, yaw, review.reverseAngle.reason);
+                            setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, cameraYaw: yaw } : entry)));
+                            pendingReverseRendersRef.current.add(shotNumber);
+                            attemptResults[currentIndex].refinementSummary = `Reverse angle (${yaw}°) of ${environmentRef.name}${hasView ? '' : ' generated'}; re-rendering.`;
+                            break;
+                        } catch (angleError) {
+                            console.warn(`Reverse angle for shot ${shotNumber} failed.`, angleError);
+                        }
+                    }
                 }
 
                 try {
@@ -13146,8 +13269,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return targets;
     };
 
+    // Shots whose review asked for a reverse angle re-render once their current render is done.
+    useEffect(() => {
+        for (const shotNumber of [...pendingReverseRendersRef.current]) {
+            const entry = shotPrompts.find((item) => item.shot === shotNumber);
+            if (!entry) { pendingReverseRendersRef.current.delete(shotNumber); continue; }
+            if (entry.isGenerating) continue;
+            pendingReverseRendersRef.current.delete(shotNumber);
+            void handleGenerateShotImage(shotNumber);
+        }
+    }, [shotPrompts]);
     const storyboardOptionsRef = useRef({ autoRefine: useStoryboardContinuityAutoRefine });
     storyboardOptionsRef.current = { autoRefine: useStoryboardContinuityAutoRefine };
+    const continuityAgentRef = useRef({ reviewShotFrameVisually, generateReferenceAngleForYaw, references });
+    continuityAgentRef.current = { reviewShotFrameVisually, generateReferenceAngleForYaw, references };
     const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
     agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
 
@@ -13188,6 +13323,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             generateShotVideo: async ({ shot }) => {
                 await runReportingErrors(() => agentHandlersRef.current.handleGenerateShotVideo(shot));
                 return { detail: `Shot ${shot} filmed with ${FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === agentHandlersRef.current.videoModel)?.label || agentHandlersRef.current.videoModel}.` };
+            },
+            reviewContinuity: async ({ shots }) => {
+                const results: Array<{ shot: number; review: ShotContinuityReview }> = [];
+                for (const shotNumber of shots) {
+                    const review = await continuityAgentRef.current.reviewShotFrameVisually(shotNumber);
+                    results.push({ shot: shotNumber, review });
+                    setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, geminiContinuityReview: review } : entry)));
+                }
+                return results;
+            },
+            generateReferenceAngle: async ({ referenceId, yaw, note }) => {
+                const reference = continuityAgentRef.current.references.find((ref) => ref.id === referenceId);
+                if (!reference) throw new Error('Unknown reference.');
+                return { url: await continuityAgentRef.current.generateReferenceAngleForYaw(reference, yaw, note) };
             },
             getStoryboardOptions: () => ({ ...storyboardOptionsRef.current }),
             setStoryboardOptions: ({ autoRefine }) => {

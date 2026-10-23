@@ -126,6 +126,10 @@ export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, un
     if (sceneNumber !== undefined) next.sceneNumber = sceneNumber;
     const sceneShotNumber = asNumber(input.sceneShotNumber);
     if (sceneShotNumber !== undefined) next.sceneShotNumber = sceneShotNumber;
+    const cameraYaw = asNumber(input.cameraYaw);
+    if (cameraYaw !== undefined) next.cameraYaw = Math.max(-180, Math.min(180, cameraYaw));
+    const cameraPitch = asNumber(input.cameraPitch);
+    if (cameraPitch !== undefined) next.cameraPitch = Math.max(-60, Math.min(60, cameraPitch));
     const characters = asStringArray(input.characters);
     if (characters) next.characters = characters;
     const products = asStringArray(input.products);
@@ -274,6 +278,8 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_set_models: 'Choosing models',
   project_generate_shot_images: 'Rendering storyboard frames',
   project_renumber_shots: 'Renumbering shots',
+  project_review_continuity: 'Reviewing continuity',
+  project_generate_reference_angle: 'Rendering a reverse angle',
   project_job_status: 'Checking a job',
   project_generate_shot_videos: 'Filming shots',
   project_generate_reference_image: 'Rendering a reference image',
@@ -302,6 +308,8 @@ const SHOT_SCHEMA = {
     environment: str('Location name (match a reference of type environment).'),
     products: strList('Product or prop names in the shot.'),
     cameraAngle: str('Camera angle, e.g. low_angle, eye_level, overhead.'),
+    cameraYaw: num('Camera yaw in degrees (-180..180): picks the location view rendered behind the action; 180 = reverse side of the room (use with project_generate_reference_angle).'),
+    cameraPitch: num('Camera pitch in degrees (-60..60).'),
     visualTriggers: strList('Visual cues that must appear.'),
     imageUrl: str('Storyboard frame to attach: https URL or data URL.'),
     imagePath: str('Storyboard frame to attach: local file path.'),
@@ -559,6 +567,16 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'project_review_continuity',
+    description: 'Visual continuity review of rendered frames: a vision model compares each frame with the frames before and after it ON SCREEN and with the cast, outfit and location references — identity, wardrobe colours, props, location, lighting, 180° screen direction, eyelines, staging, text, framing. Returns a score, issues, a concrete promptFix and, when the shot needs the other side of the room, reverseAngle {yaw}. The review is stored on the shot card.',
+    parameters: { type: 'object', properties: { shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers with frames.' } }, required: ['shots'] },
+  },
+  {
+    name: 'project_generate_reference_angle',
+    description: 'Render one new view of a location (or character/prop) from a camera yaw and store it with the reference\'s angles — e.g. yaw 180 for the reverse side of a room for a reverse shot. Shots with that cameraYaw then render against this view.',
+    parameters: { type: 'object', properties: { referenceName: str('Reference name.'), referenceId: str('Reference id.'), yaw: num('Camera yaw in degrees, -180..180 (180 = reverse).'), note: str('What the new view must show.') }, required: ['yaw'] },
+  },
+  {
     name: 'project_job_status',
     description: 'Progress of background generation jobs (frames done / rendering for shot jobs, final results when finished). Batches of more than two items run in the background automatically; pass background: true or wait: true to choose.',
     parameters: { type: 'object', properties: { jobId: str('Job id; leave out for the latest jobs.') } },
@@ -647,6 +665,8 @@ export type ProjectAgentAutomation = {
   planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
   getStoryboardOptions: () => { autoRefine: boolean };
   setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
+  reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review: { score: number; status: string; summary: string; issues: Array<{ category?: string; severity: string; message: string }>; promptFix?: string; reverseAngle?: { yaw: number; reason?: string }; comparedShot?: number } }>>;
+  generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
 };
 
 export type ProjectAgentContext = {
@@ -756,7 +776,8 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
         ].slice(-20);
       }
       pending.storyBible = next;
-      ctx.setStoryBible(() => next);
+      // Apply to the latest bible (the editor may have changed it meanwhile), not to the snapshot.
+      ctx.setStoryBible((latest) => ({ ...latest, ...patch, ...(next.scriptRevisions !== prev.scriptRevisions ? { scriptRevisions: next.scriptRevisions } : {}) }));
       settle();
       return { ok: true, updated: Object.keys(patch) };
     },
@@ -766,7 +787,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       const world = mergeWorld(prev.worldbuilding, args, (prefix) => `${prefix}-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
       const next: StoryBible = { ...prev, worldbuilding: world };
       pending.storyBible = next;
-      ctx.setStoryBible(() => next);
+      ctx.setStoryBible((latest) => ({ ...latest, worldbuilding: world }));
       settle();
       return { ok: true, universeName: world.universeName, factions: world.factions.map((faction) => faction.name), environments: world.environments.map((env) => env.name), glossary: world.glossary.length };
     },
@@ -779,7 +800,8 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
     project_upsert_reference: async (args: Record<string, unknown>) => {
       const result = upsertReference(state().references, args, makeId);
       pending.references = result.references;
-      ctx.setReferences(() => result.references);
+      const fixedId = result.reference.id;
+      ctx.setReferences((latest) => upsertReference(latest, { ...args, id: fixedId }, () => fixedId).references);
       settle();
       return { ok: true, created: result.created, reference: summarizeReference(result.reference, true) };
     },
@@ -790,7 +812,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (!target) throw new Error('No reference with that id or name.');
       const next = refs.filter((ref) => ref.id !== target.id);
       pending.references = next;
-      ctx.setReferences(() => next);
+      ctx.setReferences((latest) => latest.filter((ref) => ref.id !== target.id));
       settle();
       return { ok: true, deleted: { id: target.id, name: target.name } };
     },
@@ -806,7 +828,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (inputs.length === 0) throw new Error('Pass at least one shot.');
       const result = upsertShots(state().shotPrompts, inputs, args.replace === true);
       pending.shotPrompts = result.shots;
-      ctx.setShotPrompts(() => result.shots);
+      ctx.setShotPrompts((latest) => upsertShots(latest, inputs, args.replace === true).shots);
       settle();
       return { ok: true, shotCount: result.shots.length, touched: result.touched };
     },
@@ -816,7 +838,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (numbers.size === 0) throw new Error('Pass shot numbers.');
       const next = state().shotPrompts.filter((shot) => !numbers.has(shot.shot));
       pending.shotPrompts = next;
-      ctx.setShotPrompts(() => next);
+      ctx.setShotPrompts((latest) => latest.filter((shot) => !numbers.has(shot.shot)));
       settle();
       return { ok: true, shotCount: next.length };
     },
@@ -911,10 +933,12 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (!character) throw new Error('No character with that id or name.');
       const inputs = Array.isArray(args.outfits) ? args.outfits.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
       if (inputs.length === 0) throw new Error('Pass outfits.');
-      const result = upsertOutfits(character, inputs, () => `outfit-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, args.replace === true);
+      const ids = inputs.map(() => `outfit-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
+      const idSource = () => { let index = 0; return () => ids[index++] || `outfit-agent-${Date.now()}`; };
+      const result = upsertOutfits(character, inputs, idSource(), args.replace === true);
       const next = refs.map((ref) => (ref.id === character.id ? { ...ref, outfits: result.outfits } : ref));
       pending.references = next;
-      ctx.setReferences(() => next);
+      ctx.setReferences((latest) => latest.map((ref) => (ref.id === character.id ? { ...ref, outfits: upsertOutfits(ref, inputs, idSource(), args.replace === true).outfits } : ref)));
       settle();
       return { ok: true, character: character.name, outfits: result.outfits.map((outfit) => ({ id: outfit.id, name: outfit.name, hasImage: Boolean(outfit.imageUrl) })) };
     },
@@ -1003,7 +1027,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       const { shots, warnings } = buildSceneShots(scene, inputs, s.references);
       const merged = mergeShotsIntoScenes(s.shotPrompts, shots, [scene.sceneNumber]);
       pending.shotPrompts = merged;
-      ctx.setShotPrompts(() => merged);
+      ctx.setShotPrompts((latest) => mergeShotsIntoScenes(latest, shots, [scene.sceneNumber]));
       settle();
       const review = reviewScene(scene, merged.filter((shot) => shot.sceneNumber === scene.sceneNumber), s.references, s.storyBible.productionFormat);
       return { ok: true, sceneNumber: scene.sceneNumber, slugline: scene.slugline, shotCount: shots.length, replacedShots: replaced.length, totalShots: merged.length, warnings, review };
@@ -1068,6 +1092,33 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       return { results, hint: 'Use project_view_image to look at a frame.' };
     },
 
+    project_review_continuity: async (args: Record<string, unknown>) => {
+      const shots = shotNumbers(args.shots);
+      const reviews = await (await ctx.automation('storyboard')).reviewContinuity({ shots });
+      return {
+        reviews: reviews.map(({ shot, review }) => clean({
+          shot,
+          score: review.score,
+          status: review.status,
+          comparedWith: review.comparedShot,
+          summary: review.summary,
+          issues: review.issues.map((issue) => `[${issue.severity}] ${issue.category || 'continuity'}: ${issue.message}`),
+          promptFix: review.promptFix,
+          reverseAngle: review.reverseAngle,
+        })),
+        hint: 'Apply promptFix with project_upsert_shots, set cameraYaw (and project_generate_reference_angle if the location has no such view), then re-render with project_generate_shot_images.',
+      };
+    },
+
+    project_generate_reference_angle: async (args: Record<string, unknown>) => {
+      const ref = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName) });
+      if (!ref) throw new Error('No reference with that id or name.');
+      const yaw = asNumber(args.yaw);
+      if (yaw === undefined) throw new Error('Pass yaw.');
+      const { url } = await (await ctx.automation('concept')).generateReferenceAngle({ referenceId: ref.id, yaw: Math.max(-180, Math.min(180, yaw)), note: asString(args.note) });
+      return { ok: true, reference: ref.name, yaw, imageUrl: describeMediaUrl(url) };
+    },
+
     project_renumber_shots: async () => {
       const current = state().shotPrompts;
       const busy = current.filter((shot) => shot.isGenerating || shot.isFilming || shot.isAngleGenerating);
@@ -1075,9 +1126,12 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       const sceneKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : Number.POSITIVE_INFINITY);
       const orderKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneShotNumber) ? Number(shot.sceneShotNumber) : shot.shot);
       const ordered = [...current].sort((a, b) => sceneKey(a) - sceneKey(b) || orderKey(a) - orderKey(b) || a.shot - b.shot);
-      const next = ordered.map((shot, index) => ({ ...shot, shot: index + 1 }));
+      const renumber = (list: ShotPrompt[]) => [...list]
+        .sort((a, b) => sceneKey(a) - sceneKey(b) || orderKey(a) - orderKey(b) || a.shot - b.shot)
+        .map((shot, index) => ({ ...shot, shot: index + 1 }));
+      const next = renumber(ordered);
       pending.shotPrompts = next;
-      ctx.setShotPrompts(() => next);
+      ctx.setShotPrompts((latest) => renumber(latest));
       settle();
       return { ok: true, shotCount: next.length, firstShotOfScene: Object.fromEntries([...new Set(next.map((shot) => shot.sceneNumber))].map((scene) => [String(scene), next.find((shot) => shot.sceneNumber === scene)?.shot])) };
     },
