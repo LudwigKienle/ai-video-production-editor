@@ -4132,6 +4132,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         lastErrorRef.current = value;
         setErrorState(value);
     }, []);
+    // An error belongs to the project it happened in.
+    useEffect(() => { setError(null); }, [projectPath, setError]);
     const [scriptInputMode, setScriptInputMode] = useState<'paste' | 'generate'>('paste');
     const [scriptGenerationPrompt, setScriptGenerationPrompt] = useState('');
 
@@ -14258,7 +14260,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     <div className="project-hub__inner">
                         {error && (
                             <div className="pk-alert pk-alert--danger mb-4 flex justify-between items-start gap-3" role="alert">
-                                <span>{error}</span>
+                                <span className="min-w-0 break-words">{error.length > 400 ? `${error.slice(0, 400)}…` : error}</span>
                                 <button type="button" onClick={() => setError(null)} className="edit-icon-btn" aria-label="Dismiss">&times;</button>
                             </div>
                         )}
