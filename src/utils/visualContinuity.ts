@@ -60,14 +60,15 @@ ${previous ? `Previous shot on screen (${previous.sameScene ? 'same scene' : 'pr
 ${next ? `Next shot on screen (${next.sameScene ? 'same scene' : 'next scene'}) ${next.label}: ${next.description}` : ''}
 ${input.sceneText ? `\nScene (script excerpt):\n${input.sceneText.slice(0, 2400)}\n` : ''}
 Check, in this order:
-1. identity — every character matches their reference face, hair, age and build.
+1. identity — every character matches their reference face, hair, age and build. In inserts and close-ups of hands or body parts, the hand must belong to the right character: age, skin, build and sleeve/cuff from their outfit (a young man's hand is not an old man's hand).
 2. wardrobe — clothes, COLOURS and accessories match the outfit reference for this shot; same as the previous shot of the same scene unless the script changes them.
 3. props — the right props, in the right hands, consistent with the previous shot (a glass spilled stays spilled).
 4. location — same space and layout as the location reference and the previous shot of the scene.
 5. lighting — same time of day, light direction and colour as the previous shot of the scene.
 6. screen_direction — the 180° rule: characters keep their left/right sides across the cut; in a shot/reverse-shot pair the two characters look in OPPOSITE screen directions. If the previous shot of the same scene shows A on the left looking right, a reverse on A shows B looking left.
 7. eyeline — characters look at who/what they should (up/down, left/right) given positions and heights.
-8. staging — the action and blocking the script and description ask for (who stands where, who holds what, who is kneeling).
+8. staging — the action and blocking the script and description ask for (who stands where, who holds what, who is kneeling). The space must be physically plausible: an elevator cab, car or closet is enclosed, and only the people who are in it can be in it; nobody appears who cannot be there at this moment.
+   For inserts and details the shot exists to show (an engraving, a document, a screen), that detail must be clearly visible — if it is not, that is a medium issue at least.
 9. text — any readable text (badges, signs, documents) says exactly what it should, no extra or wrong words.
 10. framing — shot size and angle match the intended framing; vertical ${input.aspectRatio || ''} composition works.
 
