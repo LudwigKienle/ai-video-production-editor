@@ -11057,11 +11057,17 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const url = images[0]?.url;
         if (!url) throw new Error(`No ${yaw}° view came back for ${reference.name}.`);
         const meta: AngleMetadata = { id: `angle-${Date.now()}`, url, yaw, pitch: 0, label: reverse ? `Reverse (${yaw}°)` : `${yaw}°` };
-        setReferences((prev) => prev.map((ref) => (ref.id === reference.id ? {
-            ...ref,
-            multiAngleUrls: [...(ref.multiAngleUrls || []), url],
-            multiAngleMeta: [...(ref.multiAngleMeta || []), meta],
-        } : ref)));
+        // A new view for (nearly) the same angle replaces the old one instead of piling up beside it.
+        setReferences((prev) => prev.map((ref) => {
+            if (ref.id !== reference.id) return ref;
+            const replaced = (ref.multiAngleMeta || []).filter((angle) => typeof angle.yaw === 'number' && Math.abs(angle.pitch ?? 0) <= 25 && yawDistance(angle.yaw, yaw) <= 10);
+            const replacedUrls = new Set(replaced.map((angle) => angle.url));
+            return {
+                ...ref,
+                multiAngleUrls: [...(ref.multiAngleUrls || []).filter((entry) => !replacedUrls.has(entry)), url],
+                multiAngleMeta: [...(ref.multiAngleMeta || []).filter((angle) => !replaced.includes(angle)), meta],
+            };
+        }));
         return url;
     };
 

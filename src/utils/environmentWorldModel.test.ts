@@ -121,3 +121,16 @@ test('a party location keeps its crowd in new views; an empty office stays empty
   assert.match(environmentPeopleClause('engagement party'), /crowd/);
   assert.equal(environmentPeopleClause('janitor closet with shelves'), 'empty set, no people');
 });
+
+test('a view rendered again for the same yaw wins over the older one', async () => {
+  const { pickReferenceImageForYaw } = await import('./environmentWorldModel.ts');
+  const ref = { imageUrl: 'base', multiAngleMeta: [{ id: 'a', url: 'old-180', yaw: 180, pitch: 0 }, { id: 'b', url: 'new-180', yaw: 180, pitch: 0 }] };
+  assert.equal(pickReferenceImageForYaw(ref as never, 180), 'new-180');
+  assert.equal(pickReferenceImageForYaw(ref as never, 0), 'base');
+});
+
+test('the yaw picker prefers the project copy of an angle over the provider link', async () => {
+  const { pickReferenceImageForYaw } = await import('./environmentWorldModel.ts');
+  const ref = { imageUrl: 'base', multiAngleUrls: ['file:///p/angle_1.png'], multiAngleMeta: [{ id: 'a', url: 'https://fal.media/x.png', yaw: 180, pitch: 0 }] };
+  assert.equal(pickReferenceImageForYaw(ref as never, 175), 'file:///p/angle_1.png');
+});

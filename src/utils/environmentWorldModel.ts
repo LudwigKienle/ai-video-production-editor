@@ -132,16 +132,20 @@ export const buildSetDesignAssetForEnvironmentBlockout = (
 
 /** The reference image for a camera yaw: the eye-level angle within 45° of it, else the base image. */
 export const pickReferenceImageForYaw = (
-  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta'>,
+  reference: Pick<ReferenceItem, 'imageUrl' | 'multiAngleMeta' | 'multiAngleUrls'>,
   yaw?: number | null,
 ): string | null => {
   if (typeof yaw !== 'number' || yaw === 0) return reference.imageUrl || null;
   let best: { url: string; distance: number } | null = null;
-  for (const angle of reference.multiAngleMeta || []) {
-    if (!angle.url || typeof angle.yaw !== 'number' || Math.abs(angle.pitch ?? 0) > 25) continue;
+  (reference.multiAngleMeta || []).forEach((angle, index) => {
+    // multiAngleUrls runs parallel to the metadata and holds the copy saved in the project
+    // folder; the metadata URL is often the provider's temporary link.
+    const url = reference.multiAngleUrls?.[index] || angle.url;
+    if (!url || typeof angle.yaw !== 'number' || Math.abs(angle.pitch ?? 0) > 25) return;
     const distance = yawDistance(angle.yaw, yaw);
-    if (distance <= 45 && (!best || distance < best.distance)) best = { url: angle.url, distance };
-  }
+    // Ties go to the later view: a view rendered again for the same angle supersedes the old one.
+    if (distance <= 45 && (!best || distance <= best.distance)) best = { url, distance };
+  });
   return best?.url || reference.imageUrl || null;
 };
 
