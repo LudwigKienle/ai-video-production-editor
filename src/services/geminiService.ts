@@ -8,7 +8,7 @@ import { batchDirectorChunks, orderDirectorShots, splitScenesForDirector, splitS
 import type { DirectorSceneChunk } from '../utils/directorScenes';
 import { DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_FORMAT_RULES, DIRECTOR_LIGHTING, DIRECTOR_MOVE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_SHOT_TYPES, DIRECTOR_TEXT_RULE } from '../utils/directorAgent';
 import { trackTask } from './taskCenter';
-import { parseVisualContinuityVerdict, type VisualContinuityVerdict } from '../utils/visualContinuity';
+import { extractVerdictObject, parseVisualContinuityVerdict, VISUAL_CONTINUITY_SCHEMA, type VisualContinuityVerdict } from '../utils/visualContinuity';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
 
@@ -3028,13 +3028,19 @@ export const reviewShotVisualContinuity = async (
         parts.push({ text: `Image ${index + 1}: ${image.label}` });
         parts.push({ inlineData: { data: image.base64, mimeType: image.mimeType || 'image/png' } });
     });
-    const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
-        model: GEMINI_TEXT_MODEL_FLASH,
-        contents: [{ role: 'user', parts }],
-        config: { responseMimeType: 'application/json' },
-    }));
-    recordUsage({ provider: 'gemini', model: GEMINI_TEXT_MODEL_FLASH, kind: 'analysis', units: 1, unitLabel: 'request', note: 'Visual continuity review' });
-    return { verdict: parseVisualContinuityVerdict(parseJsonFromText(response.text || '{}', 'VisualContinuityReview')), model: GEMINI_TEXT_MODEL_FLASH };
+    // An empty or malformed answer is retried once and then reported — never read as "score 0".
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
+            model: GEMINI_TEXT_MODEL_FLASH,
+            contents: [{ role: 'user', parts }],
+            config: { responseMimeType: 'application/json', responseJsonSchema: VISUAL_CONTINUITY_SCHEMA },
+        }));
+        recordUsage({ provider: 'gemini', model: GEMINI_TEXT_MODEL_FLASH, kind: 'analysis', units: 1, unitLabel: 'request', note: 'Visual continuity review' });
+        let raw: unknown = null;
+        try { raw = parseJsonFromText(response.text || '', 'VisualContinuityReview'); } catch { raw = null; }
+        if (extractVerdictObject(raw)) return { verdict: parseVisualContinuityVerdict(raw), model: GEMINI_TEXT_MODEL_FLASH };
+    }
+    throw new Error('The vision model returned no continuity verdict.');
 };
 
 export const refineStoryboardPromptForContinuity = async (payload: {

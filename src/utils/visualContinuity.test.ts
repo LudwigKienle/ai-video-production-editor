@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildVisualContinuityPrompt, parseVisualContinuityVerdict, toShotContinuityReview } from './visualContinuity.ts';
+import { buildVisualContinuityPrompt, parseVisualContinuityVerdict, toShotContinuityReview, extractVerdictObject } from './visualContinuity.ts';
 
 test('the prompt lists the images and the screen-direction rule with the previous shot', () => {
   const prompt = buildVisualContinuityPrompt({
@@ -36,4 +36,11 @@ test('an aligned verdict carries no prompt fix', () => {
   assert.equal(verdict.status, 'aligned');
   assert.equal(verdict.promptFix, '');
   assert.equal(verdict.reverseYaw, null);
+});
+
+test('an empty or wrapped answer is not a score-0 verdict', () => {
+  assert.equal(extractVerdictObject({}), null);
+  assert.equal(extractVerdictObject(null), null);
+  assert.equal(extractVerdictObject([{ score: 88, issues: [] }])?.score, 88);
+  assert.equal(extractVerdictObject({ review: { score: 72 } })?.score, 72);
 });

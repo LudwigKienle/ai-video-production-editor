@@ -104,11 +104,32 @@ export const VISUAL_CONTINUITY_SCHEMA = {
   required: ['score', 'status', 'summary', 'issues', 'promptFix', 'needsReverseAngle'],
 };
 
+/**
+ * Find the verdict object in what the model returned: models sometimes wrap it in an array
+ * or under a key ("review", "verdict"). Null when there is no verdict at all — an empty or
+ * unparseable answer must not read as "score 0, no issues".
+ */
+export const extractVerdictObject = (raw: unknown): Record<string, unknown> | null => {
+  const isVerdict = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Number.isFinite(Number((value as Record<string, unknown>).score)) && (value as Record<string, unknown>).score !== null && (value as Record<string, unknown>).score !== '';
+  if (isVerdict(raw)) return raw;
+  if (Array.isArray(raw)) return raw.map(extractVerdictObject).find(Boolean) ?? null;
+  if (raw && typeof raw === 'object') {
+    for (const value of Object.values(raw as Record<string, unknown>)) {
+      if (value && typeof value === 'object') {
+        const found = extractVerdictObject(value);
+        if (found) return found;
+      }
+    }
+  }
+  return null;
+};
+
 const clampScore = (value: unknown) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 
 /** Normalise whatever the model returned; the status follows the score and the issues. */
 export const parseVisualContinuityVerdict = (raw: unknown): VisualContinuityVerdict => {
-  const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const data = extractVerdictObject(raw) ?? {};
   const issues = (Array.isArray(data.issues) ? data.issues : [])
     .filter((issue): issue is Record<string, unknown> => Boolean(issue) && typeof issue === 'object')
     .map((issue) => ({

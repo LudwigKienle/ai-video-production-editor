@@ -665,7 +665,7 @@ export type ProjectAgentAutomation = {
   planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
   getStoryboardOptions: () => { autoRefine: boolean };
   setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
-  reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review: { score: number; status: string; summary: string; issues: Array<{ category?: string; severity: string; message: string }>; promptFix?: string; reverseAngle?: { yaw: number; reason?: string }; comparedShot?: number } }>>;
+  reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; error?: string; review?: { score: number; status: string; summary: string; issues: Array<{ category?: string; severity: string; message: string }>; promptFix?: string; reverseAngle?: { yaw: number; reason?: string }; comparedShot?: number } }>>;
   generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
 };
 
@@ -1096,7 +1096,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       const shots = shotNumbers(args.shots);
       const reviews = await (await ctx.automation('storyboard')).reviewContinuity({ shots });
       return {
-        reviews: reviews.map(({ shot, review }) => clean({
+        reviews: reviews.map(({ shot, review, error }) => (!review ? { shot, error: shortError(error) } : clean({
           shot,
           score: review.score,
           status: review.status,
@@ -1105,7 +1105,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
           issues: review.issues.map((issue) => `[${issue.severity}] ${issue.category || 'continuity'}: ${issue.message}`),
           promptFix: review.promptFix,
           reverseAngle: review.reverseAngle,
-        })),
+        }))),
         hint: 'Apply promptFix with project_upsert_shots, set cameraYaw (and project_generate_reference_angle if the location has no such view), then re-render with project_generate_shot_images.',
       };
     },

@@ -169,7 +169,7 @@ export type ProjectHubStudioAutomationBindings = {
     getStoryboardOptions: () => { autoRefine: boolean };
     setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
     /** Visual continuity review of rendered frames (screen-order neighbours + references); stores the review on each shot. */
-    reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review: ShotContinuityReview }>>;
+    reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review?: ShotContinuityReview; error?: string }>>;
     /** One new view of a reference from a camera yaw (180 = reverse side), stored with its angles. */
     generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
 };
@@ -11097,7 +11097,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 const shotReviews: Array<{ shot: number; review: ShotContinuityReview }> = [];
                 for (const entry of reviewableShots) {
                     if (!entry.imageUrl) continue;
-                    shotReviews.push({ shot: entry.shot, review: await reviewShotFrameVisually(entry.shot, { shots: sourceShots }) });
+                    try {
+                        shotReviews.push({ shot: entry.shot, review: await reviewShotFrameVisually(entry.shot, { shots: sourceShots }) });
+                    } catch (shotError) {
+                        console.warn(`Visual continuity review failed for shot ${entry.shot}`, shotError);
+                    }
                 }
                 if (shotReviews.length === 0) throw new Error('No frames for the visual review.');
                 const drifting = shotReviews.filter((entry) => entry.review.status !== 'aligned').length;
@@ -13325,9 +13329,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return { detail: `Shot ${shot} filmed with ${FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === agentHandlersRef.current.videoModel)?.label || agentHandlersRef.current.videoModel}.` };
             },
             reviewContinuity: async ({ shots }) => {
-                const results: Array<{ shot: number; review: ShotContinuityReview }> = [];
+                const results: Array<{ shot: number; review?: ShotContinuityReview; error?: string }> = [];
                 for (const shotNumber of shots) {
-                    const review = await continuityAgentRef.current.reviewShotFrameVisually(shotNumber);
+                    let review: ShotContinuityReview;
+                    try {
+                        review = await continuityAgentRef.current.reviewShotFrameVisually(shotNumber);
+                    } catch (reviewError) {
+                        results.push({ shot: shotNumber, error: reviewError instanceof Error ? reviewError.message : String(reviewError) });
+                        continue;
+                    }
                     results.push({ shot: shotNumber, review });
                     setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, geminiContinuityReview: review } : entry)));
                 }
