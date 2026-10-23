@@ -14,7 +14,7 @@ This guide explains where and how to configure your API keys, how supported prov
 3. Paste your credentials into the corresponding provider fields (Gemini, FAL, Replicate, xAI, ElevenLabs, Runway, LTX, World Labs, Sonauto, Sonilo, MachGen, Higgsfield, Brave Search, Unsplash).
 4. Click **Save**.
 
-> **Where keys are stored:** Keys entered locally in the UI are stored exclusively in your browser/webview `localStorage` on your local device. When using direct BYOK keys, requests communicate directly with each provider without passing through any intermediary server. (In the web version configured with team keys, requests route through `/api/byok/proxy` as described in [`docs/model-pricing-reference.md`](model-pricing-reference.md)).
+> **Where keys are stored:** Keys entered locally in the UI are stored exclusively in your browser/webview `localStorage` on your local device. When using direct BYOK keys, requests communicate directly with each provider without passing through any intermediary server. (In the web version configured with team keys, requests route through `/api/byok/proxy` as implemented in [`src/services/byokProxyClient.ts`](../src/services/byokProxyClient.ts)).
 
 ### Option B: Local Environment Variable (`.env.local`)
 For developers running the editor locally from source:
@@ -39,10 +39,10 @@ For a comprehensive matrix of supported models and features, see [`docs/model-pr
 | **FAL (fal.ai)** | [fal.ai Dashboard](https://fal.ai/dashboard/api-keys) | High-speed video generation (Kling, Seedance, Wan, MiniMax, LTX, PixVerse) and image generation (FLUX.3, GPT Image, Ideogram, Seedream). |
 | **Replicate** | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens) | Image generation (Flux, Qwen, Z-Image), audio separation (Demucs), and upscaling. |
 | **xAI (Grok)** | [xAI Console](https://console.x.ai/) | Grok image and video generation. |
-| **ElevenLabs** | [elevenlabs.io](https://elevenlabs.io/) | Voiceover (text to speech with your custom voice list). |
-| **Runway** | [Runway Developer Portal](https://dev.runwayml.com/) | Gen-3 Alpha and Gen-3 Turbo video generation. |
-| **LTX** | [Lightricks LTX](https://ltx.video) | LTX Video models. |
-| **World Labs** | [World Labs](https://worldlabs.ai) | Spatial and 3D world representations. |
+| **ElevenLabs** | [elevenlabs.io Settings](https://elevenlabs.io/app/settings/api-keys) | Voiceover (text to speech with your custom voice list). |
+| **Runway** | [Runway Developer Portal](https://dev.runwayml.com) | Ruby: SDR video to true HDR (Post). |
+| **LTX** | [LTX Console](https://console.ltx.video) | Color Science upscale to ACES HDR EXR. |
+| **World Labs** | [World Labs Platform](https://platform.worldlabs.ai/) | Spatial and 3D world representations. |
 | **Sonauto & Sonilo** | Provider consoles | Background music and soundtrack generation. |
 | **MachGen** | [machgen.ai](https://www.machgen.ai) | Fast open-weights video and image models (MiniMax H3 Turbo, LTX Pro, Wan). Key format: `MGA_<key_id>:<secret>`. |
 | **Higgsfield** | [console.higgsfield.ai](https://console.higgsfield.ai) | Soul Cinema, DoP, and secondary host for shared video vendor models. Key format: `KEY_ID:KEY_SECRET`. |
