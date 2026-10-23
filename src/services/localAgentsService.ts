@@ -47,9 +47,10 @@ type LocalAgentsBridge = {
   onEvent: (callback: (event: LocalAgentEvent) => void) => () => void;
 };
 
+type StudioToolSource = 'mcp' | 'api' | 'agent';
 type StudioToolsBridge = {
   register: (tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>) => Promise<{ ok: boolean; count: number }>;
-  onCall: (callback: (call: { callId: string; name: string; args: Record<string, unknown> }) => void) => () => void;
+  onCall: (callback: (call: { callId: string; name: string; args: Record<string, unknown>; source?: StudioToolSource }) => void) => () => void;
   reply: (payload: { callId: string; result?: unknown; error?: string }) => void;
 };
 
@@ -96,7 +97,10 @@ const toJsonSchema = (schema: any): any => {
  * Publish the assistant's tools to the local MCP server and serve calls from it.
  * Returns an unsubscribe function; call again whenever the tool set changes.
  */
-export const registerStudioTools = (tools: FunctionDeclaration[], executor: { [name: string]: Function }): (() => void) => {
+export const registerStudioTools = (
+  tools: Array<FunctionDeclaration | { name: string; description?: string; parameters?: unknown }>,
+  executor: { [name: string]: Function },
+): (() => void) => {
   const api = toolsApi();
   if (!api) return () => undefined;
   const list = tools.map((tool) => ({
@@ -105,11 +109,11 @@ export const registerStudioTools = (tools: FunctionDeclaration[], executor: { [n
     inputSchema: toJsonSchema(tool.parameters) || { type: 'object', properties: {} },
   }));
   void api.register(list);
-  return api.onCall(async ({ callId, name, args }) => {
+  return api.onCall(async ({ callId, name, args, source }) => {
     const fn = executor[name];
     if (!fn) { api.reply({ callId, error: `Unknown tool: ${name}` }); return; }
     try {
-      const result = await fn(args || {});
+      const result = await fn(args || {}, { source: source || 'agent' });
       api.reply({ callId, result: result ?? { ok: true } });
     } catch (error) {
       api.reply({ callId, error: error instanceof Error ? error.message : String(error) });

@@ -109,6 +109,11 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
   Turbo for fast, cheap 5–15 s clips with native audio (about $0.02/s), plus
   MiniMax H3, LTX-2.3 Pro, Vidu Q3 Turbo, Wan 2.2 A14B, FLUX.2 dev and HiDream O1.
 - Assistant agents use the maintained ACP adapters (Claude Agent, Codex 2.x).
+- Claude & Codex can drive the editor from outside: Settings → Claude & Codex
+  connects Claude Code, Codex or Claude Desktop in one click (MCP, plus a REST API
+  for scripts). Agents read and write the script, cast, locations and storyboard
+  and start generations; you watch every change in the app. See
+  [docs/agent-connect.md](docs/agent-connect.md).
 
 ## Earlier (September 2026)
 

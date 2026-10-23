@@ -29,6 +29,8 @@ const {
 const fontList = require('font-list');
 const midjourneyAgent = require('./midjourney-agent');
 const localAgents = require('./local-agents');
+const studioMcp = require('./studio-mcp-server');
+const agentConnect = require('./agent-connect');
 const localAi = require('./local-ai');
 
 process.on('uncaughtException', (error) => {
@@ -572,6 +574,8 @@ ipcMain.handle('localAgents:cancel', async (_event, payload) => localAgents.canc
 ipcMain.handle('localAgents:stop', async (_event, payload) => localAgents.stop(payload));
 ipcMain.handle('localAgents:answerPermission', async (_event, payload) => localAgents.answerPermission(payload));
 ipcMain.handle('localAgents:openLogin', async (_event, payload) => localAgents.openLogin(payload));
+// External agents (Claude Code, Codex, Claude Desktop, scripts) reach the same tools over MCP / REST.
+agentConnect.register(ipcMain);
 
 // Jeff: the Midjourney browser agent (see midjourney-agent.js)
 ipcMain.handle('midjourney:status', async (_event, payload) => midjourneyAgent.status(payload || {}));
@@ -746,6 +750,7 @@ ipcMain.handle('comfyui:clearLogs', async () => {
 
 app.whenReady().then(() => {
   createWindow();
+  studioMcp.start().catch((error) => console.warn('[studio-mcp] could not start', error));
 
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().some((window) => window.isVisible())) {

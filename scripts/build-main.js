@@ -13,7 +13,8 @@ const external = [
 ];
 
 esbuild.build({
-    entryPoints: ['electron/main.js', 'electron/preload.js'],
+    // studio-mcp-stdio.js ships next to main.js: agent-connect copies it out for Claude Code, Codex and Claude Desktop.
+    entryPoints: ['electron/main.js', 'electron/preload.js', 'electron/studio-mcp-stdio.js'],
     bundle: true,
     platform: 'node',
     target: 'node18',

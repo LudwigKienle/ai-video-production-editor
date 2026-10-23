@@ -91,6 +91,18 @@ contextBridge.exposeInMainWorld('electron', {
     },
     reply: (payload) => ipcRenderer.send('studioTools:result', payload),
   },
+  studioConnect: {
+    status: () => ipcRenderer.invoke('studioConnect:status'),
+    connect: (payload) => ipcRenderer.invoke('studioConnect:connect', payload),
+    disconnect: (payload) => ipcRenderer.invoke('studioConnect:disconnect', payload),
+    regenerateToken: () => ipcRenderer.invoke('studioConnect:regenerateToken'),
+    activity: () => ipcRenderer.invoke('studioConnect:activity'),
+    onActivity: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('studioConnect:activity', handler);
+      return () => ipcRenderer.removeListener('studioConnect:activity', handler);
+    },
+  },
   midjourney: {
     status: (payload) => ipcRenderer.invoke('midjourney:status', payload),
     connect: () => ipcRenderer.invoke('midjourney:connect'),

@@ -8,6 +8,7 @@ import { getGoogleModelProvider, setGoogleModelProvider, GoogleModelProvider } f
 import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
 import { connectMidjourney, disconnectMidjourney, getMidjourneyConcurrency, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, setMidjourneyConcurrency, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
+import StudioConnectPanel from './StudioConnectPanel';
 import { MACHGEN_API_KEY_STORAGE_KEY } from '../services/machgenService';
 import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
@@ -369,7 +370,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         onKeySelected();
     };
 
-    type SettingsSection = 'providers' | 'agents' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
+    type SettingsSection = 'providers' | 'agents' | 'connect' | 'cloud' | 'shortcuts' | 'startup' | 'autosave';
     const [section, setSection] = useState<SettingsSection>('providers');
     const [showAllProviders, setShowAllProviders] = useState(false);
     const [mjStatus, setMjStatus] = useState<MidjourneyStatus>({ available: isMidjourneyAgentAvailable(), connected: false });
@@ -512,6 +513,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const nav: Array<{ id: SettingsSection; label: string; hint: string; icon: React.FC<{ className?: string }> }> = [
         { id: 'providers', label: 'AI providers', hint: `${connectedCount} of ${providers.length} connected`, icon: SparklesIcon },
         { id: 'agents', label: 'Local agents', hint: localAgents.some((a) => a.installed) ? localAgents.filter((a) => a.installed).map((a) => a.label).join(', ') : 'Claude Code, Codex', icon: KeyboardIcon },
+        { id: 'connect', label: 'Claude & Codex', hint: 'control this project from outside', icon: SparklesIcon },
         { id: 'cloud', label: 'Cloud', hint: dropboxConnected || googleDriveConnected ? 'connected' : 'Dropbox, Google Drive', icon: FolderIcon },
         { id: 'shortcuts', label: 'Shortcuts', hint: 'keyboard', icon: KeyboardIcon },
         { id: 'startup', label: 'Startup', hint: 'workspace, assistant', icon: SettingsIcon },
@@ -631,6 +633,8 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                 <p className="pk-hint">Pick the agent at the top of the Assistant panel. The editor's tools are offered to it as an MCP server; anything else the agent wants to do (edit files, run commands) asks you first.</p>
                             </div>
                         )}
+
+                        {section === 'connect' && <StudioConnectPanel />}
 
                         {section === 'cloud' && (
                             <div className="pk-stack">

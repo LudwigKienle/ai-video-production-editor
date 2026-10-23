@@ -1,20 +1,41 @@
-// A tiny MCP server (Streamable HTTP, JSON responses) that exposes the editor's
-// own tools — the same ones the Gemini assistant uses — to local agents such as
-// Claude Code and Codex. Tool calls are forwarded to the renderer over IPC, where
-// the real implementations live next to React state.
+// The editor's own tools as a local server for agents such as Claude Code, Codex and
+// Claude Desktop. Two front doors share one tool registry:
+//   - MCP (Streamable HTTP, JSON responses) at /mcp
+//   - a plain REST API at /api (GET /api/tools, POST /api/tools/<name>, GET /api/health)
+// Tool calls are forwarded to the renderer over IPC, where the implementations live next
+// to React state, so every change an agent makes shows up in the open editor at once.
+//
+// The server listens on 127.0.0.1 only, on a stable port, and requires a bearer token.
+// Port and token are written to ~/.ai-video-production-editor/studio-connect.json so the
+// stdio bridge (studio-mcp-stdio.js) and setup helpers can find them.
 
 const http = require('http');
-const { ipcMain, BrowserWindow } = require('electron');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const { pathToFileURL } = require('url');
+const { app, ipcMain, BrowserWindow } = require('electron');
+
+const DEFAULT_PORT = 47820;
+const CALL_TIMEOUT_MS = 15 * 60 * 1000;
+const TOOL_WAIT_MS = 10 * 1000;
+const DISCOVERY_DIR = path.join(os.homedir(), '.ai-video-production-editor');
+const DISCOVERY_FILE = path.join(DISCOVERY_DIR, 'studio-connect.json');
 
 let server = null;
 let port = 0;
+let token = null;
 let tools = [];
 let callSeq = 0;
 const pendingCalls = new Map();
-const CALL_TIMEOUT_MS = 5 * 60 * 1000;
+const toolWaiters = new Set();
+const activity = [];
 
 ipcMain.handle('studioTools:register', (_event, list) => {
   tools = Array.isArray(list) ? list : [];
+  for (const resolve of toolWaiters) resolve();
+  toolWaiters.clear();
   return { ok: true, count: tools.length };
 });
 
@@ -27,27 +48,85 @@ ipcMain.on('studioTools:result', (_event, { callId, result, error }) => {
   else pending.resolve(result);
 });
 
-const callTool = (name, args) => new Promise((resolve, reject) => {
+/** Wait briefly for the renderer to publish its tools (agents often connect while the app is still loading). */
+const waitForTools = () => (tools.length > 0
+  ? Promise.resolve()
+  : new Promise((resolve) => {
+    const timer = setTimeout(() => { toolWaiters.delete(done); resolve(); }, TOOL_WAIT_MS);
+    const done = () => { clearTimeout(timer); resolve(); };
+    toolWaiters.add(done);
+  }));
+
+/** Local files become file:// URLs the renderer can load (webSecurity is off for local media). */
+const resolveFileArgs = (args) => {
+  if (!args || typeof args !== 'object') return args || {};
+  const out = Array.isArray(args) ? [...args] : { ...args };
+  for (const [key, value] of Object.entries(out)) {
+    if (typeof value === 'string' && /(^filePath$|Path$)/.test(key) && value && !/^(https?|data|file|blob):/i.test(value)) {
+      const absolute = path.resolve(value.replace(/^~(?=$|\/)/, os.homedir()));
+      if (!fs.existsSync(absolute)) throw new Error(`File not found: ${absolute}`);
+      out[key] = pathToFileURL(absolute).href;
+    } else if (value && typeof value === 'object') {
+      out[key] = resolveFileArgs(value);
+    }
+  }
+  return out;
+};
+
+const recordActivity = (entry) => {
+  activity.unshift({ ...entry, at: new Date().toISOString() });
+  activity.length = Math.min(activity.length, 50);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('studioConnect:activity', activity[0]);
+  }
+};
+
+const callTool = (name, args, source = 'agent') => new Promise((resolve, reject) => {
   const target = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.isVisible()) || BrowserWindow.getAllWindows()[0];
   if (!target) return reject(new Error('No editor window to run the tool in.'));
+  let resolvedArgs;
+  try {
+    resolvedArgs = resolveFileArgs(args || {});
+  } catch (error) {
+    return reject(error);
+  }
   const callId = `call-${++callSeq}`;
   const timer = setTimeout(() => {
     pendingCalls.delete(callId);
     reject(new Error(`Tool ${name} timed out.`));
   }, CALL_TIMEOUT_MS);
-  pendingCalls.set(callId, { resolve, reject, timer });
-  target.webContents.send('studioTools:call', { callId, name, args: args || {} });
+  pendingCalls.set(callId, {
+    resolve: (value) => { recordActivity({ tool: name, source, ok: true }); resolve(value); },
+    reject: (error) => { recordActivity({ tool: name, source, ok: false, error: error.message }); reject(error); },
+    timer,
+  });
+  target.webContents.send('studioTools:call', { callId, name, args: resolvedArgs, source });
 });
 
 const readBody = (req) => new Promise((resolve, reject) => {
   const chunks = [];
-  req.on('data', (chunk) => chunks.push(chunk));
+  let size = 0;
+  req.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 200 * 1024 * 1024) { reject(new Error('Request too large.')); req.destroy(); return; }
+    chunks.push(chunk);
+  });
   req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
   req.on('error', reject);
 });
 
 const rpcResult = (id, result) => ({ jsonrpc: '2.0', id, result });
 const rpcError = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+
+const INSTRUCTIONS = [
+  'These tools operate the AI Video Production Editor that is open on this machine. Everything you change is saved in the open project and shows up in the editor immediately, so the user can watch and take over.',
+  'Start with project_get_overview. Project Space tools (project_*) read and write the script, story bible, cast/locations/props (references) and storyboard shots; project_open_phase shows a phase to the user.',
+  'To attach media you made elsewhere, pass an https URL, a data URL or a local file path (imagePath / videoPath).',
+  'Generation tools spend the user\'s provider credits; say what you are about to generate before large batches.',
+  'Prefer these tools over editing project files on disk.',
+].join(' ');
+
+const textResult = (result) => (typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }, null, 2));
 
 const handleRpc = async (message) => {
   const { id, method, params } = message;
@@ -56,8 +135,8 @@ const handleRpc = async (message) => {
       return rpcResult(id, {
         protocolVersion: (params && params.protocolVersion) || '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'ai-video-production-editor', version: '1.0.0' },
-        instructions: 'Tools operate the AI Video Production Editor that is open on this machine: workspaces, the project hub phases, the timeline and image/video generation. Prefer these tools over editing project files directly.',
+        serverInfo: { name: 'ai-video-production-editor', version: app.getVersion ? app.getVersion() : '1.0.0' },
+        instructions: INSTRUCTIONS,
       });
     case 'notifications/initialized':
     case 'notifications/cancelled':
@@ -65,15 +144,18 @@ const handleRpc = async (message) => {
     case 'ping':
       return rpcResult(id, {});
     case 'tools/list':
+      await waitForTools();
       return rpcResult(id, { tools });
     case 'tools/call': {
       const name = params && params.name;
+      await waitForTools();
       const known = tools.find((tool) => tool.name === name);
       if (!known) return rpcError(id, -32602, `Unknown tool: ${name}`);
       try {
-        const result = await callTool(name, params.arguments);
-        const text = typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }, null, 2);
-        return rpcResult(id, { content: [{ type: 'text', text }], isError: false });
+        const result = await callTool(name, params.arguments, 'mcp');
+        // Tools may return MCP content blocks directly (e.g. project_view_image returns an image).
+        const content = result && Array.isArray(result.__mcpContent) ? result.__mcpContent : [{ type: 'text', text: textResult(result) }];
+        return rpcResult(id, { content, isError: false });
       } catch (error) {
         return rpcResult(id, { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true });
       }
@@ -83,47 +165,173 @@ const handleRpc = async (message) => {
   }
 };
 
-const start = () => new Promise((resolve, reject) => {
-  if (server) return resolve({ port, url: `http://127.0.0.1:${port}/mcp` });
-  server = http.createServer(async (req, res) => {
-    if (!req.url || !req.url.startsWith('/mcp')) {
-      res.writeHead(404); res.end(); return;
-    }
-    if (req.method === 'GET') {
-      // No server-initiated stream; agents fall back to plain POST/JSON.
-      res.writeHead(405, { Allow: 'POST' }); res.end(); return;
-    }
-    if (req.method === 'DELETE') { res.writeHead(200); res.end(); return; }
-    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+const sendJson = (res, status, body, headers = {}) => {
+  res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+  res.end(JSON.stringify(body));
+};
+
+const isAuthorized = (req) => {
+  const header = req.headers.authorization || '';
+  const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : String(req.headers['x-studio-token'] || '');
+  if (!presented || !token) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(token);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+const handleRest = async (req, res, url) => {
+  if (url.pathname === '/api/health') {
+    return sendJson(res, 200, { ok: true, app: 'ai-video-production-editor', tools: tools.length });
+  }
+  if (url.pathname === '/api/tools' && req.method === 'GET') {
+    await waitForTools();
+    return sendJson(res, 200, { tools });
+  }
+  const match = url.pathname.match(/^\/api\/tools\/([A-Za-z0-9_.-]+)$/);
+  if (match && req.method === 'POST') {
+    await waitForTools();
+    const name = match[1];
+    if (!tools.find((tool) => tool.name === name)) return sendJson(res, 404, { ok: false, error: `Unknown tool: ${name}` });
+    const raw = await readBody(req);
+    const args = raw ? JSON.parse(raw) : {};
     try {
-      const body = JSON.parse((await readBody(req)) || 'null');
-      const messages = Array.isArray(body) ? body : [body];
-      const responses = [];
-      for (const message of messages) {
-        if (!message || typeof message !== 'object') continue;
-        const response = await handleRpc(message);
-        if (response && message.id !== undefined) responses.push(response);
-      }
-      if (responses.length === 0) { res.writeHead(202); res.end(); return; }
-      const payload = JSON.stringify(Array.isArray(body) ? responses : responses[0]);
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': 'studio' });
-      res.end(payload);
+      const result = await callTool(name, args, 'api');
+      return sendJson(res, 200, { ok: true, result });
     } catch (error) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(rpcError(null, -32700, error instanceof Error ? error.message : 'Parse error')));
+      return sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
     }
-  });
-  server.on('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    port = server.address().port;
-    resolve({ port, url: `http://127.0.0.1:${port}/mcp` });
+  }
+  return sendJson(res, 404, { ok: false, error: 'Not found' });
+};
+
+const handleMcp = async (req, res) => {
+  if (req.method === 'GET') {
+    // No server-initiated stream; agents fall back to plain POST/JSON.
+    res.writeHead(405, { Allow: 'POST' }); res.end(); return;
+  }
+  if (req.method === 'DELETE') { res.writeHead(200); res.end(); return; }
+  if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+  const body = JSON.parse((await readBody(req)) || 'null');
+  const messages = Array.isArray(body) ? body : [body];
+  const responses = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const response = await handleRpc(message);
+    if (response && message.id !== undefined) responses.push(response);
+  }
+  if (responses.length === 0) { res.writeHead(202); res.end(); return; }
+  sendJson(res, 200, Array.isArray(body) ? responses : responses[0], { 'Mcp-Session-Id': 'studio' });
+};
+
+const handleRequest = async (req, res) => {
+  const url = new URL(req.url || '/', 'http://127.0.0.1');
+  // Browsers send an Origin; agents do not. Refusing browser origins blocks DNS-rebinding and drive-by pages.
+  const origin = req.headers.origin;
+  if (origin && origin !== 'null') return sendJson(res, 403, { ok: false, error: 'Browser requests are not allowed.' });
+  const host = String(req.headers.host || '').replace(/:\d+$/, '');
+  if (host && host !== '127.0.0.1' && host !== 'localhost') return sendJson(res, 403, { ok: false, error: 'Bad host.' });
+  if (url.pathname !== '/api/health' && !isAuthorized(req)) {
+    return sendJson(res, 401, { ok: false, error: 'Missing or wrong token. Copy it from the editor: Settings → Claude & Codex.' });
+  }
+  try {
+    if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) return await handleMcp(req, res);
+    if (url.pathname.startsWith('/api/')) return await handleRest(req, res, url);
+    return sendJson(res, 404, { ok: false, error: 'Not found' });
+  } catch (error) {
+    if (!res.headersSent) sendJson(res, 400, rpcError(null, -32700, error instanceof Error ? error.message : 'Parse error'));
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Token and discovery file
+
+const settingsFile = () => path.join(app.getPath('userData'), 'studio-connect.json');
+
+const loadSettings = () => {
+  try {
+    return JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
+  } catch {
+    return {};
+  }
+};
+
+const saveSettings = (settings) => {
+  fs.mkdirSync(path.dirname(settingsFile()), { recursive: true });
+  fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2), { mode: 0o600 });
+};
+
+const ensureToken = () => {
+  if (token) return token;
+  const settings = loadSettings();
+  token = typeof settings.token === 'string' && settings.token.length >= 32 ? settings.token : crypto.randomBytes(24).toString('hex');
+  if (settings.token !== token) saveSettings({ ...settings, token });
+  return token;
+};
+
+const regenerateToken = () => {
+  token = crypto.randomBytes(24).toString('hex');
+  saveSettings({ ...loadSettings(), token });
+  writeDiscovery();
+  return token;
+};
+
+const getInfo = () => ({
+  running: Boolean(server),
+  port,
+  mcpUrl: server ? `http://127.0.0.1:${port}/mcp` : null,
+  apiUrl: server ? `http://127.0.0.1:${port}/api` : null,
+  token: ensureToken(),
+  toolCount: tools.length,
+  discoveryFile: DISCOVERY_FILE,
+});
+
+function writeDiscovery() {
+  if (!server) return;
+  try {
+    fs.mkdirSync(DISCOVERY_DIR, { recursive: true, mode: 0o700 });
+    const info = getInfo();
+    fs.writeFileSync(DISCOVERY_FILE, JSON.stringify({ mcpUrl: info.mcpUrl, apiUrl: info.apiUrl, token: info.token, pid: process.pid, updatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.warn('[studio-mcp] could not write discovery file', error);
+  }
+}
+
+const listenOn = (candidate) => new Promise((resolve, reject) => {
+  const instance = http.createServer((req, res) => { void handleRequest(req, res); });
+  instance.once('error', reject);
+  instance.listen(candidate, '127.0.0.1', () => {
+    instance.removeListener('error', reject);
+    resolve(instance);
   });
 });
 
+const start = async () => {
+  if (server) return getInfo();
+  ensureToken();
+  const preferred = Number(loadSettings().port) || DEFAULT_PORT;
+  try {
+    server = await listenOn(preferred);
+  } catch {
+    // Port taken (a second copy of the app?) — fall back to any free port.
+    server = await listenOn(0);
+  }
+  port = server.address().port;
+  writeDiscovery();
+  return getInfo();
+};
+
 const stop = () => {
   if (server) { server.close(); server = null; port = 0; }
+  try {
+    const current = JSON.parse(fs.readFileSync(DISCOVERY_FILE, 'utf8'));
+    if (current.pid === process.pid) fs.unlinkSync(DISCOVERY_FILE);
+  } catch {
+    /* nothing to clean up */
+  }
 };
 
 const getUrl = () => (server ? `http://127.0.0.1:${port}/mcp` : null);
+const getToken = () => ensureToken();
+const getActivity = () => activity.slice();
 
-module.exports = { start, stop, getUrl, callTool };
+module.exports = { start, stop, getUrl, getToken, getInfo, getActivity, regenerateToken, callTool, DISCOVERY_FILE };

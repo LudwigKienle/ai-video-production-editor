@@ -261,7 +261,7 @@ class AcpConnection {
     });
     const session = await this.request('session/new', {
       cwd,
-      mcpServers: mcpUrl ? [{ name: 'studio', type: 'http', url: mcpUrl, headers: [] }] : [],
+      mcpServers: mcpUrl ? [{ name: 'studio', type: 'http', url: mcpUrl, headers: [{ name: 'Authorization', value: `Bearer ${studioMcp.getToken()}` }] }] : [],
     });
     this.sessionId = session.sessionId;
     return session;

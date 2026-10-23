@@ -78,6 +78,8 @@ import ApiKeyModal from './components/ApiKeyModal';
 import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
+import { registerStudioTools } from './services/localAgentsService';
+import { createProjectAgentExecutor, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
 import LiveConversation from './components/LiveConversation';
 import DesignSystemSheet from './components/DesignSystemSheet';
 import ProjectHubWorkspace, { type ProjectHubStudioAutomationBindings } from './workspaces/ProjectHubWorkspace';
@@ -886,7 +888,9 @@ const nextPaint = () =>
             setTimeout(resolve, 0);
             return;
         }
-        window.requestAnimationFrame(() => resolve());
+        // A hidden or occluded window gets no animation frames; agents drive the app from the background.
+        const fallback = window.setTimeout(resolve, 120);
+        window.requestAnimationFrame(() => { window.clearTimeout(fallback); resolve(); });
     });
 
 function App() {
@@ -7353,6 +7357,52 @@ function App() {
             };
         },
     };
+
+    // External agents (Claude Code, Codex, Claude Desktop, REST scripts) reach the editor through
+    // electron/studio-mcp-server.js. The registry stays published while the app runs; executors read
+    // the latest state through refs, so changes land in the open project and autosave.
+    const projectAgentStateRef = useRef<ProjectAgentState | null>(null);
+    projectAgentStateRef.current = {
+        storyBible,
+        references,
+        shotPrompts,
+        projectPath,
+        projectName,
+        activePhase: projectHubActivePhase,
+        activeWorkspace,
+    };
+    const aiToolExecutorRef = useRef(aiToolExecutor);
+    aiToolExecutorRef.current = aiToolExecutor;
+    const ensureProjectHubAutomationRef = useRef(ensureProjectHubAutomation);
+    ensureProjectHubAutomationRef.current = ensureProjectHubAutomation;
+    const projectAgentExecutor = useMemo(() => createProjectAgentExecutor({
+        getState: () => projectAgentStateRef.current as ProjectAgentState,
+        setStoryBible: (update) => setStoryBible(update),
+        setReferences: (update) => setReferencesWithHistory(update),
+        setShotPrompts: (update) => setShotPromptsWithHistory(update),
+        openPhase: async (phase) => {
+            setActiveWorkspace('PROJECT');
+            setProjectHubRequestedPhase(phase);
+            await nextPaint();
+        },
+        automation: (phase) => ensureProjectHubAutomationRef.current(phase),
+        loadImage: loadImageAsJpeg,
+    }), [setReferencesWithHistory, setShotPromptsWithHistory]);
+    const studioToolSignature = assistantTools.map((tool) => tool.name).join('|');
+    useEffect(() => {
+        const executor: Record<string, Function> = {};
+        for (const tool of assistantTools) {
+            const name = tool.name || '';
+            executor[name] = (args: Record<string, unknown>, meta?: { source?: string }) => {
+                // Asking Claude or Codex to drive the studio is the explicit request the Studio Agent waits for.
+                if (meta?.source && name.startsWith('studioAgent')) assistantExplicitAgentIntentRef.current = true;
+                return (aiToolExecutorRef.current as Record<string, Function>)[name]?.(args);
+            };
+        }
+        Object.assign(executor, projectAgentExecutor);
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS], executor);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [studioToolSignature, projectAgentExecutor]);
 
     const [apiKeysRevision, setApiKeysRevision] = useState(0);
     const hasAnyApiKeyConfigured = useMemo(() => hasAnyLocalApiKey(), [

@@ -11,8 +11,8 @@ would in a terminal.
 | Where | What |
 |---|---|
 | `electron/local-agents.js` | Detects `claude` / `codex` on PATH (+ `~/.local/bin` etc.), spawns the ACP adapter (`@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp`) with Electron as the node runtime, speaks ACP (ndjson JSON-RPC) — `initialize`, `session/new`, `session/prompt`, `session/cancel`; answers `session/request_permission` (forwarded to the UI) and `fs/*`. |
-| `electron/studio-mcp-server.js` | Minimal MCP server (Streamable HTTP, JSON responses) on `127.0.0.1:<random>/mcp`. `tools/list` returns the editor's tools, `tools/call` forwards to the renderer over IPC. Passed to every session as `mcpServers: [{ name: 'studio', type: 'http', url }]`. |
-| `src/services/localAgentsService.ts` | Renderer wrapper; `registerStudioTools` converts the Gemini `FunctionDeclaration`s to JSON Schema and serves calls with the same executor the Gemini assistant uses. |
+| `electron/studio-mcp-server.js` | MCP server (Streamable HTTP, JSON responses) on `127.0.0.1:47820/mcp` with a bearer token; also serves external agents (see [agent-connect.md](agent-connect.md)). `tools/list` returns the editor's tools, `tools/call` forwards to the renderer over IPC. Passed to every session as `mcpServers: [{ name: 'studio', type: 'http', url, headers: [Authorization] }]`. |
+| `src/services/localAgentsService.ts` | Renderer wrapper; `registerStudioTools` converts the Gemini `FunctionDeclaration`s to JSON Schema and serves calls with the same executor the Gemini assistant uses (App registers them once, whether or not the assistant panel is open). |
 | `src/components/AIAssistant.tsx` | Agent switch in the header (Gemini · Claude Code · Codex), streamed replies, tool-call lines (`▸` running, `✓` done, `✗` failed), inline permission prompts, Stop. |
 | `src/components/ApiKeyModal.tsx` | Settings → Local agents: detection, version, login hint, "Sign in in Terminal", Stop. |
 

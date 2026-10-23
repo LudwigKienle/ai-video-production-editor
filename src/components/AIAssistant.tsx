@@ -11,7 +11,6 @@ import {
   listLocalAgents,
   onLocalAgentEvent,
   promptLocalAgent,
-  registerStudioTools,
   type LocalAgentEvent,
   type LocalAgentId,
   type LocalAgentInfo,
@@ -213,12 +212,11 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ apiKeyReady, tools, toolExecu
 
   useEffect(() => { try { localStorage.setItem(AGENT_CHOICE_KEY, agentChoice); } catch { /* ignore */ } }, [agentChoice]);
 
-  // Offer the assistant's tools to local agents through the studio MCP server.
+  // The tools themselves are published to local agents by App (studio MCP server), whether or not this panel is open.
   useEffect(() => {
     if (!isLocalAgentsAvailable()) return;
     listLocalAgents().then(setLocalAgents);
-    return registerStudioTools(tools, toolExecutor);
-  }, [tools, toolExecutor]);
+  }, []);
 
   // Stream local-agent output into the chat as it arrives.
   useEffect(() => {
