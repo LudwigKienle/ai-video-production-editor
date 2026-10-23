@@ -1230,7 +1230,7 @@ type AgentJob = {
   framesBefore?: Record<number, string | undefined>;
 };
 
-const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate']);
+const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate', 'project_review_continuity']);
 
 const jobSize = (tool: string, args: Record<string, unknown>) => {
   if (tool === 'project_generate' || tool === 'project_plan_outfits') return 99;
@@ -1282,6 +1282,7 @@ export const withBackgroundJobs = (
         const progress = job.shots ? (() => {
           const done = job.shots.filter((shot) => {
             const entry = shotsNow.find((item) => item.shot === shot);
+            if (job.tool === 'project_review_continuity') return Boolean(entry?.continuityReview?.reviewedAt && entry.continuityReview.reviewedAt >= job.startedAt);
             const url = job.tool === 'project_generate_shot_videos' ? entry?.videoUrl : entry?.imageUrl;
             return Boolean(url && url !== job.framesBefore?.[shot]);
           });

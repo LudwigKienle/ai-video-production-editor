@@ -6,7 +6,7 @@
 import type { ShotContinuityIssue, ShotContinuityReview } from '../types';
 
 export const CONTINUITY_CATEGORIES = [
-  'identity', 'wardrobe', 'props', 'location', 'lighting', 'screen_direction', 'eyeline', 'staging', 'text', 'framing',
+  'identity', 'wardrobe', 'props', 'location', 'lighting', 'screen_direction', 'eyeline', 'staging', 'text', 'framing', 'artifacts',
 ] as const;
 export type ContinuityCategory = typeof CONTINUITY_CATEGORIES[number];
 
@@ -63,14 +63,15 @@ Check, in this order:
 1. identity — every character matches their reference face, hair, age and build. In inserts and close-ups of hands or body parts, the hand must belong to the right character: age, skin, build and sleeve/cuff from their outfit (a young man's hand is not an old man's hand).
 2. wardrobe — clothes, COLOURS and accessories match the outfit reference for this shot; same as the previous shot of the same scene unless the script changes them.
 3. props — the right props, in the right hands, consistent with the previous shot (a glass spilled stays spilled).
-4. location — same space and layout as the location reference and the previous shot of the scene.
+4. location — same space and layout as the location reference and the previous shot of the scene. A populated location (a party, a press pit, a busy street) keeps its crowd in every angle, reverse shots included — an empty background where the scene has people is a medium issue.
 5. lighting — same time of day, light direction and colour as the previous shot of the scene.
 6. screen_direction — the 180° rule: characters keep their left/right sides across the cut; in a shot/reverse-shot pair the two characters look in OPPOSITE screen directions. If the previous shot of the same scene shows A on the left looking right, a reverse on A shows B looking left.
-7. eyeline — characters look at who/what they should (up/down, left/right) given positions and heights.
+7. eyeline — characters look at who/what they should (up/down, left/right) given positions and heights. Postures carry across the cut: someone kneeling or sitting in the previous shot is still low in this one, and the camera height and eye heights must agree with that (a kneeling character's head is not level with a standing one's chest).
 8. staging — the action and blocking the script and description ask for (who stands where, who holds what, who is kneeling). The space must be physically plausible: an elevator cab, car or closet is enclosed, and only the people who are in it can be in it; nobody appears who cannot be there at this moment.
    For inserts and details the shot exists to show (an engraving, a document, a screen), that detail must be clearly visible — if it is not, that is a medium issue at least.
 9. text — any readable text (badges, signs, documents) says exactly what it should, no extra or wrong words.
 10. framing — shot size and angle match the intended framing; vertical ${input.aspectRatio || ''} composition works.
+11. artifacts — image-model defects: semi-transparent or ghosted bodies, background showing through a person, merged or missing limbs, extra fingers, warped faces, duplicated people. Any of these is high severity.
 
 Scoring: 90–100 aligned (cuts cleanly), 70–89 watch (minor issues), below 70 drift (would be noticed — re-render).
 If the frame breaks screen direction or the scene needs the opposite side of the room for a reverse shot, set needsReverseAngle true and reverseYaw to the camera yaw in degrees (-180..180, 180 = looking back the other way) that the location reference should be shown from.
@@ -159,7 +160,7 @@ export const parseVisualContinuityVerdict = (raw: unknown): VisualContinuityVerd
 const ISSUE_KIND: Record<string, ShotContinuityIssue['kind']> = {
   screen_direction: 'previous_shot', eyeline: 'previous_shot', lighting: 'previous_shot',
   identity: 'reference', wardrobe: 'reference', props: 'reference', location: 'reference',
-  staging: 'context_reference', text: 'context_reference', framing: 'context_reference',
+  staging: 'context_reference', text: 'context_reference', framing: 'context_reference', artifacts: 'context_reference',
 };
 const SEVERITY_SCORE = { low: 80, medium: 60, high: 35 } as const;
 

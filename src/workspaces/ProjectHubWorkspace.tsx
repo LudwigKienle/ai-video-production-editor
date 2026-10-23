@@ -13368,7 +13368,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         continue;
                     }
                     results.push({ shot: shotNumber, review });
-                    setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, geminiContinuityReview: review } : entry)));
+                    setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, continuityReview: review } : entry)));
                 }
                 return results;
             },
