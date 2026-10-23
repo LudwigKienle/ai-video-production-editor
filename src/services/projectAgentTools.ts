@@ -139,6 +139,15 @@ export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, un
     if (input.environment === null || typeof input.environment === 'string') next.environment = (input.environment as string | null) || null;
     if (!next.description && next.prompt) next.description = next.prompt;
     if (!next.prompt && next.description) next.prompt = next.description;
+    // A continuity-refined prompt overrides the prompt at render time; an edit to what the shot
+    // shows (prompt, description, camera side) makes it stale — drop it, as the editor UI does.
+    const staleRefinement = next.prompt !== current.prompt || next.description !== current.description || next.cameraYaw !== current.cameraYaw;
+    if (staleRefinement && current.continuityRefinedPrompt) {
+      next.continuityRefinedPrompt = undefined;
+      next.continuityRefinementSummary = undefined;
+      next.continuityRefinementPasses = undefined;
+      next.continuityReview = undefined;
+    }
     const image = mediaFrom(input, 'image');
     if (image) next = withImageVersion(next, image);
     const video = mediaFrom(input, 'video');
@@ -241,6 +250,9 @@ export const summarizeShot = (shot: ShotPrompt, full = false) => clean({
   environment: shot.environment || undefined,
   products: shot.products?.length ? shot.products : undefined,
   cameraAngle: shot.cameraAngle,
+  cameraYaw: shot.cameraYaw || undefined,
+  /** The prompt actually rendered when a continuity pass rewrote it. */
+  renderedPrompt: full && shot.continuityRefinedPrompt ? shot.continuityRefinedPrompt : undefined,
   imageUrl: describeMediaUrl(shot.imageUrl),
   videoUrl: describeMediaUrl(shot.videoUrl),
   imageVersions: full && shot.imageVersions?.length ? shot.imageVersions.length : undefined,

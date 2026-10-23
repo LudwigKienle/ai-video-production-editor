@@ -153,3 +153,14 @@ test('long batches run as background jobs with live shot progress', async () => 
   assert.equal(status.status, 'done');
   assert.deepEqual(status.result, { results: 'done' });
 });
+
+test('upsertShots drops a stale continuity-refined prompt when the shot changes', () => {
+  const base = [{ shot: 1, prompt: 'old', description: 'd', characters: [], environment: null, continuityRefinedPrompt: 'refined old', continuityRefinementPasses: 2 }];
+  const edited = upsertShots(base, [{ shot: 1, prompt: 'new prompt' }]).shots[0];
+  assert.equal(edited.prompt, 'new prompt');
+  assert.equal(edited.continuityRefinedPrompt, undefined);
+  const untouched = upsertShots(base, [{ shot: 1, characters: ['Nora'] }]).shots[0];
+  assert.equal(untouched.continuityRefinedPrompt, 'refined old');
+  const reversed = upsertShots(base, [{ shot: 1, cameraYaw: 180 }]).shots[0];
+  assert.equal(reversed.continuityRefinedPrompt, undefined);
+});
