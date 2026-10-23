@@ -131,3 +131,25 @@ test('upsertOutfits adds by name, updates in place and can replace the wardrobe'
   const replaced = upsertOutfits({ ...nora, outfits: second.outfits }, [{ name: 'Red dress', prompt: 'blood-red gown' }], id, true);
   assert.deepEqual(replaced.outfits.map((o) => o.name), ['Red dress']);
 });
+
+test('long batches run as background jobs with live shot progress', async () => {
+  const { withBackgroundJobs } = await import('./projectAgentTools.ts');
+  let shots = [1, 2, 3].map((shot) => ({ shot, prompt: '', description: '', characters: [], environment: null } as any));
+  let finish: () => void = () => undefined;
+  const tools = withBackgroundJobs({
+    project_generate_shot_images: () => new Promise((resolve) => { finish = () => resolve({ results: 'done' }); }),
+  }, () => shots);
+  const small = tools.project_generate_shot_images({ shots: [1], wait: true });
+  finish();
+  assert.deepEqual(await small, { results: 'done' });
+  const started = await tools.project_generate_shot_images({ shots: [1, 2, 3] }) as any;
+  assert.equal(started.status, 'running');
+  shots = shots.map((shot) => (shot.shot === 1 ? { ...shot, imageUrl: 'https://x/1.png' } : shot.shot === 2 ? { ...shot, isGenerating: true } : shot));
+  let status = (await tools.project_job_status({ jobId: started.jobId }) as any).jobs[0];
+  assert.deepEqual(status.progress, { total: 3, done: 1, rendering: [2] });
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  status = (await tools.project_job_status({ jobId: started.jobId }) as any).jobs[0];
+  assert.equal(status.status, 'done');
+  assert.deepEqual(status.result, { results: 'done' });
+});

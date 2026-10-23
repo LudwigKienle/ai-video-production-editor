@@ -162,6 +162,9 @@ export type ProjectHubStudioAutomationBindings = {
     renderOutfit: (payload: { characterId: string; outfitId: string }) => Promise<{ detail: string }>;
     /** The hub's own planner: outfits from the script, then renders them. */
     planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
+    /** Storyboard continuity auto-refine (Gemini reviews each frame and re-renders up to 3 times). */
+    getStoryboardOptions: () => { autoRefine: boolean };
+    setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
 };
 
 export type ProjectHubModelOption = { id: string; label: string; provider: string; goodFor?: string };
@@ -13143,6 +13146,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return targets;
     };
 
+    const storyboardOptionsRef = useRef({ autoRefine: useStoryboardContinuityAutoRefine });
+    storyboardOptionsRef.current = { autoRefine: useStoryboardContinuityAutoRefine };
     const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
     agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
 
@@ -13183,6 +13188,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             generateShotVideo: async ({ shot }) => {
                 await runReportingErrors(() => agentHandlersRef.current.handleGenerateShotVideo(shot));
                 return { detail: `Shot ${shot} filmed with ${FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === agentHandlersRef.current.videoModel)?.label || agentHandlersRef.current.videoModel}.` };
+            },
+            getStoryboardOptions: () => ({ ...storyboardOptionsRef.current }),
+            setStoryboardOptions: ({ autoRefine }) => {
+                if (typeof autoRefine === 'boolean') setUseStoryboardContinuityAutoRefine(autoRefine);
             },
             getOutfitModels: () => ({
                 current: agentHandlersRef.current.outfitImageModel,

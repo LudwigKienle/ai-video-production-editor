@@ -273,6 +273,8 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_director_review: 'Reviewing coverage',
   project_set_models: 'Choosing models',
   project_generate_shot_images: 'Rendering storyboard frames',
+  project_renumber_shots: 'Renumbering shots',
+  project_job_status: 'Checking a job',
   project_generate_shot_videos: 'Filming shots',
   project_generate_reference_image: 'Rendering a reference image',
   project_generate: 'Running a generation step',
@@ -551,9 +553,20 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
       properties: {
         shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers.' },
         model: str('Optional image model id to switch to first.'),
+        autoRefine: { type: 'boolean', description: 'Continuity auto-refine: Gemini reviews each frame against its neighbours and re-renders up to 3 times (better continuity, up to 3× time and cost). Leave out to keep the editor\'s setting.' },
       },
       required: ['shots'],
     },
+  },
+  {
+    name: 'project_job_status',
+    description: 'Progress of background generation jobs (frames done / rendering for shot jobs, final results when finished). Batches of more than two items run in the background automatically; pass background: true or wait: true to choose.',
+    parameters: { type: 'object', properties: { jobId: str('Job id; leave out for the latest jobs.') } },
+  },
+  {
+    name: 'project_renumber_shots',
+    description: 'Renumber all storyboard shots 1…n in screen order (scene, then shot within the scene), e.g. after scene-by-scene directing appended new numbers. Refuses while any shot is rendering or filming.',
+    parameters: { type: 'object', properties: {} },
   },
   {
     name: 'project_generate_shot_videos',
@@ -632,6 +645,8 @@ export type ProjectAgentAutomation = {
   setOutfitModel: (model: string) => void;
   renderOutfit: (payload: { characterId: string; outfitId: string }) => Promise<{ detail: string }>;
   planOutfits: (payload: { characterId: string; count?: number }) => Promise<{ detail: string }>;
+  getStoryboardOptions: () => { autoRefine: boolean };
+  setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
 };
 
 export type ProjectAgentContext = {
@@ -680,7 +695,7 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
     throw new Error('The editor did not switch models in time.');
   };
 
-  return {
+  const tools: Record<string, (args: any) => Promise<unknown>> = {
     project_get_overview: async () => {
       const s = state();
       const bible = s.storyBible;
@@ -1029,6 +1044,10 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
     project_generate_shot_images: async (args: Record<string, unknown>) => {
       const shots = shotNumbers(args.shots);
       if (asString(args.model)) await switchModels({ imageModel: asString(args.model) });
+      if (typeof args.autoRefine === 'boolean') {
+        (await ctx.automation('storyboard')).setStoryboardOptions({ autoRefine: args.autoRefine });
+        for (let attempt = 0; attempt < 30 && (await ctx.automation('storyboard')).getStoryboardOptions().autoRefine !== args.autoRefine; attempt += 1) await ctx.settle();
+      }
       const results = [];
       for (const shot of shots) {
         const before = state().shotPrompts.find((entry) => entry.shot === shot);
@@ -1047,6 +1066,20 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
         }
       }
       return { results, hint: 'Use project_view_image to look at a frame.' };
+    },
+
+    project_renumber_shots: async () => {
+      const current = state().shotPrompts;
+      const busy = current.filter((shot) => shot.isGenerating || shot.isFilming || shot.isAngleGenerating);
+      if (busy.length) throw new Error(`Shots ${busy.map((shot) => shot.shot).join(', ')} are still rendering; renumber when they are done.`);
+      const sceneKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneNumber) ? Number(shot.sceneNumber) : Number.POSITIVE_INFINITY);
+      const orderKey = (shot: ShotPrompt) => (Number.isFinite(shot.sceneShotNumber) ? Number(shot.sceneShotNumber) : shot.shot);
+      const ordered = [...current].sort((a, b) => sceneKey(a) - sceneKey(b) || orderKey(a) - orderKey(b) || a.shot - b.shot);
+      const next = ordered.map((shot, index) => ({ ...shot, shot: index + 1 }));
+      pending.shotPrompts = next;
+      ctx.setShotPrompts(() => next);
+      settle();
+      return { ok: true, shotCount: next.length, firstShotOfScene: Object.fromEntries([...new Set(next.map((shot) => shot.sceneNumber))].map((scene) => [String(scene), next.find((shot) => shot.sceneNumber === scene)?.shot])) };
     },
 
     project_generate_shot_videos: async (args: Record<string, unknown>) => {
@@ -1109,6 +1142,90 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       }
     },
   };
+
+  return withBackgroundJobs(tools, () => ctx.getState().shotPrompts);
+};
+
+
+// ---------------------------------------------------------------------------
+// Background jobs: long generation batches return a job id at once instead of holding one
+// request open for many minutes (agents and HTTP clients time out).
+
+type AgentJob = {
+  id: string;
+  tool: string;
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  result?: unknown;
+  error?: string;
+  shots?: number[];
+  framesBefore?: Record<number, string | undefined>;
+};
+
+const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate']);
+
+const jobSize = (tool: string, args: Record<string, unknown>) => {
+  if (tool === 'project_generate' || tool === 'project_plan_outfits') return 99;
+  if (Array.isArray(args.shots)) return args.shots.length;
+  if (Array.isArray(args.outfits)) return args.outfits.length;
+  return args.all === true ? 99 : 3;
+};
+
+export const withBackgroundJobs = (
+  tools: Record<string, (args: any) => Promise<unknown>>,
+  getShots: () => ShotPrompt[],
+): Record<string, (args: any) => Promise<unknown>> => {
+  const jobs = new Map<string, AgentJob>();
+  const wrapped: Record<string, (args: any) => Promise<unknown>> = { ...tools };
+  for (const name of LONG_TOOLS) {
+    const run = tools[name];
+    if (!run) continue;
+    wrapped[name] = async (args: Record<string, unknown> = {}) => {
+      const background = args.background === true || (args.wait !== true && jobSize(name, args) > 2);
+      if (!background) return run(args);
+      const shots = Array.isArray(args.shots) ? args.shots.filter((value): value is number => typeof value === 'number') : undefined;
+      const current = getShots();
+      const job: AgentJob = {
+        id: `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        tool: name,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        shots,
+        framesBefore: shots ? Object.fromEntries(shots.map((shot) => [shot, name === 'project_generate_shot_videos' ? current.find((entry) => entry.shot === shot)?.videoUrl : current.find((entry) => entry.shot === shot)?.imageUrl])) : undefined,
+      };
+      jobs.set(job.id, job);
+      run(args).then((result) => {
+        job.status = 'done';
+        job.result = result;
+      }).catch((error) => {
+        job.status = 'failed';
+        job.error = shortError(error);
+      }).finally(() => { job.finishedAt = new Date().toISOString(); });
+      return { jobId: job.id, status: 'running', tool: name, note: 'Running in the background — the editor shows each result as it lands. Check with project_job_status.' };
+    };
+  }
+  wrapped.project_job_status = async (args: Record<string, unknown> = {}) => {
+    const id = asString(args.jobId);
+    const list = id ? [jobs.get(id)].filter((job): job is AgentJob => Boolean(job)) : [...jobs.values()].slice(-10);
+    if (id && list.length === 0) throw new Error(`No job ${id} (jobs live until the editor restarts).`);
+    const shotsNow = getShots();
+    return {
+      jobs: list.map((job) => {
+        const progress = job.shots ? (() => {
+          const done = job.shots.filter((shot) => {
+            const entry = shotsNow.find((item) => item.shot === shot);
+            const url = job.tool === 'project_generate_shot_videos' ? entry?.videoUrl : entry?.imageUrl;
+            return Boolean(url && url !== job.framesBefore?.[shot]);
+          });
+          const busy = job.shots.filter((shot) => shotsNow.find((item) => item.shot === shot && (item.isGenerating || item.isFilming)));
+          return { total: job.shots.length, done: done.length, rendering: busy };
+        })() : undefined;
+        return clean({ jobId: job.id, tool: job.tool, status: job.status, startedAt: job.startedAt, finishedAt: job.finishedAt, progress, error: job.error, result: job.status === 'running' ? undefined : job.result });
+      }),
+    };
+  };
+  return wrapped;
 };
 
 /** Browser helper for project_view_image: any image URL (https, data, file) → downscaled JPEG base64. */
