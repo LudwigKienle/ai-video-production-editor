@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createProjectAgentExecutor, describeMediaUrl, upsertReference, upsertShots, withImageVersion, type ProjectAgentState } from './projectAgentTools.ts';
+import { createProjectAgentExecutor, describeMediaUrl, mergeWorld, upsertReference, upsertShots, withImageVersion, type ProjectAgentState } from './projectAgentTools.ts';
 
 const ids = () => { let n = 0; return () => `ref-${++n}`; };
 
@@ -78,6 +78,11 @@ test('executor writes through the setters and reads its own writes before React 
     setShotPrompts: () => undefined,
     openPhase: async (phase) => { opened.push(phase); },
     automation: async () => { throw new Error('not used'); },
+    settle: async () => undefined,
+    saveProject: async () => ({ folderPath: '/tmp/x', savedAt: 'now', name: 'Test' }),
+    saveProjectAs: async () => ({ folderPath: '/tmp/y', savedAt: 'now', name: 'Test' }),
+    newProject: async () => undefined,
+    openProject: async () => undefined,
     loadImage: async () => ({ base64: '', mimeType: 'image/jpeg' }),
   });
   await executor.project_update_story({ script: 'New draft', title: 'Night Shift' });
@@ -92,4 +97,21 @@ test('executor writes through the setters and reads its own writes before React 
   assert.deepEqual(opened, ['storyboard']);
   await assert.rejects(() => executor.project_open_phase({ phase: 'timeline' }), /phase must be one of/);
   await assert.rejects(() => executor.project_update_story({}), /at least one/);
+});
+
+test('mergeWorld fills fields and merges factions, places and glossary by name', () => {
+  let n = 0;
+  const id = (prefix: string) => `${prefix}-${++n}`;
+  const first = mergeWorld(undefined, { universeName: 'OWNED', factions: [{ name: 'House Ashcroft', leader: 'Victor' }], glossary: [{ term: 'The Trust', meaning: '51%' }] }, id);
+  assert.equal(first.universeName, 'OWNED');
+  assert.equal(first.factions[0].leader, 'Victor');
+  const second = mergeWorld(first, { tone: 'Glossy revenge', factions: [{ name: 'house ashcroft', agenda: 'Keep the shares' }, { name: 'The Vales' }], environments: [{ name: 'Ashcroft Tower', containerType: 'city' }], glossary: [{ term: 'the trust', meaning: '51% of Ashcroft Global' }] }, id);
+  assert.equal(second.universeName, 'OWNED');
+  assert.equal(second.tone, 'Glossy revenge');
+  assert.equal(second.factions.length, 2);
+  assert.equal(second.factions[0].leader, 'Victor');
+  assert.equal(second.factions[0].agenda, 'Keep the shares');
+  assert.equal(second.environments[0].containerType, 'city');
+  assert.equal(second.glossary.length, 1);
+  assert.equal(second.glossary[0].meaning, '51% of Ashcroft Global');
 });

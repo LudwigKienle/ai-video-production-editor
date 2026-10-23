@@ -73,13 +73,14 @@ import { STUDIO_AGENT_STATUS_STYLES } from './components/StudioAgentStrip';
 import ActivityCenter from './components/ActivityCenter';
 import { useTaskCenter } from './hooks/useTaskCenter';
 import { useAgentTaskBridge } from './hooks/useAgentTaskBridge';
-import { estimateProgress, summarizeTasks } from './services/taskCenter';
+import { estimateProgress, startTask, summarizeTasks } from './services/taskCenter';
 import ApiKeyModal from './components/ApiKeyModal';
 import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
 import { registerStudioTools } from './services/localAgentsService';
-import { createProjectAgentExecutor, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
+import { createProjectAgentExecutor, describeAgentTool, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
+import { onStudioConnectActivity } from './services/studioConnectService';
 import LiveConversation from './components/LiveConversation';
 import DesignSystemSheet from './components/DesignSystemSheet';
 import ProjectHubWorkspace, { type ProjectHubStudioAutomationBindings } from './workspaces/ProjectHubWorkspace';
@@ -3265,17 +3266,23 @@ function App() {
         }));
     }, []);
 
-    const handleSaveProject = async () => {
+    const handleSaveProject = () => saveProjectAt();
+
+    /** Save the project; a new project goes to targetFolder (agents) or a folder the user picks. */
+    const saveProjectAt = async (targetFolder?: string, opts?: { name?: string; throwOnError?: boolean; asNew?: boolean }) => {
         try {
-            let folderPath = projectPath;
+            // asNew: "Save as" — write the current project into targetFolder and keep working there.
+            let folderPath = opts?.asNew ? null : projectPath;
             if (!folderPath) {
-                folderPath = await selectProjectFolder();
-                if (!folderPath) return;
+                folderPath = targetFolder || await selectProjectFolder();
+                if (!folderPath) return null;
                 await initializeProjectFolder(folderPath);
                 setProjectPath(folderPath);
             }
+            if (opts?.name) setProjectName(opts.name);
             setIsProjectSaving(true);
             const collaborationForSave = buildCollaborationForSave();
+            const savedName = opts?.name || projectName || storyBible.title || 'Untitled Project';
             const { savedAt } = await saveProjectToFolder(
                 folderPath,
                 {
@@ -3300,10 +3307,10 @@ function App() {
                     usageLedger,
                     costSettings,
                 },
-                projectName || storyBible.title || 'Untitled Project',
+                savedName,
             );
             setLastSavedAt(savedAt);
-            setProjectName(projectName || storyBible.title || 'Untitled Project');
+            setProjectName(savedName);
             setLastAutoSavedAt(null);
             suppressAutosaveRef.current = true;
             setProjectCollaboration(collaborationForSave);
@@ -3318,15 +3325,18 @@ function App() {
             }
             upsertRecentProject({
                 path: folderPath,
-                name: projectName || storyBible.title || 'Untitled Project',
+                name: savedName,
                 lastOpened: new Date().toISOString(),
                 lastSavedAt: savedAt,
                 projectGroup: storyBible.projectGroup,
                 projectSubgroup: storyBible.projectSubgroup,
             });
+            return { folderPath, savedAt, name: savedName };
         } catch (e) {
+            if (opts?.throwOnError) throw e;
             const msg = e instanceof Error ? e.message : String(e);
             alert(`Project save failed: ${msg}`);
+            return null;
         } finally {
             setIsProjectSaving(false);
         }
@@ -7375,6 +7385,14 @@ function App() {
     aiToolExecutorRef.current = aiToolExecutor;
     const ensureProjectHubAutomationRef = useRef(ensureProjectHubAutomation);
     ensureProjectHubAutomationRef.current = ensureProjectHubAutomation;
+    const saveProjectAtRef = useRef(saveProjectAt);
+    saveProjectAtRef.current = saveProjectAt;
+    const loadProjectRef = useRef(handleLoadProject);
+    loadProjectRef.current = handleLoadProject;
+    const closeProjectRef = useRef(handleCloseProject);
+    closeProjectRef.current = handleCloseProject;
+    const resetReferencesRef = useRef(resetReferences);
+    resetReferencesRef.current = resetReferences;
     const projectAgentExecutor = useMemo(() => createProjectAgentExecutor({
         getState: () => projectAgentStateRef.current as ProjectAgentState,
         setStoryBible: (update) => setStoryBible(update),
@@ -7386,8 +7404,55 @@ function App() {
             await nextPaint();
         },
         automation: (phase) => ensureProjectHubAutomationRef.current(phase),
+        settle: async () => { await nextPaint(); await nextPaint(); },
+        saveProject: async (folderPath, name) => {
+            const result = await saveProjectAtRef.current(folderPath, { name, throwOnError: true });
+            if (!result) throw new Error('The project was not saved.');
+            return result;
+        },
+        saveProjectAs: async (folderPath, name) => {
+            const result = await saveProjectAtRef.current(folderPath, { name, throwOnError: true, asNew: true });
+            if (!result) throw new Error('The project was not saved.');
+            return result;
+        },
+        openProject: async (folderPath) => {
+            if (projectAgentStateRef.current?.projectPath) await saveProjectAtRef.current(undefined, { throwOnError: true });
+            await loadProjectRef.current(folderPath);
+            for (let attempt = 0; attempt < 40 && projectAgentStateRef.current?.projectPath !== folderPath; attempt += 1) await nextPaint();
+            if (projectAgentStateRef.current?.projectPath !== folderPath) throw new Error(`Could not open ${folderPath}.`);
+        },
+        newProject: async () => {
+            // Save the open project first (closing cancels the autosave timer), then start empty.
+            if (projectAgentStateRef.current?.projectPath) await saveProjectAtRef.current(undefined, { throwOnError: true });
+            closeProjectRef.current();
+            setStoryBible(INITIAL_BIBLE);
+            resetReferencesRef.current([]);
+            await nextPaint();
+            await nextPaint();
+        },
         loadImage: loadImageAsJpeg,
     }), [setReferencesWithHistory, setShotPromptsWithHistory]);
+
+    // Show what an external agent is doing in the Activity center while it works ("Claude Code · Writing shots").
+    useEffect(() => {
+        const running = new Map<string, ReturnType<typeof startTask>>();
+        const unsubscribe = onStudioConnectActivity((event) => {
+            if (!event.callId) return;
+            if (event.phase === 'start') {
+                running.set(event.callId, startTask({ label: `${event.client || 'Agent'} · ${describeAgentTool(event.tool)}`, kind: 'agent', provider: event.client || 'agent', message: 'Working…' }));
+                return;
+            }
+            const task = running.get(event.callId);
+            running.delete(event.callId);
+            if (!task) return;
+            if (event.ok) task.complete();
+            else task.fail(new Error(event.error || 'Failed'));
+        });
+        return () => {
+            unsubscribe();
+            for (const task of running.values()) task.complete();
+        };
+    }, []);
     const studioToolSignature = assistantTools.map((tool) => tool.name).join('|');
     useEffect(() => {
         const executor: Record<string, Function> = {};

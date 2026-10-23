@@ -21,7 +21,7 @@ export type StudioConnectStatus = {
   clients: Array<{ id: StudioConnectClientId; label: string; installed: boolean; connected: boolean }>;
 };
 
-export type StudioConnectActivity = { tool: string; source: string; ok: boolean; error?: string; at: string };
+export type StudioConnectActivity = { phase?: 'start' | 'end'; callId?: string; tool: string; source: string; client?: string; ok?: boolean; error?: string; at: string };
 
 type StudioConnectBridge = {
   status: () => Promise<StudioConnectStatus>;

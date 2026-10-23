@@ -6,12 +6,15 @@
  *
  * The merge logic is pure (and unit-tested); `createProjectAgentTools` wires it to App state.
  */
-import type { ReferenceItem, ScriptRevision, ShotPrompt, StoryBible } from '../types';
+import type { ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
+import { createDefaultWorldbuildingState } from '../data/worldbuildingTypes.ts';
 
 export type ProjectAgentPhase = 'script' | 'worldbuilding' | 'director' | 'concept' | 'scene_wall' | 'storyboard' | 'filming' | 'review' | 'marketing';
 export const PROJECT_AGENT_PHASES: ProjectAgentPhase[] = ['script', 'worldbuilding', 'director', 'concept', 'scene_wall', 'storyboard', 'filming', 'review', 'marketing'];
 
 const REFERENCE_TYPES: ReferenceItem['type'][] = ['character', 'environment', 'product', 'prop'];
+const PRODUCTION_FORMAT_IDS: NonNullable<StoryBible['productionFormat']>[] = ['feature', 'short', 'commercial', 'microdrama', 'music-video', 'documentary', 'social'];
+const PROJECT_TYPES: NonNullable<StoryBible['projectType']>[] = ['teaser', 'trailer', 'short', 'feature', 'commercial', 'micro-drama', 'reelshort'];
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -129,6 +132,53 @@ export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, un
   return { shots: [...byNumber.values()].sort((a, b) => a.shot - b.shot), touched };
 };
 
+const WORLD_TEXT_FIELDS = ['universeName', 'genre', 'tone', 'era', 'coreConflict', 'magicSystem', 'technologyLevel', 'rules', 'history', 'factionsSummary', 'lookNotes'] as const;
+const ENVIRONMENT_TYPES: WorldbuildingEnvironment['containerType'][] = ['region', 'city', 'dungeon', 'settlement', 'frontier', 'sanctuary'];
+const FACTION_COLORS = ['#c9a227', '#b3261e', '#3d5a80', '#6a4c93', '#2a9d8f', '#e76f51'];
+
+/** Merge world fields; factions, environments and glossary entries are matched by name / term. */
+export const mergeWorld = (prev: WorldbuildingState | undefined, input: Record<string, unknown>, makeId: (prefix: string) => string): WorldbuildingState => {
+  const base: WorldbuildingState = { ...createDefaultWorldbuildingState(), ...(prev || {}) };
+  for (const field of WORLD_TEXT_FIELDS) {
+    const value = asString(input[field]);
+    if (value !== undefined) (base as Record<string, unknown>)[field] = value;
+  }
+  const items = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : []);
+  const factions = [...base.factions];
+  for (const item of items(input.factions)) {
+    const name = asString(item.name)?.trim();
+    if (!name) continue;
+    const index = factions.findIndex((entry) => sameName(entry.name, name));
+    const current: WorldbuildingFaction = index >= 0 ? factions[index] : {
+      id: makeId('faction'), name, archetype: '', influence: '', leader: '', color: FACTION_COLORS[factions.length % FACTION_COLORS.length], agenda: '', beliefs: '', allies: '', rivals: '', notes: '',
+    };
+    const next = { ...current, ...clean({ archetype: asString(item.archetype), influence: asString(item.influence), leader: asString(item.leader), agenda: asString(item.agenda), beliefs: asString(item.beliefs), allies: asString(item.allies), rivals: asString(item.rivals), notes: asString(item.notes), color: asString(item.color) }) };
+    if (index >= 0) factions[index] = next; else factions.push(next);
+  }
+  const environments = [...base.environments];
+  for (const item of items(input.environments)) {
+    const name = asString(item.name)?.trim();
+    if (!name) continue;
+    const index = environments.findIndex((entry) => sameName(entry.name, name));
+    const containerType = ENVIRONMENT_TYPES.includes(item.containerType as WorldbuildingEnvironment['containerType']) ? item.containerType as WorldbuildingEnvironment['containerType'] : undefined;
+    const current: WorldbuildingEnvironment = index >= 0 ? environments[index] : {
+      id: makeId('environment'), name, containerType: containerType || 'city', biome: '', mood: '', purpose: '', description: '', hazards: '', resources: '', notes: '',
+    };
+    const next = { ...current, ...clean({ containerType, biome: asString(item.biome), mood: asString(item.mood), purpose: asString(item.purpose), description: asString(item.description), hazards: asString(item.hazards), resources: asString(item.resources), notes: asString(item.notes) }) };
+    if (index >= 0) environments[index] = next; else environments.push(next);
+  }
+  const glossary = [...base.glossary];
+  for (const item of items(input.glossary)) {
+    const term = asString(item.term)?.trim();
+    const meaning = asString(item.meaning);
+    if (!term || meaning === undefined) continue;
+    const index = glossary.findIndex((entry) => sameName(entry.term, term));
+    if (index >= 0) glossary[index] = { ...glossary[index], meaning };
+    else glossary.push({ id: makeId('term'), term, meaning });
+  }
+  return { ...base, factions, environments, glossary };
+};
+
 export const summarizeReference = (ref: ReferenceItem, full = false) => clean({
   id: ref.id,
   type: ref.type,
@@ -157,6 +207,33 @@ export const summarizeShot = (shot: ShotPrompt, full = false) => clean({
   imageVersions: full && shot.imageVersions?.length ? shot.imageVersions.length : undefined,
   busy: shot.isGenerating || shot.isFilming || undefined,
 });
+
+/** Human words for the Activity center: "project_upsert_shots" → "Writing shots". */
+const AGENT_TOOL_LABELS: Record<string, string> = {
+  project_get_overview: 'Reading the project',
+  project_get_story: 'Reading the story',
+  project_update_story: 'Writing the story',
+  project_update_world: 'Building the world',
+  project_list_references: 'Reading cast and locations',
+  project_upsert_reference: 'Editing cast and locations',
+  project_delete_reference: 'Removing a reference',
+  project_list_shots: 'Reading the storyboard',
+  project_upsert_shots: 'Writing shots',
+  project_delete_shots: 'Removing shots',
+  project_view_image: 'Looking at an image',
+  project_open_phase: 'Opening a phase',
+  project_save: 'Saving the project',
+  project_save_as: 'Saving a copy',
+  project_new: 'Starting a new project',
+  project_open: 'Opening a project',
+  project_list_models: 'Checking models',
+  project_set_models: 'Choosing models',
+  project_generate_shot_images: 'Rendering storyboard frames',
+  project_generate_shot_videos: 'Filming shots',
+  project_generate_reference_image: 'Rendering a reference image',
+  project_generate: 'Running a generation step',
+};
+export const describeAgentTool = (tool?: string) => (tool && AGENT_TOOL_LABELS[tool]) || (tool || 'Working').replace(/^studioAgent/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
 
 // ---------------------------------------------------------------------------
 // Tool declarations (JSON Schema; registerStudioTools passes them through)
@@ -211,6 +288,31 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
         productionGuidelines: str('Production guidelines and constraints.'),
         selectedStyle: str('Visual style description used for every generation.'),
         targetAudience: str('Target audience.'),
+        productionFormat: str('Production format: feature, short, commercial, microdrama (vertical 9:16 episodes), music-video, documentary or social. Sets the storyboard frame and look.'),
+        projectType: str('Script type: teaser, trailer, short, feature, commercial, micro-drama or reelshort.'),
+      },
+    },
+  },
+  {
+    name: 'project_update_world',
+    description: 'Write the World phase (worldbuilding): universe name, genre, tone, era, core conflict, rules, history, technology, look notes, plus factions (power groups), environments (places) and glossary terms — matched by name, only passed fields change. For a contemporary drama, factions are families, companies or circles; rules are the social and legal stakes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        universeName: str('Name of the world / series universe.'),
+        genre: str('Genre.'),
+        tone: str('Tone.'),
+        era: str('Era / time period.'),
+        coreConflict: str('The central conflict of the world.'),
+        magicSystem: str('Supernatural rules (leave empty for realistic worlds).'),
+        technologyLevel: str('Technology level.'),
+        rules: str('Rules of the world: power, money, law, social codes.'),
+        history: str('Backstory of the world.'),
+        factionsSummary: str('How the factions relate.'),
+        lookNotes: str('Art direction for the whole world.'),
+        factions: { type: 'array', items: { type: 'object', properties: { name: str('Name.'), archetype: str('Archetype.'), influence: str('Influence.'), leader: str('Leader.'), agenda: str('Agenda.'), beliefs: str('Beliefs.'), allies: str('Allies.'), rivals: str('Rivals.'), notes: str('Notes.'), color: str('Hex color.') } }, description: 'Factions to add or edit.' },
+        environments: { type: 'array', items: { type: 'object', properties: { name: str('Name.'), containerType: str('region, city, dungeon, settlement, frontier or sanctuary.'), mood: str('Mood.'), purpose: str('Story purpose.'), description: str('Description.'), hazards: str('Dangers.'), resources: str('Resources / secrets.'), notes: str('Notes.') } }, description: 'World places to add or edit.' },
+        glossary: { type: 'array', items: { type: 'object', properties: { term: str('Term.'), meaning: str('Meaning.') } }, description: 'Glossary entries.' },
       },
     },
   },
@@ -275,6 +377,73 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     parameters: { type: 'object', properties: { phase: str('Phase to open.') }, required: ['phase'] },
   },
   {
+    name: 'project_save',
+    description: 'Save the open project to disk. A project that has never been saved needs folderPath (a new, empty folder) and gets the name you pass; after that every change autosaves. A project that already has a folder always saves there — use project_save_as to copy it elsewhere.',
+    parameters: { type: 'object', properties: { folderPath: str('Folder for a never-saved project (absolute path or ~/…).'), name: str('Project name.') } },
+  },
+  {
+    name: 'project_save_as',
+    description: 'Copy the open project into a new, empty folder and continue working there (the old folder keeps its last saved state).',
+    parameters: { type: 'object', properties: { folderPath: str('New folder (absolute path or ~/…).'), name: str('Project name.') }, required: ['folderPath'] },
+  },
+  {
+    name: 'project_open',
+    description: 'Open another saved project folder in the editor (the open project is saved first).',
+    parameters: { type: 'object', properties: { folderPath: str('Project folder containing project.json (absolute path or ~/…).') }, required: ['folderPath'] },
+  },
+  {
+    name: 'project_new',
+    description: 'Start a new, empty project: the open project is saved and closed first. Use this before writing a new script, world or storyboard unless the user asked you to work in the open project. Pass folderPath to save the new project right away.',
+    parameters: { type: 'object', properties: { folderPath: str('Folder for the new project (absolute path or ~/…).'), name: str('Project name.') } },
+  },
+  {
+    name: 'project_list_models',
+    description: 'Image and video models the editor can use (id, label, provider, what each is good for) and which ones are selected for concepts/storyboard and filming.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'project_set_models',
+    description: 'Select the image model (concepts, storyboard frames) and/or the video model (filming) in the editor. Ids come from project_list_models. The user sees the change in the model pickers.',
+    parameters: { type: 'object', properties: { imageModel: str('Image model id.'), videoModel: str('Video model id.') } },
+  },
+  {
+    name: 'project_generate_shot_images',
+    description: 'Render storyboard frames for specific shots, one after another, with the selected image model (or the one you pass). Uses each shot\'s prompt, cast and location references, sketch/pose and continuity. Returns each shot\'s new frame. Spends provider credits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers.' },
+        model: str('Optional image model id to switch to first.'),
+      },
+      required: ['shots'],
+    },
+  },
+  {
+    name: 'project_generate_shot_videos',
+    description: 'Film specific shots from their storyboard frames with the selected video model (or the one you pass). The motion prompt is written automatically if a shot has none. Spends provider credits; video can take minutes per shot.',
+    parameters: {
+      type: 'object',
+      properties: {
+        shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers.' },
+        model: str('Optional video model id to switch to first.'),
+      },
+      required: ['shots'],
+    },
+  },
+  {
+    name: 'project_generate_reference_image',
+    description: 'Render (or re-render) the image of one character, location, product or prop with the selected image model (or the one you pass). An existing image is used as the base, so instruction can describe a change ("same face, add a leather jacket").',
+    parameters: {
+      type: 'object',
+      properties: {
+        referenceId: str('Reference id.'),
+        referenceName: str('Reference name (if no id).'),
+        instruction: str('Optional extra direction appended to the reference prompt.'),
+        model: str('Optional image model id to switch to first.'),
+      },
+    },
+  },
+  {
     name: 'project_generate',
     description: 'Run one of the editor\'s own generation steps with the models chosen in the app (spends the user\'s provider credits): concepts (reference images for cast/locations), environment_angles, director_pass (shot list from the script), apply_director_treatment, storyboard_images, storyboard_videos, write_script (from a brief), improve_script.',
     parameters: {
@@ -314,6 +483,14 @@ export type ProjectAgentAutomation = {
   applyDirectorTreatment: () => Promise<{ detail: string }>;
   generateStoryboardImages: (payload?: { limit?: number }) => Promise<{ detail: string }>;
   generateStoryboardVideos: (payload?: { limit?: number }) => Promise<{ detail: string }>;
+  getModels: () => {
+    image: { current: string; options: Array<{ id: string; label: string; provider: string; goodFor?: string }> };
+    video: { current: string; options: Array<{ id: string; label: string; provider: string; goodFor?: string }> };
+  };
+  setModels: (payload: { imageModel?: string; videoModel?: string }) => { imageModel: string; videoModel: string };
+  generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
+  generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
+  generateReferenceImage: (payload: { referenceId: string; instruction?: string }) => Promise<{ detail: string }>;
 };
 
 export type ProjectAgentContext = {
@@ -323,6 +500,16 @@ export type ProjectAgentContext = {
   setShotPrompts: (update: (prev: ShotPrompt[]) => ShotPrompt[]) => void;
   openPhase: (phase: ProjectAgentPhase) => Promise<void>;
   automation: (phase?: ProjectAgentPhase) => Promise<ProjectAgentAutomation>;
+  /** Save to disk; a project without a folder is created in folderPath. Later edits autosave. */
+  saveProject: (folderPath?: string, name?: string) => Promise<{ folderPath: string; savedAt: string; name: string }>;
+  /** Copy the open project into a new folder and continue there. */
+  saveProjectAs: (folderPath: string, name?: string) => Promise<{ folderPath: string; savedAt: string; name: string }>;
+  /** Save the open project and open another project folder. */
+  openProject: (folderPath: string) => Promise<void>;
+  /** Save the open project, close it and start an empty one. */
+  newProject: () => Promise<void>;
+  /** Resolve after React has rendered the latest state updates (and the hub has re-bound its handlers). */
+  settle: () => Promise<void>;
   /** Image URL → base64 JPEG (downscaled), for project_view_image. */
   loadImage: (url: string, maxSize: number) => Promise<{ base64: string; mimeType: string }>;
 };
@@ -336,13 +523,28 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
   const state = () => ({ ...ctx.getState(), ...pending });
   const settle = () => { setTimeout(() => { pending = {}; }, 0); };
   const makeId = () => `ref-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const shotNumbers = (value: unknown) => {
+    const numbers = (Array.isArray(value) ? value : [value]).filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
+    if (numbers.length === 0) throw new Error('Pass shot numbers.');
+    return [...new Set(numbers)];
+  };
+  /** Select models in the hub and wait until its handlers run with them. */
+  const switchModels = async (models: { imageModel?: string; videoModel?: string }) => {
+    (await ctx.automation()).setModels(models);
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await ctx.settle();
+      const current = (await ctx.automation()).getModels();
+      if ((!models.imageModel || current.image.current === models.imageModel) && (!models.videoModel || current.video.current === models.videoModel)) return;
+    }
+    throw new Error('The editor did not switch models in time.');
+  };
 
   return {
     project_get_overview: async () => {
       const s = state();
       const bible = s.storyBible;
       return {
-        project: clean({ name: s.projectName || bible.title || 'Untitled project', path: s.projectPath || undefined, savedToDisk: Boolean(s.projectPath) }),
+        project: clean({ name: s.projectName || bible.title || 'Untitled project', path: s.projectPath || undefined, savedToDisk: Boolean(s.projectPath), hasContent: Boolean(bible.script?.trim() || s.references.length || s.shotPrompts.length) }),
         story: clean({
           title: bible.title,
           logline: bible.logline || undefined,
@@ -354,7 +556,10 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
         references: s.references.map((ref) => summarizeReference(ref)),
         shots: s.shotPrompts.map((shot) => summarizeShot(shot)),
         editor: { workspace: s.activeWorkspace, phase: s.activePhase },
-        hint: s.projectPath ? 'Changes autosave to the project file.' : 'The project is not saved to a folder yet; ask the user to save it (changes still show in the editor).',
+        hint: [
+          s.projectPath ? 'Changes autosave to the project file.' : 'The project is not saved to a folder yet (project_save with a folderPath).',
+          (bible.script?.trim() || s.references.length || s.shotPrompts.length) ? 'This is the user\'s open project with content: only change it if they asked you to; otherwise use project_new.' : null,
+        ].filter(Boolean).join(' '),
       };
     },
 
@@ -370,12 +575,21 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
         targetAudience: b.targetAudience,
         projectType: b.projectType,
         characters: b.characters,
+        world: b.worldbuilding ? clean({
+          universeName: b.worldbuilding.universeName || undefined,
+          tone: b.worldbuilding.tone || undefined,
+          coreConflict: b.worldbuilding.coreConflict || undefined,
+          factions: b.worldbuilding.factions.map((faction) => faction.name),
+          environments: b.worldbuilding.environments.map((env) => env.name),
+        }) : undefined,
       });
     },
 
     project_update_story: async (args: Record<string, unknown>) => {
-      const fields = ['title', 'logline', 'script', 'plotBeats', 'productionGuidelines', 'selectedStyle', 'targetAudience'] as const;
+      const fields = ['title', 'logline', 'script', 'plotBeats', 'productionGuidelines', 'selectedStyle', 'targetAudience', 'productionFormat', 'projectType'] as const;
       const patch = clean(Object.fromEntries(fields.map((field) => [field, asString(args[field])]))) as Partial<StoryBible>;
+      if (patch.productionFormat && !PRODUCTION_FORMAT_IDS.includes(patch.productionFormat)) throw new Error(`productionFormat must be one of ${PRODUCTION_FORMAT_IDS.join(', ')}.`);
+      if (patch.projectType && !PROJECT_TYPES.includes(patch.projectType)) throw new Error(`projectType must be one of ${PROJECT_TYPES.join(', ')}.`);
       if (Object.keys(patch).length === 0) throw new Error(`Pass at least one of: ${fields.join(', ')}.`);
       const prev = state().storyBible;
       const next: StoryBible = { ...prev, ...patch };
@@ -389,6 +603,16 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       ctx.setStoryBible(() => next);
       settle();
       return { ok: true, updated: Object.keys(patch) };
+    },
+
+    project_update_world: async (args: Record<string, unknown>) => {
+      const prev = state().storyBible;
+      const world = mergeWorld(prev.worldbuilding, args, (prefix) => `${prefix}-agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
+      const next: StoryBible = { ...prev, worldbuilding: world };
+      pending.storyBible = next;
+      ctx.setStoryBible(() => next);
+      settle();
+      return { ok: true, universeName: world.universeName, factions: world.factions.map((faction) => faction.name), environments: world.environments.map((env) => env.name), glossary: world.glossary.length };
     },
 
     project_list_references: async (args: Record<string, unknown>) => {
@@ -467,6 +691,120 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       if (!phase || !PROJECT_AGENT_PHASES.includes(phase)) throw new Error(`phase must be one of ${PROJECT_AGENT_PHASES.join(', ')}.`);
       await ctx.openPhase(phase);
       return { ok: true, phase };
+    },
+
+    project_save: async (args: Record<string, unknown>) => {
+      const s = state();
+      const folder = asString(args.folderPath);
+      if (!s.projectPath && !folder) throw new Error('This project has no folder yet: pass folderPath (and a name).');
+      if (s.projectPath && folder && folder.replace(/\/+$/, '') !== s.projectPath.replace(/\/+$/, '')) {
+        throw new Error(`The open project is already saved at ${s.projectPath}. Use project_save_as to copy it to ${folder}, or project_new to start a separate project.`);
+      }
+      await ctx.settle();
+      const result = await ctx.saveProject(s.projectPath ? undefined : folder, asString(args.name));
+      return { ok: true, ...result };
+    },
+
+    project_save_as: async (args: Record<string, unknown>) => {
+      const folder = asString(args.folderPath);
+      if (!folder) throw new Error('Pass folderPath.');
+      await ctx.settle();
+      const result = await ctx.saveProjectAs(folder, asString(args.name));
+      return { ok: true, ...result, note: 'You are now working in the new folder.' };
+    },
+
+    project_open: async (args: Record<string, unknown>) => {
+      const folder = asString(args.folderPath);
+      if (!folder) throw new Error('Pass folderPath.');
+      await ctx.settle();
+      await ctx.openProject(folder);
+      pending = {};
+      const s = ctx.getState();
+      return { ok: true, project: s.projectName || s.storyBible.title || folder, path: s.projectPath, shots: s.shotPrompts.length, references: s.references.length };
+    },
+
+    project_new: async (args: Record<string, unknown>) => {
+      const before = state();
+      await ctx.newProject();
+      pending = {};
+      const folder = asString(args.folderPath);
+      const saved = folder ? await ctx.saveProject(folder, asString(args.name)) : null;
+      return { ok: true, closed: before.projectPath || before.projectName || null, saved };
+    },
+
+    project_list_models: async () => {
+      const models = (await ctx.automation()).getModels();
+      return {
+        image: { selected: models.image.current, options: models.image.options },
+        video: { selected: models.video.current, options: models.video.options },
+      };
+    },
+
+    project_set_models: async (args: Record<string, unknown>) => {
+      const imageModel = asString(args.imageModel);
+      const videoModel = asString(args.videoModel);
+      if (!imageModel && !videoModel) throw new Error('Pass imageModel and/or videoModel.');
+      await switchModels({ imageModel, videoModel });
+      const current = (await ctx.automation()).getModels();
+      return { ok: true, imageModel: current.image.current, videoModel: current.video.current };
+    },
+
+    project_generate_shot_images: async (args: Record<string, unknown>) => {
+      const shots = shotNumbers(args.shots);
+      if (asString(args.model)) await switchModels({ imageModel: asString(args.model) });
+      const results = [];
+      for (const shot of shots) {
+        const before = state().shotPrompts.find((entry) => entry.shot === shot);
+        if (!before) { results.push({ shot, ok: false, error: `No shot ${shot}.` }); continue; }
+        try {
+          const bindings = await ctx.automation('storyboard');
+          const { detail } = await bindings.generateShotImage({ shot });
+          await ctx.settle();
+          const after = ctx.getState().shotPrompts.find((entry) => entry.shot === shot);
+          const changed = Boolean(after?.imageUrl && after.imageUrl !== before.imageUrl);
+          results.push(changed
+            ? { shot, ok: true, detail, imageUrl: describeMediaUrl(after?.imageUrl) }
+            : { shot, ok: false, error: 'No new frame was produced (check the shot prompt and the selected model).' });
+        } catch (error) {
+          results.push({ shot, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return { results, hint: 'Use project_view_image to look at a frame.' };
+    },
+
+    project_generate_shot_videos: async (args: Record<string, unknown>) => {
+      const shots = shotNumbers(args.shots);
+      if (asString(args.model)) await switchModels({ videoModel: asString(args.model) });
+      const results = [];
+      for (const shot of shots) {
+        const before = state().shotPrompts.find((entry) => entry.shot === shot);
+        if (!before) { results.push({ shot, ok: false, error: `No shot ${shot}.` }); continue; }
+        try {
+          const bindings = await ctx.automation('filming');
+          const { detail } = await bindings.generateShotVideo({ shot });
+          await ctx.settle();
+          const after = ctx.getState().shotPrompts.find((entry) => entry.shot === shot);
+          const changed = Boolean(after?.videoUrl && after.videoUrl !== before.videoUrl);
+          results.push(changed
+            ? { shot, ok: true, detail, videoUrl: describeMediaUrl(after?.videoUrl) }
+            : { shot, ok: false, error: before.imageUrl || before.startFrameUrl ? 'No new video was produced.' : 'The shot has no storyboard frame yet; render it first (project_generate_shot_images).' });
+        } catch (error) {
+          results.push({ shot, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return { results };
+    },
+
+    project_generate_reference_image: async (args: Record<string, unknown>) => {
+      const ref = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName) });
+      if (!ref) throw new Error('No reference with that id or name.');
+      if (asString(args.model)) await switchModels({ imageModel: asString(args.model) });
+      const bindings = await ctx.automation('concept');
+      const { detail } = await bindings.generateReferenceImage({ referenceId: ref.id, instruction: asString(args.instruction) });
+      await ctx.settle();
+      const after = findReference(ctx.getState().references, { id: ref.id });
+      if (!after?.imageUrl || after.imageUrl === ref.imageUrl) throw new Error('No new reference image was produced.');
+      return { ok: true, detail, reference: summarizeReference(after, true) };
     },
 
     project_generate: async (args: Record<string, unknown>) => {

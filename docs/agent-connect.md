@@ -45,15 +45,25 @@ tools …) plus the Project Space tools in `src/services/projectAgentTools.ts`:
 | Tool | Does |
 |---|---|
 | `project_get_overview` | Title, logline, style, cast/locations/props, shots with frame/video URLs, current phase |
-| `project_get_story` / `project_update_story` | Story bible and script (the previous script is kept as a revision) |
+| `project_get_story` / `project_update_story` | Story bible and script (the previous script is kept as a revision), production format (microdrama = 9:16 storyboard) and project type |
+| `project_update_world` | World phase: universe, tone, era, core conflict, rules, history, look, factions, places, glossary (merged by name) |
 | `project_list_references` / `project_upsert_reference` / `project_delete_reference` | Characters, environments, products, props; `imageUrl` / `imagePath` adds a selected image version |
 | `project_list_shots` / `project_upsert_shots` / `project_delete_shots` | Storyboard shots; merge by shot number or `replace: true`; attach frames and videos |
 | `project_view_image` | Returns a frame or reference image (≤1024 px) as MCP image content |
 | `project_open_phase` | Shows script, concept, storyboard, filming … to the user |
+| `project_new` / `project_open` / `project_save` / `project_save_as` | Start a fresh project (the open one is saved first), open a project folder, save (a saved project only ever saves to its own folder), copy to a new folder. Folders that already hold a `project.json` are refused. |
+| `project_list_models` / `project_set_models` | Image and video models with what each is good for; selects them in the editor's pickers |
+| `project_generate_shot_images` / `project_generate_shot_videos` / `project_generate_reference_image` | Render or film specific shots, or one character/location/prop, optionally with a model; returns the new URLs and the hub's error if it failed |
 | `project_generate` | The app's own steps with the models chosen in the app: concepts, environment angles, director pass, storyboard images/videos, write/improve script |
 
-Local file paths in any `…Path` argument become `file://` URLs before the call reaches the
-renderer. Edits go through the history stacks, so the user can undo them.
+Local media paths (`imagePath`, `videoPath`, `filePath`, …) become `file://` URLs before the call reaches the
+renderer; `folderPath` gets `~` expanded. Edits go through the history stacks, so the user can undo them.
+
+## Safety and visibility
+
+- The open project belongs to the user. The server instructions and `project_get_overview` (`hasContent`) tell agents to start their own project with `project_new` unless asked to edit the open one.
+- Every call shows up in the Activity center as "Claude Code · Writing shots" (client name from the MCP `initialize`, kept per session; the stdio bridge forwards the session id).
+- Errors the Project Hub would only show in its banner are returned to the agent.
 
 ## Pieces
 

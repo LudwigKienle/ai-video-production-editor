@@ -148,6 +148,19 @@ export type ProjectHubStudioAutomationBindings = {
     applyDirectorTreatment: () => Promise<{ detail: string; shotCount: number }>;
     generateStoryboardImages: (payload?: { limit?: number }) => Promise<{ detail: string; generatedCount: number }>;
     generateStoryboardVideos: (payload?: { limit?: number }) => Promise<{ detail: string; generatedCount: number }>;
+    /** Image and video model pickers: current choice and every option. */
+    getModels: () => ProjectHubModelCatalog;
+    setModels: (payload: { imageModel?: string; videoModel?: string }) => { imageModel: string; videoModel: string };
+    /** One shot's storyboard frame / video, or one reference image, with the selected models. Throws with the hub's error. */
+    generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
+    generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
+    generateReferenceImage: (payload: { referenceId: string; instruction?: string }) => Promise<{ detail: string }>;
+};
+
+export type ProjectHubModelOption = { id: string; label: string; provider: string; goodFor?: string };
+export type ProjectHubModelCatalog = {
+    image: { current: string; options: ProjectHubModelOption[] };
+    video: { current: string; options: ProjectHubModelOption[] };
 };
 
 interface ProjectHubWorkspaceProps {
@@ -4094,7 +4107,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const [conceptPropSubtab, setConceptPropSubtab] = useState<ConceptPropSubtab>(() => storedUiPrefs.conceptPropSubtab || 'base_ref');
     const [conceptBrandingSubtab, setConceptBrandingSubtab] = useState<ConceptBrandingSubtab>(() => storedUiPrefs.conceptBrandingSubtab || 'base_ref');
     const [isLoading, setIsLoading] = useState<string | boolean>(false);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setErrorState] = useState<string | null>(null);
+    // The latest error, readable right away: agent bindings report it instead of a silent "done".
+    const lastErrorRef = useRef<string | null>(null);
+    const setError = useCallback((value: string | null) => {
+        lastErrorRef.current = value;
+        setErrorState(value);
+    }, []);
     const [scriptInputMode, setScriptInputMode] = useState<'paste' | 'generate'>('paste');
     const [scriptGenerationPrompt, setScriptGenerationPrompt] = useState('');
 
@@ -4152,6 +4171,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const requiresShotAudio = videoModel === 'aurora-fal' || videoModel === 'ltx-audio-to-video';
     const isSeedanceStoryboardPanelModel = videoModel === 'seedance-1.5-pro' || videoModel === 'seedance-2.0-fal' || videoModel === 'seedance-2.5-i2v-fal';
     const [referenceAspectRatio, setReferenceAspectRatio] = useState<AspectRatioOption>('16:9');
+    // A production format brings its frame: Microdrama storyboards in 9:16, a feature in 16:9.
+    useEffect(() => {
+        if (!storyBible.productionFormat) return;
+        const formatAspect = getProductionFormat(storyBible.productionFormat).aspectRatio as AspectRatioOption | undefined;
+        if (formatAspect) setReferenceAspectRatio(formatAspect);
+    }, [storyBible.productionFormat]);
     const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
     const seedreamSize = imageSize === '4K' ? '4K' : '2K';
     const [useGeminiContextMemory, setUseGeminiContextMemory] = useState<boolean>(() => storedUiPrefs.useGeminiContextMemory ?? true);
@@ -13111,10 +13136,51 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return targets;
     };
 
+    const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel });
+    agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel };
+
+    /** Run a hub action and turn the error it would only show in the UI into a thrown error. */
+    const runReportingErrors = async (action: () => Promise<unknown>) => {
+        lastErrorRef.current = null;
+        await action();
+        if (lastErrorRef.current) throw new Error(lastErrorRef.current);
+    };
+
     useEffect(() => {
         if (!onBindStudioAutomation) return undefined;
 
+        const toOption = (option: { id: string; label: string; provider: string; goodFor?: string }) => ({ id: option.id, label: option.label, provider: option.provider, goodFor: option.goodFor });
         onBindStudioAutomation({
+            getModels: () => ({
+                image: { current: agentHandlersRef.current.referenceImageModel, options: REFERENCE_MODEL_OPTIONS.map(toOption) },
+                video: { current: agentHandlersRef.current.videoModel, options: FILMING_VIDEO_MODEL_OPTIONS.map(toOption) },
+            }),
+            setModels: ({ imageModel, videoModel: nextVideoModel }) => {
+                if (imageModel !== undefined) {
+                    if (!REFERENCE_MODEL_OPTIONS.some((option) => option.id === imageModel)) throw new Error(`Unknown image model: ${imageModel}. Use project_list_models.`);
+                    setReferenceImageModel(imageModel as ReferenceImageModel);
+                }
+                if (nextVideoModel !== undefined) {
+                    if (!FILMING_VIDEO_MODEL_OPTIONS.some((option) => option.id === nextVideoModel)) throw new Error(`Unknown video model: ${nextVideoModel}. Use project_list_models.`);
+                    setVideoModel(nextVideoModel as FilmingVideoModel);
+                }
+                return {
+                    imageModel: imageModel ?? agentHandlersRef.current.referenceImageModel,
+                    videoModel: nextVideoModel ?? agentHandlersRef.current.videoModel,
+                };
+            },
+            generateShotImage: async ({ shot }) => {
+                await runReportingErrors(() => agentHandlersRef.current.handleGenerateShotImage(shot));
+                return { detail: `Shot ${shot} rendered with ${REFERENCE_MODEL_LABELS[agentHandlersRef.current.referenceImageModel] || agentHandlersRef.current.referenceImageModel}.` };
+            },
+            generateShotVideo: async ({ shot }) => {
+                await runReportingErrors(() => agentHandlersRef.current.handleGenerateShotVideo(shot));
+                return { detail: `Shot ${shot} filmed with ${FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === agentHandlersRef.current.videoModel)?.label || agentHandlersRef.current.videoModel}.` };
+            },
+            generateReferenceImage: async ({ referenceId, instruction }) => {
+                await runReportingErrors(() => agentHandlersRef.current.regenerateReferenceImage(referenceId, instruction ? { promptSuffix: instruction } : undefined));
+                return { detail: `Reference image rendered with ${REFERENCE_MODEL_LABELS[agentHandlersRef.current.referenceImageModel] || agentHandlersRef.current.referenceImageModel}.` };
+            },
             writeProjectScript: async ({ prompt, length, mode }) => {
                 const result = await runWriteProjectScript({ prompt, length, mode });
                 return result;

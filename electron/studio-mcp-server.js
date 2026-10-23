@@ -31,6 +31,20 @@ let callSeq = 0;
 const pendingCalls = new Map();
 const toolWaiters = new Set();
 const activity = [];
+/** MCP session id → the client's own name from initialize (claude-code, codex-mcp-client, claude-ai …). */
+const sessions = new Map();
+
+const CLIENT_LABELS = [
+  [/claude[-_ ]?code|claude-agent/i, 'Claude Code'],
+  [/codex/i, 'Codex'],
+  [/claude/i, 'Claude'],
+  [/cursor/i, 'Cursor'],
+];
+const labelForClient = (name) => {
+  if (!name) return 'Agent';
+  const match = CLIENT_LABELS.find(([pattern]) => pattern.test(name));
+  return match ? match[1] : name;
+};
 
 ipcMain.handle('studioTools:register', (_event, list) => {
   tools = Array.isArray(list) ? list : [];
@@ -57,15 +71,21 @@ const waitForTools = () => (tools.length > 0
     toolWaiters.add(done);
   }));
 
-/** Local files become file:// URLs the renderer can load (webSecurity is off for local media). */
+const MEDIA_PATH_KEY = /^(file|image|video|audio|sketch|mask|frame|startFrame|endFrame)Path$/;
+const FOLDER_KEY = /^(folder|directory|projectFolder|outputFolder)(Path)?$/;
+const expandHome = (value) => path.resolve(value.replace(/^~(?=$|\/)/, os.homedir()));
+
+/** Local media files become file:// URLs the renderer can load (webSecurity is off for local media); folders get ~ expanded. */
 const resolveFileArgs = (args) => {
   if (!args || typeof args !== 'object') return args || {};
   const out = Array.isArray(args) ? [...args] : { ...args };
   for (const [key, value] of Object.entries(out)) {
-    if (typeof value === 'string' && /(^filePath$|Path$)/.test(key) && value && !/^(https?|data|file|blob):/i.test(value)) {
-      const absolute = path.resolve(value.replace(/^~(?=$|\/)/, os.homedir()));
+    if (typeof value === 'string' && value && MEDIA_PATH_KEY.test(key) && !/^(https?|data|file|blob):/i.test(value)) {
+      const absolute = expandHome(value);
       if (!fs.existsSync(absolute)) throw new Error(`File not found: ${absolute}`);
       out[key] = pathToFileURL(absolute).href;
+    } else if (typeof value === 'string' && value && FOLDER_KEY.test(key)) {
+      out[key] = expandHome(value);
     } else if (value && typeof value === 'object') {
       out[key] = resolveFileArgs(value);
     }
@@ -73,15 +93,19 @@ const resolveFileArgs = (args) => {
   return out;
 };
 
-const recordActivity = (entry) => {
-  activity.unshift({ ...entry, at: new Date().toISOString() });
-  activity.length = Math.min(activity.length, 50);
+const broadcast = (event) => {
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send('studioConnect:activity', activity[0]);
+    if (!window.isDestroyed()) window.webContents.send('studioConnect:activity', event);
   }
 };
 
-const callTool = (name, args, source = 'agent') => new Promise((resolve, reject) => {
+const recordActivity = (entry) => {
+  activity.unshift({ ...entry, phase: 'end', at: new Date().toISOString() });
+  activity.length = Math.min(activity.length, 50);
+  broadcast(activity[0]);
+};
+
+const callTool = (name, args, source = 'agent', client = null) => new Promise((resolve, reject) => {
   const target = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.isVisible()) || BrowserWindow.getAllWindows()[0];
   if (!target) return reject(new Error('No editor window to run the tool in.'));
   let resolvedArgs;
@@ -90,14 +114,23 @@ const callTool = (name, args, source = 'agent') => new Promise((resolve, reject)
   } catch (error) {
     return reject(error);
   }
+  // Saving into a folder that already holds a project would overwrite it.
+  if (['project_save', 'project_save_as', 'project_new'].includes(name) && resolvedArgs.folderPath && fs.existsSync(path.join(resolvedArgs.folderPath, 'project.json'))) {
+    return reject(new Error(`${resolvedArgs.folderPath} already contains a project. Pick a new folder.`));
+  }
+  if (name === 'project_open' && resolvedArgs.folderPath && !fs.existsSync(path.join(resolvedArgs.folderPath, 'project.json'))) {
+    return reject(new Error(`No project.json in ${resolvedArgs.folderPath}.`));
+  }
   const callId = `call-${++callSeq}`;
+  const clientLabel = source === 'api' ? 'Script' : labelForClient(client);
+  broadcast({ phase: 'start', callId, tool: name, source, client: clientLabel, at: new Date().toISOString() });
   const timer = setTimeout(() => {
     pendingCalls.delete(callId);
     reject(new Error(`Tool ${name} timed out.`));
   }, CALL_TIMEOUT_MS);
   pendingCalls.set(callId, {
-    resolve: (value) => { recordActivity({ tool: name, source, ok: true }); resolve(value); },
-    reject: (error) => { recordActivity({ tool: name, source, ok: false, error: error.message }); reject(error); },
+    resolve: (value) => { recordActivity({ callId, tool: name, source, client: clientLabel, ok: true }); resolve(value); },
+    reject: (error) => { recordActivity({ callId, tool: name, source, client: clientLabel, ok: false, error: error.message }); reject(error); },
     timer,
   });
   target.webContents.send('studioTools:call', { callId, name, args: resolvedArgs, source });
@@ -120,7 +153,8 @@ const rpcError = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, me
 
 const INSTRUCTIONS = [
   'These tools operate the AI Video Production Editor that is open on this machine. Everything you change is saved in the open project and shows up in the editor immediately, so the user can watch and take over.',
-  'Start with project_get_overview. Project Space tools (project_*) read and write the script, story bible, cast/locations/props (references) and storyboard shots; project_open_phase shows a phase to the user.',
+  'Start with project_get_overview. Project Space tools (project_*) read and write the script, story bible, world, cast/locations/props (references) and storyboard shots; project_open_phase shows a phase to the user.',
+  'The open project belongs to the user: if it already has content and they did not ask you to change it, start your own with project_new (it saves and closes theirs first).',
   'To attach media you made elsewhere, pass an https URL, a data URL or a local file path (imagePath / videoPath).',
   'Generation tools spend the user\'s provider credits; say what you are about to generate before large batches.',
   'Prefer these tools over editing project files on disk.',
@@ -128,10 +162,11 @@ const INSTRUCTIONS = [
 
 const textResult = (result) => (typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }, null, 2));
 
-const handleRpc = async (message) => {
+const handleRpc = async (message, context = {}) => {
   const { id, method, params } = message;
   switch (method) {
     case 'initialize':
+      if (context.sessionId) sessions.set(context.sessionId, (params && params.clientInfo && params.clientInfo.name) || null);
       return rpcResult(id, {
         protocolVersion: (params && params.protocolVersion) || '2025-06-18',
         capabilities: { tools: { listChanged: false } },
@@ -152,7 +187,7 @@ const handleRpc = async (message) => {
       const known = tools.find((tool) => tool.name === name);
       if (!known) return rpcError(id, -32602, `Unknown tool: ${name}`);
       try {
-        const result = await callTool(name, params.arguments, 'mcp');
+        const result = await callTool(name, params.arguments, 'mcp', sessions.get(context.sessionId) || null);
         // Tools may return MCP content blocks directly (e.g. project_view_image returns an image).
         const content = result && Array.isArray(result.__mcpContent) ? result.__mcpContent : [{ type: 'text', text: textResult(result) }];
         return rpcResult(id, { content, isError: false });
@@ -213,14 +248,19 @@ const handleMcp = async (req, res) => {
   if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
   const body = JSON.parse((await readBody(req)) || 'null');
   const messages = Array.isArray(body) ? body : [body];
+  // Each initialize opens a session (so tool calls can be shown as "Claude Code is …"); clients echo the id.
+  const isInitialize = messages.some((message) => message && message.method === 'initialize');
+  let sessionId = String(req.headers['mcp-session-id'] || '');
+  if (isInitialize || !sessionId) sessionId = crypto.randomBytes(12).toString('hex');
+  if (sessions.size > 200) sessions.delete(sessions.keys().next().value);
   const responses = [];
   for (const message of messages) {
     if (!message || typeof message !== 'object') continue;
-    const response = await handleRpc(message);
+    const response = await handleRpc(message, { sessionId });
     if (response && message.id !== undefined) responses.push(response);
   }
-  if (responses.length === 0) { res.writeHead(202); res.end(); return; }
-  sendJson(res, 200, Array.isArray(body) ? responses : responses[0], { 'Mcp-Session-Id': 'studio' });
+  if (responses.length === 0) { res.writeHead(202, { 'Mcp-Session-Id': sessionId }); res.end(); return; }
+  sendJson(res, 200, Array.isArray(body) ? responses : responses[0], { 'Mcp-Session-Id': sessionId });
 };
 
 const handleRequest = async (req, res) => {

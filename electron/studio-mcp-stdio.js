@@ -25,6 +25,8 @@ const readDiscovery = () => {
   return null;
 };
 
+let sessionId = null;
+
 const post = (info, payload) => new Promise((resolve, reject) => {
   const url = new URL(info.mcpUrl);
   const body = Buffer.from(JSON.stringify(payload));
@@ -38,8 +40,10 @@ const post = (info, payload) => new Promise((resolve, reject) => {
       Accept: 'application/json, text/event-stream',
       Authorization: `Bearer ${info.token}`,
       'Content-Length': body.length,
+      ...(sessionId ? { 'Mcp-Session-Id': sessionId } : {}),
     },
   }, (res) => {
+    if (res.headers['mcp-session-id']) sessionId = String(res.headers['mcp-session-id']);
     const chunks = [];
     res.on('data', (chunk) => chunks.push(chunk));
     res.on('end', () => {
