@@ -24,3 +24,14 @@ test('the previous shot of the first shot of scene 1 is nothing, not the last sh
   assert.equal(nextInScreenOrder(shots, 151)?.shot, 20);
   assert.equal(nextInScreenOrder(shots, 151, { sameScene: true }), null);
 });
+
+test('the establishing shot of the scene is found by its wide framing', async () => {
+  const { establishingShotOf } = await import('./shotOrder.ts');
+  const scene = [
+    { shot: 149, sceneNumber: 1, sceneShotNumber: 1, description: '0:00 Hook — champagne pours over her face', prompt: 'Extreme close-up', imageUrl: 'a' },
+    { shot: 151, sceneNumber: 1, sceneShotNumber: 3, description: 'Wide: the party, Nora kneeling', prompt: 'High wide shot', imageUrl: 'c' },
+    { shot: 20, sceneNumber: 2, sceneShotNumber: 1, description: 'Wide: the office', prompt: 'wide', imageUrl: 'd' },
+  ];
+  assert.equal(establishingShotOf(scene, 149)?.shot, 151);
+  assert.equal(establishingShotOf(scene, 151), null);
+});

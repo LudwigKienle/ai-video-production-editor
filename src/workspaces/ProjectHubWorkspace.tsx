@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
 import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
-import { nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
+import { establishingShotOf, nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
 import { buildVisualContinuityPrompt, toShotContinuityReview, type ContinuityImageRole } from '../utils/visualContinuity';
 import {
     reviewShotVisualContinuity,
@@ -10999,6 +10999,10 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const sources: Array<{ role: ContinuityImageRole; url: string; label: string }> = [{ role: 'current', url: frameUrl, label: `current frame — shot ${label(shot)}` }];
         if (previous?.imageUrl) sources.push({ role: 'previous', url: previous.imageUrl, label: `previous shot on screen — ${label(previous)}` });
         if (next?.imageUrl) sources.push({ role: 'next', url: next.imageUrl, label: `next shot on screen — ${label(next)}` });
+        const establishing = establishingShotOf(list, shotNumber, hasFrame);
+        if (establishing?.imageUrl && establishing.shot !== previous?.shot && establishing.shot !== next?.shot) {
+            sources.push({ role: 'establishing', url: establishing.imageUrl, label: `establishing wide shot of this scene — ${label(establishing)}: the geography every shot must match` });
+        }
         resolveShotReferenceImages(shot, aligned, shot.outfitSelections).slice(0, 6).forEach((item) => {
             sources.push({ role: item.kind === 'environment' ? 'location' : item.kind, url: item.url, label: `${item.kind} reference — ${item.label}` });
         });
@@ -11284,6 +11288,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             } else if (usePreviousShotContext && previousShot?.imageUrl) {
                 pushReferenceUrl(previousShot.imageUrl);
                 contextPromptBits.push('Maintain continuity with the previous shot: match lighting, time of day, and camera placement.');
+            }
+            // Close shots need the scene's geography: who kneels where, where the crowd stands.
+            const establishingForRender = establishingShotOf(shotPrompts, shotNumber, (entry) => Boolean(entry.imageUrl));
+            if (establishingForRender?.imageUrl && establishingForRender.shot !== previousShot?.shot) {
+                pushReferenceUrl(establishingForRender.imageUrl);
+                contextPromptBits.push('One reference image is the establishing wide shot of this scene: keep where everyone stands, sits or kneels, their postures, the crowd and the light consistent with it, but frame this shot as described');
             }
             const shotEnvironmentRef = alignedShot.environment
                 ? references.find((r) => r.type === 'environment' && r.imageUrl && matchesRefName(r.name, alignedShot.environment || ''))

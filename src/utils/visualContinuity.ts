@@ -10,7 +10,7 @@ export const CONTINUITY_CATEGORIES = [
 ] as const;
 export type ContinuityCategory = typeof CONTINUITY_CATEGORIES[number];
 
-export type ContinuityImageRole = 'current' | 'previous' | 'next' | 'character' | 'outfit' | 'location' | 'prop';
+export type ContinuityImageRole = 'current' | 'previous' | 'next' | 'establishing' | 'character' | 'outfit' | 'location' | 'prop';
 
 export type VisualContinuityInput = {
   shot: {
@@ -67,7 +67,7 @@ Check, in this order:
 5. lighting — same time of day, light direction and colour as the previous shot of the scene.
 6. screen_direction — the 180° rule: characters keep their left/right sides across the cut; in a shot/reverse-shot pair the two characters look in OPPOSITE screen directions. If the previous shot of the same scene shows A on the left looking right, a reverse on A shows B looking left.
 7. eyeline — characters look at who/what they should (up/down, left/right) given positions and heights. Postures carry across the cut: someone kneeling or sitting in the previous shot is still low in this one, and the camera height and eye heights must agree with that (a kneeling character's head is not level with a standing one's chest).
-8. staging — the action and blocking the script and description ask for (who stands where, who holds what, who is kneeling). The space must be physically plausible: an elevator cab, car or closet is enclosed, and only the people who are in it can be in it; nobody appears who cannot be there at this moment.
+8. staging — the action and blocking the script and description ask for (who stands where, who holds what, who is kneeling). If an establishing/wide shot of the scene is attached, it defines the geography: every shot must agree with it — who stands, sits or kneels where, which way they face, where the crowd is, and therefore the camera height and what is behind each character. The space must be physically plausible: an elevator cab, car or closet is enclosed, and only the people who are in it can be in it; nobody appears who cannot be there at this moment.
    For inserts and details the shot exists to show (an engraving, a document, a screen), that detail must be clearly visible — if it is not, that is a medium issue at least.
 9. text — any readable text (badges, signs, documents) says exactly what it should, no extra or wrong words.
 10. framing — shot size and angle match the intended framing; vertical ${input.aspectRatio || ''} composition works.

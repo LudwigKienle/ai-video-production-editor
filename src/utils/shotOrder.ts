@@ -50,3 +50,22 @@ export const shotsBeforeInScreenOrder = <T extends Pick<ShotPrompt, 'shot' | 'sc
   const index = ordered.findIndex((shot) => shot.shot === shotNumber);
   return index <= 0 ? [] : ordered.slice(0, index).reverse();
 };
+
+const ESTABLISHING = /\b(wide|establishing|master|full shot|long shot|extreme wide)\b/i;
+
+/**
+ * The scene's establishing / wide shot: it defines the geography (who stands, sits or kneels
+ * where, where the crowd is) that every other shot of the scene has to agree with.
+ */
+export const establishingShotOf = <T extends Pick<ShotPrompt, 'shot' | 'sceneNumber' | 'sceneShotNumber' | 'description' | 'prompt' | 'shotTypePresetId'>>(
+  shots: T[],
+  shotNumber: number,
+  where?: (shot: T) => boolean,
+): T | null => {
+  const current = shots.find((shot) => shot.shot === shotNumber);
+  if (!current || !Number.isFinite(current.sceneNumber)) return null;
+  return screenOrder(shots).find((shot) => shot.shot !== shotNumber
+    && shot.sceneNumber === current.sceneNumber
+    && (!where || where(shot))
+    && ESTABLISHING.test([shot.shotTypePresetId, shot.description?.slice(0, 40), shot.prompt?.slice(0, 60)].filter(Boolean).join(' '))) || null;
+};
