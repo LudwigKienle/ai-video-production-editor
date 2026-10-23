@@ -113,3 +113,11 @@ test('uses the angle nearest to the shot yaw and falls back to the base image', 
   assert.equal(pickReferenceImageForYaw(reference, 0), 'base.png');
   assert.equal(pickReferenceImageForYaw(reference, undefined), 'base.png');
 });
+
+test('a party location keeps its crowd in new views; an empty office stays empty', async () => {
+  const { environmentHasCrowd, environmentPeopleClause } = await import('./environmentWorldModel.ts');
+  assert.equal(environmentHasCrowd('Penthouse ballroom, champagne tower, elegant guests in evening wear'), true);
+  assert.equal(environmentHasCrowd('Glass office, desk, skyline at night'), false);
+  assert.match(environmentPeopleClause('engagement party'), /crowd/);
+  assert.equal(environmentPeopleClause('janitor closet with shelves'), 'empty set, no people');
+});

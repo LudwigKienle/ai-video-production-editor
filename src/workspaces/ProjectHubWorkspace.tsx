@@ -98,7 +98,7 @@ import { parsePdfScript, extractPdfPageImages } from '../services/pdfParsingServ
 import { parseScriptDocument } from '../services/documentParsingService';
 import { getBase64FromUrl, fileToBase64, getVideoDuration } from '../utils/helpers';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes as splitScriptIntoSceneBlocks } from '../utils/directorScenes';
-import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, pickEnvironmentViews, pickReferenceImageForYaw, yawDistance } from '../utils/environmentWorldModel';
+import { applyGeneratedWorldToEnvironmentReference, buildEnvironmentWorldPrompt, buildSetDesignAssetForEnvironmentBlockout, buildSetDesignAssetForEnvironmentWorld, MARBLE_VIEW_AZIMUTH, environmentPeopleClause, pickEnvironmentViews, pickReferenceImageForYaw, yawDistance } from '../utils/environmentWorldModel';
 import type { EnvironmentViewSlot } from '../utils/environmentWorldModel';
 import { appendConceptReferenceToShotContext } from '../utils/shotContextComposer';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
@@ -11047,7 +11047,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 ? 'reverse angle: the camera has turned around to show the opposite side of the same space — what was behind the camera in the reference'
                 : 'the camera has moved around the same space to this new direction',
             note || '',
-            reference.type === 'environment' ? 'empty set, no people' : 'same character, same outfit',
+            reference.type === 'environment'
+                ? environmentPeopleClause([reference.description, reference.prompt, note].filter(Boolean).join(' '))
+                : 'same character, same outfit',
             'same exact identity, architecture, materials, colours and lighting as the reference',
             stylePrompt,
         ].filter(Boolean).join('. ');
@@ -11262,10 +11264,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             };
             const contextPromptBits: string[] = [];
 
-            if (usePreviousShotContext && previousShot?.imageUrl) {
+            // A reverse angle (camera turned ≥90° from the previous shot) must not copy the previous
+            // frame's camera placement or background — that is what flipped reverse shots across the line.
+            const isReverseOfPrevious = Boolean(previousShot && alignedShot.environment
+                && previousShot.environment === alignedShot.environment
+                && yawDistance(shot.cameraYaw ?? 0, previousShot.cameraYaw ?? 0) >= 90);
+            if (isReverseOfPrevious) {
+                contextPromptBits.push('Reverse angle: the camera faces the opposite way from the previous shot. Use the location image for this camera direction as the background, keep wardrobe, lighting and where everyone stands in the room, and follow this prompt for who is on the left and right of frame');
+            } else if (usePreviousShotContext && previousShot?.imageUrl) {
                 pushReferenceUrl(previousShot.imageUrl);
                 contextPromptBits.push('Maintain continuity with the previous shot: match lighting, time of day, and camera placement.');
             }
+            const shotEnvironmentRef = alignedShot.environment
+                ? references.find((r) => r.type === 'environment' && r.imageUrl && matchesRefName(r.name, alignedShot.environment || ''))
+                : undefined;
 
             const tagBuckets: Record<string, string[]> = {
                 lighting: [],
@@ -11287,7 +11299,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 const tag = ref.tag || 'other';
                 if (!tagBuckets[tag]) tagBuckets.other = tagBuckets.other || [];
                 tagBuckets[tag]?.push(formatContextLabel(ref));
-                if (ref.imageUrl) {
+                // The shot's own location always comes in as the view for its camera yaw, never its default view again.
+                const isShotEnvironment = shotEnvironmentRef && (matchesRefName(shotEnvironmentRef.name, ref.name || '') || ref.imageUrl === shotEnvironmentRef.imageUrl);
+                if (isShotEnvironment) {
+                    pushReferenceUrl(pickReferenceImageForYaw(shotEnvironmentRef, shot.cameraYaw));
+                } else if (ref.imageUrl) {
                     pushReferenceUrl(ref.imageUrl);
                 } else if (ref.name) {
                     pushReferenceUrl(references.find(r => r.imageUrl && matchesRefName(r.name, ref.name))?.imageUrl);

@@ -144,3 +144,13 @@ export const pickReferenceImageForYaw = (
   }
   return best?.url || reference.imageUrl || null;
 };
+
+const CROWD_WORDS = /\b(guests?|crowds?|party|partygoers|audience|spectators|patrons|diners|dancers|extras|people|passers-?by|commuters|shoppers|staff|waiters|reporters|press|onlookers|congregation|mourners|soldiers|workers|students|fans)\b/i;
+
+/** Whether a location is meant to be populated (a party, a press pit) rather than an empty set. */
+export const environmentHasCrowd = (text: string | null | undefined) => CROWD_WORDS.test(text || '');
+
+/** The people line for a new view of a location: keep the background crowd, never the leads. */
+export const environmentPeopleClause = (text: string | null | undefined) => (environmentHasCrowd(text)
+  ? 'keep the same background crowd as the reference (same kind of people, wardrobe and density) filling this side of the space too — extras only, no main characters'
+  : 'empty set, no people');
