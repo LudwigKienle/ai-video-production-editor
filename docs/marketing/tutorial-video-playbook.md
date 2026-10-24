@@ -6,6 +6,9 @@ tutorials. Their channel has about 493K subscribers, and the reference video
 below reached about 301K views in its first 17 days. We copy the parts that
 build trust and skip the hype.
 
+Broader growth ideas (MCP recipe gallery, creator program, contests,
+academy, SEO pages) are in `growth-ideas.md`.
+
 Reference: Higgsfield AI, "How to prompt like a director with Opus 5.5 +
 Seedance 2.5 (full workflow)", 7 Oct 2026, 17 min.
 https://www.youtube.com/watch?v=kFKpcCHkuPI (analysed from the English
