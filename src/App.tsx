@@ -2659,13 +2659,12 @@ function App() {
             try {
                 const autosaveMeta = JSON.parse(autosaveRaw) as { projectPath?: string; savedAt?: string; name?: string };
                 if (autosaveMeta.projectPath) {
+                    // No window.confirm here: a blocking dialog froze the whole editor (and every
+                    // agent driving it over MCP) after a crash, often hidden behind other windows.
+                    // Reopen the latest auto-save and say so instead.
                     const label = autosaveMeta.name ? `"${autosaveMeta.name}"` : 'your last project';
-                    const shouldRecover = window.confirm(
-                        `We detected an unclean shutdown. Recover the latest auto-save for ${label}?`
-                    );
-                    if (shouldRecover) {
-                        handleLoadProject(autosaveMeta.projectPath);
-                    }
+                    console.info(`Recovered ${label} after an unclean shutdown.`);
+                    handleLoadProject(autosaveMeta.projectPath);
                 }
             } catch {
                 localStorage.removeItem(AUTOSAVE_META_KEY);
