@@ -1,27 +1,48 @@
-# First 10 Minutes
+# First 10 Minutes: Beginner Walkthrough
 
-This guide is for people who just found the repository and want to understand
-what the app is before reading the full codebase.
+This guide is for people who just found the repository and want to open the app, understand the core workflow, and create their first generation project in under 10 minutes.
 
-Prefer to watch? The [video version](https://youtu.be/p99IG1m5ybU) covers install, the welcome guide,
-the studio layout, a project folder and the Project Hub in under four minutes.
+Prefer to watch? The [4-minute video setup](https://youtu.be/p99IG1m5ybU) covers install, the welcome guide, the studio layout, project folders, and the Project Hub.
 
-## 1. Run the App
+---
+
+## 1. Getting the App
+
+### Option A: Prebuilt Desktop Installers (Recommended for Creators)
+If you simply want to run the studio without configuring a Node.js development environment:
+- Download the latest signed package from [GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest).
+- **macOS:** Download the `.dmg` (Universal binary).
+- **Windows:** Download the `.exe` installer.
+- **Linux:** Download the `.AppImage`.
+- Launch the application, choose or create a local project directory, and enter your provider API keys under Settings.
+
+### Option B: Running from Source (For Developers)
+Clone the repository and install dependencies:
 
 ```bash
+git clone https://github.com/LudwigKienle/ai-video-production-editor.git
+cd ai-video-production-editor
 npm install
-npm run electron:dev
 ```
 
-The Electron app starts a local Vite dev server and opens the desktop shell.
-Provider workflows require your own API keys, but you can still inspect the
-workspace structure, project flow, and public demo material without committing
-credentials.
+#### Browser Dev vs. Electron Desktop Dev
+The application supports two distinct local development workflows:
 
-## 2. Understand the Main Loop
+| Mode | Command | Best For | Details |
+| --- | --- | --- | --- |
+| **Browser Dev** | `npm run dev` | UI & Frontend Iteration | Starts a Vite dev server at `http://localhost:5173/studio.html`. Delivers fast Hot Module Replacement (HMR) for developing React components, CSS, and web layouts. |
+| **Electron Dev** | `npm run electron:dev` | Full Desktop Experience | Compiles the Electron main and preload processes and runs the native desktop container. Enables native filesystem access, local file exports, and native application menus. |
 
-AI Video Production Editor is organized around this production path:
+---
 
+## 2. Visual Walkthrough: First 10 Minutes in the Studio
+
+### Step 1: First Launch & Studio Overview
+When you first open the studio, you are greeted by the macOS-style production shell with a source-list sidebar, slim toolbar, and quick access to projects.
+
+![Studio Overview](assets/screenshots/studio-open-source-preview.png)
+
+The studio organizes production into a single continuous loop:
 ```text
 script -> Director -> concepts -> storyboard -> AI filming
        -> continuity review -> re-film queue -> edit -> export
@@ -31,11 +52,51 @@ The main surfaces to inspect first:
 
 | Surface | Why it matters |
 | --- | --- |
-| Project Hub | The core script-to-filming production workspace. |
-| Node Space | Graph-style workflow and pipeline builder. |
-| Image / Video Generation | Provider-facing generation surfaces. |
+| Project | The core script-to-filming production workspace (Project Hub). |
+| Create → Nodes | Graph-style workflow and pipeline builder (Node Space). |
+| Create → Images / Video | Provider-facing generation surfaces for stills and motion clips. |
 | Review / Requests | Feedback, QA, and shot task surfaces. |
-| Export | Timeline and handoff utilities for downstream work. |
+| Deliver → Export | Timeline and handoff utilities for downstream work. |
+
+### Step 2: Input Your Script or Load the Demo Project
+Navigate to **Project** in the sidebar (under the Project group). You can paste your own screenplay into the editor or load preloaded demo files from `examples/demo-project`:
+- `script.md`
+- `project-brief.md`
+- `shot-list.md`
+
+![Script Workspace](assets/screenshots/studio-script.png)
+
+The Director agent can automatically parse scenes, identify speaking characters, and flag required visual elements.
+
+### Step 3: Run the Director Pass & Build the Storyboard
+Inside **Project**, switch to the **Storyboard** phase. The Director pass turns your screenplay into structured shot cards with camera bodies, lenses, and framing rules.
+
+![Storyboard Step](assets/screenshots/studio-storyboard.png)
+
+- Set camera lenses (e.g., 35mm Prime, 50mm Anamorphic).
+- Choose director styles and aspect ratios (16:9, 9:16, 2.39:1).
+- Use Gemini continuity review to verify visual consistency across shots.
+
+### Step 4: Concept Generation & AI Filming
+Open **Create → Images** to generate character and concept stills, and **Create → Video** to generate motion shots.
+
+![Image Generation](assets/screenshots/studio-image-gen.png)
+
+![Video Filming](assets/screenshots/studio-video-gen.png)
+
+- **Providers & Models:** Generate image and motion clips using supported provider integrations (such as fal.ai, Replicate, and Google Gemini) to run models including Kling, Seedance, Wan, LTX, and FLUX according to each provider's catalog.
+- Use **Auto Model** or manually select engines tailored for performance, characters, or landscapes.
+- Turn approved storyboard frames into motion clips with start/end frame interpolation.
+
+### Step 5: Advanced Visual Pipelines in Node Space
+For non-linear generation and complex multi-model pipelines, switch to **Create → Nodes** in the sidebar.
+
+![Node Space Text to Image](assets/screenshots/studio-node-space-text-to-image.png)
+
+- Connect `Prompt → Image Model → Sampler → Output` graphs.
+- Use pre-built blueprints or build custom node chains.
+
+---
 
 ## 3. Use the Demo Project
 

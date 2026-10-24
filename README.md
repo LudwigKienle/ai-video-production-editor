@@ -149,7 +149,7 @@ open-weights models for images and video.
 
 ## Quick start
 
-**New here?** Watch the [4-minute setup video](https://youtu.be/p99IG1m5ybU) first.
+**New here?** Follow the [First 10 Minutes Walkthrough](docs/FIRST_10_MINUTES.md) or watch the [4-minute setup video](https://youtu.be/p99IG1m5ybU).
 
 **Just want the app?** Download the newest installer from
 [GitHub Releases](https://github.com/LudwigKienle/ai-video-production-editor/releases/latest)
