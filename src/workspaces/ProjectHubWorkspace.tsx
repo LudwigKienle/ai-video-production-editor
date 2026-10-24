@@ -1,11 +1,14 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
+import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ShotVideoReview, ShotVideoTakeComparison, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
 import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
 import { establishingShotOf, nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
 import { buildVisualContinuityPrompt, toShotContinuityReview, type ContinuityImageRole } from '../utils/visualContinuity';
+import { buildTakeComparisonPrompt, buildVideoReviewPrompt, extractDialogueLine, isPopulatedShot, mergeVideoReviews, pickBestTake, shotTakes, videoReviewFor, VIDEO_REVIEW_DIMENSIONS, VIDEO_REVIEW_DIMENSION_LABELS, type VideoReviewShotInput } from '../utils/videoReview';
 import {
     reviewShotVisualContinuity,
+    reviewShotVideoWithGemini,
+    compareShotVideoTakesWithGemini,
     generateProductionGuidelines,
     generateScriptWithMode,
     generateReferenceDetails,
@@ -170,6 +173,8 @@ export type ProjectHubStudioAutomationBindings = {
     setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
     /** Visual continuity review of rendered frames (screen-order neighbours + references); stores the review on each shot. */
     reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review?: ShotContinuityReview; error?: string }>>;
+    /** Gemini watches the filmed takes (with sound), scores them and, with compareVersions, picks the best take; stored on each shot. */
+    reviewVideos: (payload: { shots: number[]; compareVersions?: boolean; selectBest?: boolean; force?: boolean; isCancelled?: () => boolean }) => Promise<Array<{ shot: number; error?: string; takes?: string[]; reviews?: ShotVideoReview[]; comparison?: ShotVideoTakeComparison | null; selectedVideoUrl?: string }>>;
     /** One new view of a reference from a camera yaw (180 = reverse side), stored with its angles. */
     generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
 };
@@ -3834,6 +3839,104 @@ const RelightModal: React.FC<{
     };
 
 /** Compact shot tile for the Storyboard / Filming boards. Details live in the inspector beside the grid. */
+const TAKE_VERDICT_CHIP: Record<ShotVideoReview['verdict'], string> = { keep: 'pk-chip--ok', usable: 'pk-chip--warn', reshoot: 'pk-chip--danger' };
+
+/** Filming inspector: Gemini's review of the selected take, the better take if one exists, details on demand. */
+const ShotTakeReviewPanel: React.FC<{
+    shot: ShotPrompt;
+    running: boolean;
+    onReview: (options: { compareVersions: boolean; force: boolean }) => void;
+    onUseTake: (videoUrl: string) => void;
+    onApplyFix: (fix: string) => void;
+}> = ({ shot, running, onReview, onUseTake, onApplyFix }) => {
+    const takes = shotTakes(shot);
+    if (!takes.length) return null;
+    const current = videoReviewFor(shot, shot.videoUrl);
+    const comparison = shot.videoTakeComparison && takes.includes(shot.videoTakeComparison.bestVideoUrl) ? shot.videoTakeComparison : null;
+    const version = (url: string) => takes.indexOf(url) + 1;
+    const betterTake = comparison && comparison.bestVideoUrl !== shot.videoUrl ? comparison.bestVideoUrl : null;
+    const compare = takes.length > 1;
+    const reviewedTakes = takes.filter((url) => videoReviewFor(shot, url));
+    const actionLabel = running ? 'Watching…' : compare ? `Compare ${Math.min(takes.length, 6)} takes` : current ? 'Review again' : 'Review take';
+    return (
+        <section className="take-review" aria-label="Take review">
+            <div className="take-review__head">
+                <span className="take-review__title">Take review</span>
+                {current && <span className={`pk-chip ${TAKE_VERDICT_CHIP[current.verdict]}`} title={`Gemini: ${current.verdict}`}><strong>{current.score.toFixed(1)}</strong>/10</span>}
+                <button type="button" className="app-button app-secondary take-review__action" disabled={running} onClick={() => onReview({ compareVersions: compare, force: !compare && Boolean(current) })}>
+                    {actionLabel}
+                </button>
+            </div>
+            {!current && !comparison && !running && <p className="take-review__hint">Gemini watches the take with sound: image and animation quality, background extras, lip sync, artifacts.</p>}
+            {current?.summary && <p className="take-review__summary">{current.summary}</p>}
+            {current?.frozenBackground && <p className="take-review__flag">Background extras stand still.</p>}
+            {betterTake && (
+                <div className="take-review__better">
+                    <span><strong>v{version(betterTake)}</strong> is the better take. {comparison?.reason}</span>
+                    <button type="button" className="app-button app-secondary" onClick={() => onUseTake(betterTake)}>Use v{version(betterTake)}</button>
+                </div>
+            )}
+            {(current || comparison) && (
+                <details className="take-review__details">
+                    <summary>Details</summary>
+                    {current && (
+                        <dl className="take-review__scores">
+                            {VIDEO_REVIEW_DIMENSIONS.map((key) => {
+                                const value = current.scores[key];
+                                return (
+                                    <div key={key} className="take-review__score-row">
+                                        <dt>{VIDEO_REVIEW_DIMENSION_LABELS[key]}</dt>
+                                        <dd>
+                                            <span className="take-review__bar" aria-hidden="true"><span style={{ width: `${(value ?? 0) * 10}%` }} /></span>
+                                            <span>{value === null ? '—' : value.toFixed(1)}</span>
+                                        </dd>
+                                    </div>
+                                );
+                            })}
+                        </dl>
+                    )}
+                    {current && current.issues.length > 0 && (
+                        <ul className="take-review__issues">
+                            {current.issues.map((issue, index) => (
+                                <li key={index} className={`take-review__issue take-review__issue--${issue.severity}`}>
+                                    {issue.timestamp && <span className="take-review__time">{issue.timestamp}</span>}
+                                    <span>{issue.message}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {current?.dialogueHeard && <p className="take-review__note"><span>Heard</span> “{current.dialogueHeard}”</p>}
+                    {current?.promptFix && (
+                        <div className="take-review__fix">
+                            <p className="take-review__note"><span>Prompt fix</span> {current.promptFix}</p>
+                            <button type="button" className="app-button app-secondary" onClick={() => onApplyFix(current.promptFix!)}>Add to motion prompt</button>
+                        </div>
+                    )}
+                    {reviewedTakes.length > 1 && (
+                        <ol className="take-review__takes">
+                            {(comparison?.ranking.length ? comparison.ranking.map((entry) => entry.videoUrl) : reviewedTakes).filter((url) => takes.includes(url)).map((url) => {
+                                const review = videoReviewFor(shot, url);
+                                const reason = comparison?.ranking.find((entry) => entry.videoUrl === url)?.reason || review?.summary;
+                                return (
+                                    <li key={url} className={url === shot.videoUrl ? 'is-selected' : ''}>
+                                        <button type="button" className="take-review__take" onClick={() => onUseTake(url)} title="Select this take">
+                                            <strong>v{version(url)}</strong>
+                                            {review && <span className={`pk-chip ${TAKE_VERDICT_CHIP[review.verdict]}`}>{review.score.toFixed(1)}</span>}
+                                            {url === comparison?.bestVideoUrl && <span className="pk-chip pk-chip--accent">Best</span>}
+                                            <small>{reason}</small>
+                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ol>
+                    )}
+                    <p className="take-review__meta">{[current?.model || comparison?.model, current ? new Date(current.reviewedAt).toLocaleString() : null].filter(Boolean).join(' · ')}</p>
+                </details>
+            )}
+        </section>
+    );
+};
+
 const ShotTile: React.FC<{
     shot: ShotPrompt;
     label: string;
@@ -3848,6 +3951,7 @@ const ShotTile: React.FC<{
         ? Boolean(shot.isFilming)
         : Boolean(shot.isGenerating || shot.isEditing || shot.isSketching || shot.isAngleGenerating);
     const hasVideo = Boolean(shot.videoUrl);
+    const takeReview = videoReviewFor(shot, shot.videoUrl);
     const critique = shot.cinematographyCritique;
     const score = critique ? Math.round(((critique.lightingScore + critique.compositionScore) / 2) * 10) : null;
     return (
@@ -3864,7 +3968,9 @@ const ShotTile: React.FC<{
                 <span className="shot-tile__label">{label}</span>
                 <span className="shot-tile__status">
                     {busy && <span className="pk-chip pk-chip--accent">{mode === 'filming' ? 'Filming…' : 'Generating…'}</span>}
-                    {!busy && hasVideo && <span className="pk-chip pk-chip--ok">Video</span>}
+                    {!busy && hasVideo && (takeReview
+                        ? <span className={`pk-chip ${TAKE_VERDICT_CHIP[takeReview.verdict]}`} title="Take review (Gemini)">{takeReview.score.toFixed(1)}</span>
+                        : <span className="pk-chip pk-chip--ok">Video</span>)}
                     {!busy && !hasVideo && image && mode === 'filming' && <span className="pk-chip">Frame ready</span>}
                     {!busy && !hasVideo && !image && mode === 'filming' && <span className="pk-chip pk-chip--warn">No frame</span>}
                     {!busy && mode === 'storyboard' && score !== null && <span className="pk-chip" title="Cinematography score">{score}%</span>}
@@ -4205,6 +4311,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const [geminiContextShotId, setGeminiContextShotId] = useState<number | null>(null);
     const [geminiFilmingContextShotId, setGeminiFilmingContextShotId] = useState<number | null>(null);
     const [geminiContinuityReviewRunning, setGeminiContinuityReviewRunning] = useState(false);
+    const [videoReviewRunningShots, setVideoReviewRunningShots] = useState<number[]>([]);
     const [visualStyle, setVisualStyle] = useState(storyBible.selectedStyle || '');
     const [directorPersona, setDirectorPersona] = useState(storyBible.directorPersona || 'none');
     const [directorPersonaPromptOverride, setDirectorPersonaPromptOverride] = useState(storyBible.directorPersonaPrompt || '');
@@ -11041,6 +11148,132 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return toShotContinuityReview(verdict, { comparedShot: previous?.shot, model: `${model} (visual)` });
     };
 
+    /**
+     * Gemini watches a shot's takes (video + sound) and reviews them against the concept references and
+     * the dialogue line; with compareVersions every take (up to the last six) is reviewed and compared
+     * side by side. Reviews are stored per take on the shot; already reviewed takes are reused unless forced.
+     */
+    const reviewShotVideoTakes = async (
+        shotNumber: number,
+        options: { compareVersions?: boolean; selectBest?: boolean; force?: boolean; isCancelled?: () => boolean } = {},
+    ): Promise<{ shot: number; error?: string; takes: string[]; reviews: ShotVideoReview[]; comparison: ShotVideoTakeComparison | null; selectedVideoUrl?: string }> => {
+        const shot = shotPrompts.find((entry) => entry.shot === shotNumber);
+        if (!shot) throw new Error(`No shot ${shotNumber}.`);
+        const takes = shotTakes(shot);
+        if (!takes.length) throw new Error(`Shot ${shotNumber} has no video yet; film it first.`);
+        const targets = options.compareVersions ? takes.slice(-6) : [shot.videoUrl || takes[takes.length - 1]];
+        const aligned = alignShotToConcept(shot, references);
+        const referenceSources = resolveShotReferenceImages(shot, aligned, shot.outfitSelections)
+            .filter((item) => item.kind === 'character' || item.kind === 'outfit')
+            .slice(0, 4);
+        const referenceImages = (await Promise.all(referenceSources.map(async (item) => {
+            try {
+                const image = await getBase64FromUrl(item.url);
+                return { base64: image.base64, mimeType: image.mimeType, label: `${item.kind} reference — ${item.label}` };
+            } catch {
+                return null;
+            }
+        }))).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+        const input: VideoReviewShotInput = {
+            label: formatShotLabel(shot),
+            description: shot.description,
+            videoPrompt: shot.filmingContinuityRefinedPrompt || shot.motionPrompt || shot.prompt,
+            cameraMove: shot.cameraMovementPreset,
+            characters: aligned.characters || shot.characters || [],
+            environment: aligned.environment ?? shot.environment,
+            dialogue: extractDialogueLine(shot),
+            populated: isPopulatedShot(shot),
+            aspectRatio: resolveShotEffectiveAspectRatio(shot),
+        };
+        const referenceLabels = referenceImages.map(({ label }) => ({ label }));
+        const prompt = buildVideoReviewPrompt(input, referenceLabels);
+        const version = (url: string) => takes.indexOf(url) + 1;
+        setVideoReviewRunningShots((prev) => (prev.includes(shotNumber) ? prev : [...prev, shotNumber]));
+        try {
+            const reviews: ShotVideoReview[] = [];
+            const errors: string[] = [];
+            for (const url of targets) {
+                if (options.isCancelled?.()) break;
+                const existing = options.force ? null : videoReviewFor(shot, url);
+                if (existing) { reviews.push(existing); continue; }
+                try {
+                    reviews.push(await reviewShotVideoWithGemini({ video: url, videoUrl: url, prompt, references: referenceImages }));
+                } catch (reviewError) {
+                    errors.push(`v${version(url)}: ${reviewError instanceof Error ? reviewError.message : String(reviewError)}`);
+                }
+            }
+            let comparison: ShotVideoTakeComparison | null = null;
+            const reviewed = targets.filter((url) => reviews.some((review) => review.videoUrl === url));
+            if (options.compareVersions && reviewed.length > 1 && !options.isCancelled?.()) {
+                let parsed: Awaited<ReturnType<typeof compareShotVideoTakesWithGemini>> | null = null;
+                try {
+                    parsed = await compareShotVideoTakesWithGemini({
+                        takes: reviewed,
+                        prompt: buildTakeComparisonPrompt(input, reviewed.map((url) => `take v${version(url)}${url === shot.videoUrl ? ' (currently selected)' : ''}`), referenceLabels),
+                        references: referenceImages,
+                    });
+                } catch (compareError) {
+                    errors.push(`comparison: ${compareError instanceof Error ? compareError.message : String(compareError)}`);
+                }
+                // A failed comparison call keeps an earlier side-by-side verdict over the same takes.
+                const earlier = shot.videoTakeComparison;
+                comparison = !parsed && earlier?.decidedBy === 'comparison' && earlier.ranking.every((entry) => reviewed.includes(entry.videoUrl)) && earlier.ranking.length === reviewed.length
+                    ? earlier
+                    : pickBestTake(reviewed, reviews, parsed?.comparison ?? null, { model: parsed?.model });
+            }
+            if (!reviews.length) throw new Error(errors.join(' · ') || 'No take was reviewed.');
+            const selectBest = Boolean(options.selectBest && comparison);
+            setShotPrompts((prev) => prev.map((entry) => {
+                if (entry.shot !== shotNumber) return entry;
+                const entryTakes = shotTakes(entry);
+                const next: ShotPrompt = { ...entry, videoReviews: mergeVideoReviews(entry.videoReviews, reviews, entryTakes) };
+                if (comparison) next.videoTakeComparison = comparison;
+                if (selectBest && comparison && entryTakes.includes(comparison.bestVideoUrl)) {
+                    const index = (entry.videoVersions || []).indexOf(comparison.bestVideoUrl);
+                    next.videoUrl = comparison.bestVideoUrl;
+                    if (index >= 0) next.selectedVideoIndex = index;
+                }
+                return next;
+            }));
+            return { shot: shotNumber, takes, reviews, comparison, selectedVideoUrl: selectBest && comparison ? comparison.bestVideoUrl : shot.videoUrl, error: errors.length ? errors.join(' · ') : undefined };
+        } finally {
+            setVideoReviewRunningShots((prev) => prev.filter((entry) => entry !== shotNumber));
+        }
+    };
+
+    /** Filming UI: review takes of one or more shots, errors go to the error banner. */
+    const handleReviewShotVideos = async (shotNumbers: number[], options: { compareVersions?: boolean; force?: boolean } = {}) => {
+        setError(null);
+        const failures: string[] = [];
+        for (const shotNumber of shotNumbers) {
+            const entry = shotPrompts.find((item) => item.shot === shotNumber);
+            try {
+                const result = await videoReviewAgentRef.current.reviewShotVideoTakes(shotNumber, {
+                    compareVersions: options.compareVersions ?? (entry ? shotTakes(entry).length > 1 : false),
+                    force: options.force,
+                });
+                if (result.error) failures.push(`Shot ${shotNumber} — ${result.error}`);
+            } catch (reviewError) {
+                failures.push(`Shot ${shotNumber} — ${reviewError instanceof Error ? reviewError.message : String(reviewError)}`);
+            }
+        }
+        if (failures.length) setError(`Take review: ${failures.join(' · ')}`);
+    };
+
+    const selectShotTake = (shotNumber: number, videoUrl: string) => setShotPrompts((prev) => prev.map((entry) => {
+        if (entry.shot !== shotNumber) return entry;
+        const index = (entry.videoVersions || []).indexOf(videoUrl);
+        return { ...entry, videoUrl, ...(index >= 0 ? { selectedVideoIndex: index } : {}) };
+    }));
+
+    const appendToMotionPrompt = (shotNumber: number, fix: string) => setShotPrompts((prev) => prev.map((entry) => {
+        if (entry.shot !== shotNumber) return entry;
+        const base = (entry.motionPrompt || '').trim();
+        if (base.includes(fix.trim())) return entry;
+        // The must-have leads: models tend to ignore sentences appended at the end of a prompt.
+        return { ...entry, motionPrompt: base ? `${fix.trim()} ${base}` : fix.trim(), filmingContinuityRefinedPrompt: undefined };
+    }));
+
     /** One new view of a reference from a camera yaw (e.g. 180° = the reverse side of a room), stored with its angles. */
     const generateReferenceAngleForYaw = async (reference: ReferenceItem, yaw: number, note?: string) => {
         if (!reference.imageUrl) throw new Error(`${reference.name} has no base image yet.`);
@@ -13327,6 +13560,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     const storyboardOptionsRef = useRef({ autoRefine: useStoryboardContinuityAutoRefine });
     storyboardOptionsRef.current = { autoRefine: useStoryboardContinuityAutoRefine };
     const continuityAgentRef = useRef({ reviewShotFrameVisually, generateReferenceAngleForYaw, references });
+    const videoReviewAgentRef = useRef({ reviewShotVideoTakes });
+    videoReviewAgentRef.current = { reviewShotVideoTakes };
     continuityAgentRef.current = { reviewShotFrameVisually, generateReferenceAngleForYaw, references };
     const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
     agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
@@ -13381,6 +13616,20 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     }
                     results.push({ shot: shotNumber, review });
                     setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber ? { ...entry, continuityReview: review } : entry)));
+                }
+                return results;
+            },
+            reviewVideos: async ({ shots, compareVersions, selectBest, force, isCancelled }) => {
+                const results: Array<{ shot: number; error?: string; takes?: string[]; reviews?: ShotVideoReview[]; comparison?: ShotVideoTakeComparison | null; selectedVideoUrl?: string }> = [];
+                for (const shotNumber of shots) {
+                    if (isCancelled?.()) break;
+                    try {
+                        results.push(await videoReviewAgentRef.current.reviewShotVideoTakes(shotNumber, { compareVersions, selectBest, force, isCancelled }));
+                    } catch (reviewError) {
+                        results.push({ shot: shotNumber, error: reviewError instanceof Error ? reviewError.message : String(reviewError) });
+                    }
+                    // Let React commit the stored review before the next shot reads shotPrompts.
+                    await new Promise((resolve) => setTimeout(resolve, 0));
                 }
                 return results;
             },
@@ -19534,6 +19783,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                         >
                                             <BrainIcon className="w-5 h-5" /> {geminiContinuityReviewRunning ? 'Reviewing...' : 'Run Continuity Review'}
                                         </button>
+                                        <button
+                                            onClick={() => handleReviewShotVideos(filmingVisibleShots.filter((shot) => shot.videoUrl).map((shot) => shot.shot))}
+                                            disabled={videoReviewRunningShots.length > 0 || !filmingVisibleShots.some((shot) => shot.videoUrl)}
+                                            className="app-button app-secondary"
+                                            title="Gemini watches every filmed take with sound, scores it and picks the best take per shot."
+                                        >
+                                            <FilmIcon className="w-5 h-5" /> {videoReviewRunningShots.length > 0 ? 'Watching takes…' : 'Review all takes'}
+                                        </button>
                                         {canGenerateFilming && (
                                             <button
                                                 onClick={() => handleRefilmContinuityPriorityShots(
@@ -20087,6 +20344,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                         </div>
                                                                     )}
                                                                 </div>
+                                                                {shot.videoUrl && !shot.isFilming && (
+                                                                    <ShotTakeReviewPanel
+                                                                        shot={shot}
+                                                                        running={videoReviewRunningShots.includes(shot.shot)}
+                                                                        onReview={({ compareVersions, force }) => { void handleReviewShotVideos([shot.shot], { compareVersions, force }); }}
+                                                                        onUseTake={(url) => selectShotTake(shot.shot, url)}
+                                                                        onApplyFix={(fix) => appendToMotionPrompt(shot.shot, fix)}
+                                                                    />
+                                                                )}
                                                             </div>
 
                                                             {/* Video Result / Action Button */}

@@ -21,6 +21,7 @@ open editor through its MCP server, and you watch the result appear in the app.
 | [`/microdrama`](#microdrama) | A vertical microdrama episode from a one-line idea | optional |
 | [`/same-shot-every-model`](#same-shot-every-model) | One shot rendered by several image models, side by side | 💳 |
 | [`/continuity-pass`](#continuity-pass) | A scored continuity review, with fixes re-rendered | 💳 |
+| [`/pick-takes`](#pick-takes) | Gemini watches every take and picks the best one per shot | 💳 |
 | [`/reverse-shot`](#reverse-shot) | The other side of a room for reverse shots | 💳 |
 | [`/wardrobe`](#wardrobe) | Outfits per character, planned from the script | 💳 |
 | [`/film-it`](#film-it) | Video for selected shots from their frames | 💳 |
@@ -107,6 +108,19 @@ before and after for each shot.
 ```
 
 💳 Only the shots that get re-rendered.
+
+## /pick-takes
+
+```text
+Use the ai-video-studio tools on the open project. Run project_review_videos on shots
+<range> with compareVersions: true. Gemini watches every take with its sound and scores
+image quality, animation, camera move, background life (frozen extras), character
+consistency, lip sync and audio. For each shot, tell me the best take and why. For shots
+where even the best take scores below 6, add its promptFix to the motionPrompt with
+project_upsert_shots and re-film only those shots (project_generate_shot_videos).
+```
+
+💳 One Gemini review per take plus one comparison per shot; re-films only where needed.
 
 ## /reverse-shot
 

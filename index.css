@@ -7255,6 +7255,41 @@ body[data-theme="light"] .wb-marker { background: rgb(255 255 255 / 0.94); color
 .phase-settings > summary::-webkit-details-marker { display: none; }
 .phase-settings > summary::after { content: "›"; margin-left: auto; color: var(--app-muted); transition: transform 120ms ease; }
 .phase-settings[open] > summary::after { transform: rotate(90deg); }
+
+/* Take review (Gemini watches the filmed take): score, one action, details on demand. */
+.take-review { margin-top: 1rem; padding-top: 0.85rem; border-top: 1px solid var(--edit-hairline, rgb(var(--app-muted-rgb) / 0.14)); display: flex; flex-direction: column; gap: 0.5rem; }
+.take-review__head { display: flex; align-items: center; gap: 0.5rem; }
+.take-review__title { font-size: var(--fs-xs); font-weight: 650; color: var(--app-text); }
+.take-review__action { margin-left: auto; }
+.take-review__hint, .take-review__summary, .take-review__meta { margin: 0; font-size: var(--fs-xs); line-height: var(--lh-body); color: var(--app-muted); }
+.take-review__summary { color: var(--app-text); }
+.take-review__flag { margin: 0; font-size: var(--fs-xs); color: var(--app-warm); }
+.take-review__better { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius-md); background: var(--edit-accent-soft); font-size: var(--fs-xs); color: var(--app-text); line-height: var(--lh-body); }
+.take-review__better > span { flex: 1; }
+.take-review__details > summary { list-style: none; cursor: pointer; font-size: var(--fs-xs); font-weight: 600; color: var(--app-muted); user-select: none; }
+.take-review__details > summary::-webkit-details-marker { display: none; }
+.take-review__details > summary::after { content: " ›"; display: inline-block; transition: transform 120ms ease; }
+.take-review__details[open] > summary::after { transform: rotate(90deg); }
+.take-review__details[open] > summary { margin-bottom: 0.6rem; }
+.take-review__details { display: flex; flex-direction: column; gap: 0.6rem; }
+.take-review__scores { display: grid; gap: 0.3rem; margin: 0 0 0.6rem; }
+.take-review__score-row { display: grid; grid-template-columns: 9.5rem 1fr; align-items: center; gap: 0.6rem; font-size: var(--fs-xs); }
+.take-review__score-row dt { color: var(--app-muted); }
+.take-review__score-row dd { margin: 0; display: flex; align-items: center; gap: 0.5rem; color: var(--app-text); font-variant-numeric: tabular-nums; }
+.take-review__bar { flex: 1; height: 4px; border-radius: 999px; background: rgb(var(--app-muted-rgb) / 0.18); overflow: hidden; }
+.take-review__bar > span { display: block; height: 100%; border-radius: inherit; background: var(--app-accent); }
+.take-review__issues, .take-review__takes { list-style: none; margin: 0 0 0.6rem; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.take-review__issue { display: flex; gap: 0.5rem; font-size: var(--fs-xs); line-height: var(--lh-body); color: var(--app-text); padding-left: 0.55rem; border-left: 2px solid rgb(var(--app-muted-rgb) / 0.3); }
+.take-review__issue--medium { border-left-color: var(--app-warm); }
+.take-review__issue--high { border-left-color: var(--app-danger); }
+.take-review__time { color: var(--app-muted); font-variant-numeric: tabular-nums; }
+.take-review__note { margin: 0 0 0.4rem; font-size: var(--fs-xs); line-height: var(--lh-body); color: var(--app-text); }
+.take-review__note > span { color: var(--app-muted); margin-right: 0.35rem; }
+.take-review__fix { margin-bottom: 0.6rem; }
+.take-review__take { width: 100%; display: flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.5rem; border-radius: var(--radius-md); background: transparent; border: 1px solid transparent; color: var(--app-text); font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+.take-review__take:hover { background: rgb(var(--app-muted-rgb) / 0.08); }
+.take-review__takes .is-selected .take-review__take { border-color: rgb(var(--app-accent-rgb) / 0.35); }
+.take-review__take small { color: var(--app-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .phase-settings > summary small { color: var(--app-muted); font-weight: 500; font-size: var(--fs-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phase-settings__body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0.7rem 0.7rem; border-top: 1px solid var(--edit-hairline, rgb(var(--app-muted-rgb) / 0.14)); }
 .phase-settings__body > .flex.items-center.bg-gray-800, .phase-settings__body > .flex.flex-wrap.items-center.bg-gray-800 { background: transparent; border: 0; padding: 0.25rem 0; }

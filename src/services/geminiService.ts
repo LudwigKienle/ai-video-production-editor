@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, FunctionDeclaration, GenerateImagesResponse } from "@google/genai";
 import { withModelFallback } from './geminiModelFallback';
 import { isLocalLlmReady, withLocalLlm } from './localLlmService';
-import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorShot, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
+import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorShot, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview, ShotVideoReview } from '../types';
 import { getVideoDuration, fileToBase64, decode } from "../utils/helpers";
 import { recordUsage } from '../utils/usageTracker';
 import { batchDirectorChunks, orderDirectorShots, splitScenesForDirector, splitScriptIntoScenes, targetShotCount } from '../utils/directorScenes';
@@ -9,6 +9,7 @@ import type { DirectorSceneChunk } from '../utils/directorScenes';
 import { DIRECTOR_COUNT_RULE, DIRECTOR_COVERAGE_RULE, DIRECTOR_FORMAT_RULES, DIRECTOR_LIGHTING, DIRECTOR_MOVE_RULE, DIRECTOR_NAMES_RULE, DIRECTOR_PROMPT_RULE, DIRECTOR_SHOT_TYPES, DIRECTOR_TEXT_RULE } from '../utils/directorAgent';
 import { trackTask } from './taskCenter';
 import { extractVerdictObject, parseVisualContinuityVerdict, VISUAL_CONTINUITY_SCHEMA, type VisualContinuityVerdict } from '../utils/visualContinuity';
+import { parseTakeComparison, parseVideoReview, TAKE_COMPARISON_SCHEMA, VIDEO_REVIEW_SCHEMA, type ParsedTakeComparison } from '../utils/videoReview';
 import { getGoogleModelProvider } from './googleModelProvider';
 import { generateImageWithGemini3ProReplicate, generateTextWithGemini3ProReplicate, generateVideoWithVeoReplicate } from './replicateService';
 
@@ -3041,6 +3042,128 @@ export const reviewShotVisualContinuity = async (
         if (extractVerdictObject(raw)) return { verdict: parseVisualContinuityVerdict(raw), model: GEMINI_TEXT_MODEL_FLASH };
     }
     throw new Error('The vision model returned no continuity verdict.');
+};
+
+/** Inline video parts stay under the 20 MB request limit (base64 adds a third); larger takes go through the File API. */
+const INLINE_VIDEO_MAX_BYTES = 14 * 1024 * 1024;
+const VIDEO_REVIEW_MODEL = GEMINI_TEXT_MODEL_PRO;
+
+/** A shot video (File, file:// path, https, blob or data URL) as bytes. */
+const loadVideoFile = async (video: File | string): Promise<File> => {
+    if (video instanceof File) return video;
+    if (video.startsWith('file://') && window.electron?.project?.readFile) {
+        const filePath = fileUrlToPath(video);
+        const bytes = await window.electron.project.readFile({ filePath });
+        const normalizedBytes = new Uint8Array(bytes.byteLength);
+        normalizedBytes.set(bytes);
+        const fileName = filePath.split(/[\\/]/).pop() || 'video.mp4';
+        return new File([normalizedBytes.buffer as ArrayBuffer], fileName, { type: inferVideoMimeTypeFromName(fileName) });
+    }
+    const response = await fetch(video);
+    if (!response.ok) throw new Error(`Could not load the video (${response.status}).`);
+    const blob = await response.blob();
+    const name = video.split(/[?#]/)[0].split('/').pop() || 'video.mp4';
+    const type = blob.type && blob.type.startsWith('video/') ? blob.type : inferVideoMimeTypeFromName(name);
+    return new File([blob], name, { type });
+};
+
+/**
+ * One video as a Gemini part (with its sound): inline when small, else uploaded through the File API
+ * (uploads are cached for 30 minutes, so comparing takes after reviewing them does not upload twice).
+ */
+const videoPartForGemini = async (video: File | string, fps: number) => {
+    const cacheKey = video instanceof File ? buildVideoCacheKey(video) : `url:${video}`;
+    const cached = getVideoCacheEntry(cacheKey);
+    if (cached) return { fileData: { fileUri: cached.fileUri, mimeType: cached.mimeType }, videoMetadata: { fps } };
+    const file = await loadVideoFile(video);
+    if (file.size === 0) throw new Error('The video file is empty.');
+    const mimeType = file.type || 'video/mp4';
+    if (file.size <= INLINE_VIDEO_MAX_BYTES) {
+        return { inlineData: { data: await fileToBase64(file), mimeType }, videoMetadata: { fps } };
+    }
+    const fileUri = await uploadFileToGemini(new File([file], file.name, { type: mimeType }));
+    setVideoCacheEntry(cacheKey, fileUri, mimeType);
+    return { fileData: { fileUri, mimeType }, videoMetadata: { fps } };
+};
+
+const referenceParts = (references: Array<{ base64: string; mimeType: string; label: string }>) => references.flatMap((reference, index) => [
+    { text: `Image ${index + 1}: ${reference.label}` },
+    { inlineData: { data: reference.base64, mimeType: reference.mimeType || 'image/jpeg' } },
+]);
+
+/**
+ * Video review of one take: Gemini watches the clip natively (frames at `fps` plus the audio track)
+ * next to the concept references and returns a structured verdict (see utils/videoReview).
+ */
+export const reviewShotVideoWithGemini = async (payload: {
+    video: File | string;
+    videoUrl: string;
+    prompt: string;
+    references?: Array<{ base64: string; mimeType: string; label: string }>;
+    /** Frames per second Gemini samples; 1 is its default, lip sync and motion need more. */
+    fps?: number;
+}): Promise<ShotVideoReview> => {
+    if (shouldUseReplicateForGoogleModels()) throw new Error('Video review needs the Gemini API (Settings → Google models → Gemini).');
+    const ai = getAiClient();
+    const videoPart = await videoPartForGemini(payload.video, payload.fps ?? 4);
+    const parts: any[] = [{ text: payload.prompt }, videoPart, ...referenceParts(payload.references || [])];
+    // An empty or malformed answer is retried once and then reported — never read as "score 0".
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response: GenerateContentResponse = await withTimeout(withRetry(() => ai.models.generateContent({
+            model: VIDEO_REVIEW_MODEL,
+            contents: [{ role: 'user', parts }],
+            config: { responseMimeType: 'application/json', responseJsonSchema: VIDEO_REVIEW_SCHEMA },
+        }), 3), VIDEO_ANALYSIS_TIMEOUT_MS * 2, 'Video review');
+        recordUsage({ provider: 'gemini', model: VIDEO_REVIEW_MODEL, kind: 'analysis', units: 1, unitLabel: 'request', note: 'Video take review' });
+        let raw: unknown = null;
+        try { raw = parseJsonFromText(response.text || '', 'VideoTakeReview'); } catch { raw = null; }
+        const review = parseVideoReview(raw, { videoUrl: payload.videoUrl, model: VIDEO_REVIEW_MODEL });
+        if (review) return review;
+    }
+    throw new Error('Gemini returned no video review.');
+};
+
+/** Several takes of one shot side by side (up to 6); Gemini names the one to cut in, with reasons. */
+export const compareShotVideoTakesWithGemini = async (payload: {
+    takes: Array<File | string>;
+    prompt: string;
+    references?: Array<{ base64: string; mimeType: string; label: string }>;
+    fps?: number;
+}): Promise<{ comparison: ParsedTakeComparison; model: string }> => {
+    if (shouldUseReplicateForGoogleModels()) throw new Error('Video review needs the Gemini API (Settings → Google models → Gemini).');
+    if (payload.takes.length < 2) throw new Error('Comparing needs at least two takes.');
+    if (payload.takes.length > 6) throw new Error('Compare at most six takes at once.');
+    const ai = getAiClient();
+    const videoParts = [];
+    // Inline takes add up: past the request limit every take goes through the File API.
+    let inlineBytes = 0;
+    for (const [index, take] of payload.takes.entries()) {
+        let part: any = await videoPartForGemini(take, payload.fps ?? 2);
+        if (part.inlineData) {
+            inlineBytes += part.inlineData.data.length;
+            if (inlineBytes > INLINE_VIDEO_MAX_BYTES * 1.3) {
+                const file = await loadVideoFile(take);
+                const fileUri = await uploadFileToGemini(file);
+                setVideoCacheEntry(take instanceof File ? buildVideoCacheKey(take) : `url:${take}`, fileUri, file.type || 'video/mp4');
+                part = { fileData: { fileUri, mimeType: file.type || 'video/mp4' }, videoMetadata: part.videoMetadata };
+            }
+        }
+        videoParts.push({ text: `Video ${index + 1}` }, part);
+    }
+    const parts: any[] = [{ text: payload.prompt }, ...videoParts, ...referenceParts(payload.references || [])];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response: GenerateContentResponse = await withTimeout(withRetry(() => ai.models.generateContent({
+            model: VIDEO_REVIEW_MODEL,
+            contents: [{ role: 'user', parts }],
+            config: { responseMimeType: 'application/json', responseJsonSchema: TAKE_COMPARISON_SCHEMA },
+        }), 3), VIDEO_ANALYSIS_TIMEOUT_MS * 3, 'Take comparison');
+        recordUsage({ provider: 'gemini', model: VIDEO_REVIEW_MODEL, kind: 'analysis', units: 1, unitLabel: 'request', note: `Video take comparison (${payload.takes.length} takes)` });
+        let raw: unknown = null;
+        try { raw = parseJsonFromText(response.text || '', 'VideoTakeComparison'); } catch { raw = null; }
+        const comparison = parseTakeComparison(raw, payload.takes.length);
+        if (comparison) return { comparison, model: VIDEO_REVIEW_MODEL };
+    }
+    throw new Error('Gemini returned no take comparison.');
 };
 
 export const refineStoryboardPromptForContinuity = async (payload: {

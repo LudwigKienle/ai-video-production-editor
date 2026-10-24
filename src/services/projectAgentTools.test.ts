@@ -187,3 +187,50 @@ test('a cancelled background job stops between shots and keeps finished work', a
   assert.equal(status.jobs[0].status, 'cancelled');
   assert.ok(rendered.length > 0 && rendered.length < 6);
 });
+
+test('project_review_videos reports takes as 1-based versions and the best take with its reason', async () => {
+  const state: ProjectAgentState = {
+    storyBible: { logline: '', characters: [], plotBeats: '', script: '', productionGuidelines: '' },
+    references: [],
+    shotPrompts: [{ shot: 4, prompt: 'Gala', description: 'Nora crosses the gala', characters: ['Nora'], environment: null, videoUrl: 'v1.mp4', videoVersions: ['v1.mp4', 'v2.mp4'] }],
+    projectPath: null, projectName: 'Test', activePhase: 'filming', activeWorkspace: 'PROJECT',
+  };
+  const calls: unknown[] = [];
+  const takeReview = (videoUrl: string, score: number) => ({
+    videoUrl, score, verdict: score >= 8 ? 'keep' as const : 'reshoot' as const, frozenBackground: score < 6, summary: `take ${videoUrl}`,
+    scores: { visualQuality: score, animation: score, cameraMotion: null, backgroundMotion: score, consistency: score, lipSync: null, audio: null },
+    issues: score < 6 ? [{ category: 'background' as const, severity: 'high' as const, message: 'Guests frozen.', timestamp: '00:02' }] : [],
+    reviewedAt: 'now',
+  });
+  const executor = createProjectAgentExecutor({
+    getState: () => state,
+    setStoryBible: () => undefined, setReferences: () => undefined, setShotPrompts: () => undefined,
+    openPhase: async () => undefined,
+    automation: async (phase) => {
+      assert.equal(phase, 'filming');
+      return { reviewVideos: async (payload: unknown) => {
+        calls.push(payload);
+        return [{
+          shot: 4, takes: ['v1.mp4', 'v2.mp4'], reviews: [takeReview('v1.mp4', 4.5), takeReview('v2.mp4', 8.6)], selectedVideoUrl: 'v1.mp4',
+          comparison: { bestVideoUrl: 'v2.mp4', reason: 'The crowd moves.', decidedBy: 'comparison' as const, comparedAt: 'now', ranking: [{ videoUrl: 'v2.mp4', rank: 1, reason: 'alive' }, { videoUrl: 'v1.mp4', rank: 2, reason: 'frozen' }] },
+        }, { shot: 9, error: 'No shot 9.' }];
+      } } as any;
+    },
+    settle: async () => undefined,
+    saveProject: async () => ({ folderPath: '/tmp/x', savedAt: 'now', name: 'Test' }),
+    saveProjectAs: async () => ({ folderPath: '/tmp/y', savedAt: 'now', name: 'Test' }),
+    newProject: async () => undefined, openProject: async () => undefined,
+    loadImage: async () => ({ base64: '', mimeType: 'image/jpeg' }),
+  });
+  const result = await executor.project_review_videos({ shots: [4, 9], compareVersions: true, wait: true }) as any;
+  assert.equal((calls[0] as any).compareVersions, true);
+  assert.equal((calls[0] as any).selectBest, false);
+  const [shot4, shot9] = result.reviews;
+  assert.equal(shot4.selectedTake, 1);
+  assert.deepEqual(shot4.takes.map((take: any) => [take.take, take.score]), [[1, 4.5], [2, 8.6]]);
+  assert.equal(shot4.takes[0].frozenBackground, true);
+  assert.deepEqual(shot4.takes[0].issues, ['[high] 00:02 background: Guests frozen.']);
+  assert.equal(shot4.takes[1].scores.lipSync, null);
+  assert.deepEqual(shot4.best, { take: 2, reason: 'The crowd moves.', decidedBy: 'comparison', ranking: ['v2: alive', 'v1: frozen'] });
+  assert.deepEqual(shot9, { shot: 9, error: 'No shot 9.' });
+});
