@@ -5,24 +5,17 @@ on:
   pull_request:
 
 jobs:
-  download-repo-only:
-    name: Keep repository download-only
+  public-release-check:
+    name: Keep private data out of the public repository
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Block application source paths
-        shell: bash
-        run: |
-          blocked="$(
-            git ls-files | grep -E '^(src|electron|server|api|components|workspaces|hooks|utils|packages|conductor)/|^(package.json|package-lock.json|tsconfig\.json|tsconfig\.build\.json|vite\.config\.ts|index\.tsx|constants\.tsx|metadata\.json)$' || true
-          )"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-          if [ -n "$blocked" ]; then
-            echo "::error::This repository is download-only. Source-code paths are not allowed."
-            echo "$blocked"
-            exit 1
-          fi
-
-          echo "Repository guard passed."
+      - name: Block local paths, secrets and private artifacts
+        run: node scripts/check-public-release.mjs --strict-artifacts
