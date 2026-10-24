@@ -6,7 +6,8 @@
  *
  * The merge logic is pure (and unit-tested); `createProjectAgentTools` wires it to App state.
  */
-import type { CharacterOutfit, ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
+import type { CharacterOutfit, ReferenceItem, ScriptRevision, ShotPrompt, ShotVideoReview, ShotVideoTakeComparison, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
+import { formatVideoReviewIssues, shotTakes, videoReviewFor } from '../utils/videoReview.ts';
 import { createDefaultWorldbuildingState } from '../data/worldbuildingTypes.ts';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes } from '../utils/directorScenes.ts';
 import {
@@ -255,6 +256,9 @@ export const summarizeShot = (shot: ShotPrompt, full = false) => clean({
   renderedPrompt: full && shot.continuityRefinedPrompt ? shot.continuityRefinedPrompt : undefined,
   imageUrl: describeMediaUrl(shot.imageUrl),
   videoUrl: describeMediaUrl(shot.videoUrl),
+  /** Video review score (0–10) of the selected take. */
+  videoScore: videoReviewFor(shot, shot.videoUrl)?.score,
+  videoTakes: full && shotTakes(shot).length > 1 ? shotTakes(shot).length : undefined,
   imageVersions: full && shot.imageVersions?.length ? shot.imageVersions.length : undefined,
   busy: shot.isGenerating || shot.isFilming || undefined,
 });
@@ -292,6 +296,7 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_renumber_shots: 'Renumbering shots',
   project_cancel_job: 'Stopping a job',
   project_review_continuity: 'Reviewing continuity',
+  project_review_videos: 'Watching the takes',
   project_generate_reference_angle: 'Rendering a reverse angle',
   project_job_status: 'Checking a job',
   project_generate_shot_videos: 'Filming shots',
@@ -586,6 +591,20 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     parameters: { type: 'object', properties: { shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers with frames.' } }, required: ['shots'] },
   },
   {
+    name: 'project_review_videos',
+    description: 'Video review of filmed shots: Gemini WATCHES each take with its sound (not stills) and scores it 0–10 overall plus image quality, animation (how the characters move), camera move, background life (flags frozen, mannequin-like extras), character consistency against the concept references, lip sync against the dialogue line, and audio; lists artifacts (morphing, extra limbs, garbled text) with timestamps and a concrete promptFix for the video prompt. With compareVersions it reviews every take of the shot, compares them side by side and names the best one with reasons. Reviews are stored on the shot (per take) and shown in Filming. Spends Gemini credits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers with videos.' },
+        compareVersions: { type: 'boolean', description: 'Review every take (video version) of each shot and pick the best one. Default: only the selected take.' },
+        selectBest: { type: 'boolean', description: 'With compareVersions: make the best take the selected video in the editor. Default false (the editor keeps its selection).' },
+        force: { type: 'boolean', description: 'Review takes again even if they already have a review.' },
+      },
+      required: ['shots'],
+    },
+  },
+  {
     name: 'project_generate_reference_angle',
     description: 'Render one new view of a location (or character/prop) from a camera yaw and store it with the reference\'s angles — e.g. yaw 180 for the reverse side of a room for a reverse shot. Shots with that cameraYaw then render against this view.',
     parameters: { type: 'object', properties: { referenceName: str('Reference name.'), referenceId: str('Reference id.'), yaw: num('Camera yaw in degrees, -180..180 (180 = reverse).'), note: str('What the new view must show.') }, required: ['yaw'] },
@@ -686,6 +705,7 @@ export type ProjectAgentAutomation = {
   setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
   reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; error?: string; review?: { score: number; status: string; summary: string; issues: Array<{ category?: string; severity: string; message: string }>; promptFix?: string; reverseAngle?: { yaw: number; reason?: string }; comparedShot?: number } }>>;
   generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
+  reviewVideos: (payload: { shots: number[]; compareVersions?: boolean; selectBest?: boolean; force?: boolean; isCancelled?: () => boolean }) => Promise<Array<{ shot: number; error?: string; takes?: string[]; reviews?: ShotVideoReview[]; comparison?: ShotVideoTakeComparison | null; selectedVideoUrl?: string }>>;
 };
 
 export type ProjectAgentContext = {
@@ -1130,6 +1150,36 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       };
     },
 
+    project_review_videos: async (args: Record<string, unknown>) => {
+      const shots = shotNumbers(args.shots);
+      const isCancelled = typeof args.__isCancelled === 'function' ? args.__isCancelled as () => boolean : undefined;
+      const results = await (await ctx.automation('filming')).reviewVideos({ shots, compareVersions: args.compareVersions === true, selectBest: args.selectBest === true, force: args.force === true, isCancelled });
+      return {
+        reviews: results.map(({ shot, error, takes = [], reviews = [], comparison, selectedVideoUrl }) => {
+          if (error && !reviews.length) return { shot, error: shortError(error) };
+          const version = (url?: string) => (url ? takes.indexOf(url) + 1 || undefined : undefined);
+          return clean({
+            shot,
+            error: error ? shortError(error) : undefined,
+            selectedTake: version(selectedVideoUrl),
+            takes: reviews.map((review) => clean({
+              take: version(review.videoUrl),
+              score: review.score,
+              verdict: review.verdict,
+              scores: clean(review.scores),
+              frozenBackground: review.frozenBackground || undefined,
+              summary: review.summary,
+              issues: formatVideoReviewIssues(review),
+              dialogueHeard: review.dialogueHeard,
+              promptFix: review.promptFix,
+            })),
+            best: comparison ? clean({ take: version(comparison.bestVideoUrl), reason: comparison.reason, decidedBy: comparison.decidedBy, ranking: comparison.ranking.map((entry) => `v${version(entry.videoUrl)}: ${entry.reason}`) }) : undefined,
+          });
+        }),
+        hint: 'Takes are 1-based video versions. Apply a promptFix to the shot\'s motionPrompt with project_upsert_shots and re-film with project_generate_shot_videos; selectBest: true picks the best take in the editor.',
+      };
+    },
+
     project_generate_reference_angle: async (args: Record<string, unknown>) => {
       const ref = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName) });
       if (!ref) throw new Error('No reference with that id or name.');
@@ -1239,7 +1289,7 @@ type AgentJob = {
   framesBefore?: Record<number, string | undefined>;
 };
 
-const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate', 'project_review_continuity']);
+const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate', 'project_review_continuity', 'project_review_videos']);
 
 const jobSize = (tool: string, args: Record<string, unknown>) => {
   if (tool === 'project_generate' || tool === 'project_plan_outfits') return 99;
@@ -1299,6 +1349,7 @@ export const withBackgroundJobs = (
           const done = job.shots.filter((shot) => {
             const entry = shotsNow.find((item) => item.shot === shot);
             if (job.tool === 'project_review_continuity') return Boolean(entry?.continuityReview?.reviewedAt && entry.continuityReview.reviewedAt >= job.startedAt);
+            if (job.tool === 'project_review_videos') return Boolean(entry?.videoReviews?.some((review) => review.reviewedAt >= job.startedAt));
             const url = job.tool === 'project_generate_shot_videos' ? entry?.videoUrl : entry?.imageUrl;
             return Boolean(url && url !== job.framesBefore?.[shot]);
           });

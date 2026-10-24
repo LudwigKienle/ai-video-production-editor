@@ -1313,6 +1313,63 @@ export type ShotContinuityReview = {
   reverseAngle?: { yaw: number; reason?: string };
 };
 
+/** Sub-scores of a video take review, 0–10; null when the dimension does not apply (no dialogue, no audio, nobody in the background). */
+export type ShotVideoReviewScores = {
+  /** Image quality: sharpness, detail, lighting, colour, no flicker, noise or compression mush. */
+  visualQuality: number | null;
+  /** Animation quality of the characters: natural body and face motion, weight, timing, no jitter, floating or slow-motion drift. */
+  animation: number | null;
+  /** The camera move matches the intended move and is smooth. */
+  cameraMotion: number | null;
+  /** Secondary motion of extras and the environment; frozen or mannequin-like crowds score low. */
+  backgroundMotion: number | null;
+  /** Characters match their concept references (face, hair, build, wardrobe). */
+  consistency: number | null;
+  /** Lip sync and intelligibility of the dialogue line. */
+  lipSync: number | null;
+  /** Audio: clean, no clipping, dropouts, wrong voice or unmotivated noise. */
+  audio: number | null;
+};
+
+export type ShotVideoReviewIssue = {
+  category: 'quality' | 'animation' | 'camera' | 'background' | 'consistency' | 'lip_sync' | 'audio' | 'artifact' | 'story';
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  /** Where in the clip, "MM:SS". */
+  timestamp?: string;
+};
+
+/** A video model watching one take (with sound) and judging it. Stored per take on the shot. */
+export type ShotVideoReview = {
+  /** The take this review belongs to (one of the shot's videoVersions). */
+  videoUrl: string;
+  /** Overall score 0–10 (one decimal). */
+  score: number;
+  verdict: 'keep' | 'usable' | 'reshoot';
+  scores: ShotVideoReviewScores;
+  /** Background extras stand still like mannequins. */
+  frozenBackground: boolean;
+  summary: string;
+  issues: ShotVideoReviewIssue[];
+  /** What the reviewer heard (the dialogue as spoken). */
+  dialogueHeard?: string;
+  /** Concrete change to the video prompt that fixes the issues. */
+  promptFix?: string;
+  model?: string;
+  reviewedAt: string;
+};
+
+/** Several takes of one shot watched side by side; the reviewer picks the one to cut in. */
+export type ShotVideoTakeComparison = {
+  bestVideoUrl: string;
+  reason: string;
+  ranking: Array<{ videoUrl: string; rank: number; reason: string }>;
+  /** 'comparison' when the side-by-side pick stands, 'scores' when the single-take scores decided. */
+  decidedBy: 'comparison' | 'scores';
+  model?: string;
+  comparedAt: string;
+};
+
 export type GarmentCategory = 'top' | 'bottom' | 'shoes' | 'outerwear' | 'accessory' | 'headwear';
 
 export type OutfitGarmentPiece = {
@@ -1517,6 +1574,10 @@ export type ShotPrompt = {
   filmingContinuityRefinementSummary?: string;
   filmingContinuityRefinementPasses?: number;
   continuityReview?: ShotContinuityReview;
+  /** Video reviews, one per reviewed take (matched by videoUrl). */
+  videoReviews?: ShotVideoReview[];
+  /** Latest side-by-side comparison of the takes. */
+  videoTakeComparison?: ShotVideoTakeComparison;
   analysisNotes?: string[];
 };
 
