@@ -15,7 +15,7 @@ const PARTITION = 'persist:midjourney';
 const IMAGINE_URL = 'https://www.midjourney.com/imagine';
 const LOGIN_URL = 'https://www.midjourney.com/login';
 const CDN_HOST = 'cdn.midjourney.com';
-const SUBMIT_TIMEOUT_MS = 75 * 1000;      // Enter → job id known
+const SUBMIT_TIMEOUT_MS = 120 * 1000;     // Enter → job id known (a busy queue can take this long)
 const RENDER_TIMEOUT_MS = 8 * 60 * 1000;  // job id known → images on the CDN
 const STALL_TIMEOUT_MS = 4 * 60 * 1000;   // no progress change at all
 const RUN_TIMEOUT_MS = 20 * 1000;         // one page call
@@ -476,10 +476,11 @@ const normalizePromptParams = (text) => {
     const words = match[2].trim().split(/\s+/).filter(Boolean);
     const arity = FLAG_ARITY[flag];
     if (arity === undefined) { console.warn('[jeff] dropping unknown flag', flag); body.push(words.join(' ')); continue; }
-    if (arity === 'many') { flags.set(flag, words.join(' ')); continue; }
+    if (arity === 'many') { flags.set(flag, words.join(' ').replace(/[,;.]+$/, '')); continue; }
     let take = arity;
     if (OPTIONAL_VALUE_FLAGS.has(flag) && words.length && !/^[a-z0-9._-]+$/i.test(words[0])) take = 0;
-    flags.set(flag, words.slice(0, take).join(' '));
+    // "--v 7," → the comma belongs to the description, not to the version.
+    flags.set(flag, words.slice(0, take).join(' ').replace(/[,;.]+$/, ''));
     if (words.length > take) body.push(words.slice(take).join(' '));
   }
   const description = body.filter(Boolean).join(', ').replace(/\s+,/g, ',').replace(/,\s*,/g, ',').trim();
@@ -672,7 +673,7 @@ const objectPromptText = (obj) => [obj.prompt, obj.full_command, obj.fullCommand
  */
 const jobIdFromApi = (job, knownIds) => {
   const claimed = claimedJobIds();
-  const snippet = promptSnippet(job.prompt);
+  const snippet = promptSnippet(job.fullPrompt || job.prompt);
   for (const entry of apiLog) {
     if (entry.at < job.submittedAt - 1000) continue;
     if (!/submit|imagine|jobs?\b|create/i.test(entry.url)) continue;
@@ -685,7 +686,7 @@ const jobIdFromApi = (job, knownIds) => {
       const id = objectJobId(obj);
       if (!id || knownIds.has(id) || claimed.has(id)) return;
       const promptText = objectPromptText(obj);
-      if (snippet && promptText.includes(snippet)) matching.push(id);
+      if (textHasSnippet(promptText, snippet)) matching.push(id);
       else if (!promptText) unmatched.add(id);
     });
     if (moderation) throw moderationError(moderation.slice(0, 300));
@@ -705,11 +706,18 @@ const ensureImaginePage = async () => {
   if (!/midjourney\.com\/imagine/i.test(url) || inflightJobs().length === 0) await navigate(IMAGINE_URL);
 };
 
-const promptSnippet = (prompt) => String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ');
+// Words only: Midjourney shows the prompt with its own punctuation, hyphen breaks and image URLs, so
+// "Cinematic character reference, medium-wide shot" must still match its job card.
+const promptWords = (text) => String(text || '').toLowerCase().replace(/https?:\/\/\S+/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+const promptSnippet = (prompt) => {
+  const description = String(prompt || '').split(/(^|\s)--[a-z]/i)[0];
+  return promptWords(description).split(' ').filter(Boolean).slice(0, 6).join(' ');
+};
+const textHasSnippet = (text, snippet) => Boolean(snippet) && promptWords(text).includes(snippet);
 
 const resolveJobId = async (job, knownIds) => {
   const deadline = Date.now() + SUBMIT_TIMEOUT_MS;
-  const snippet = promptSnippet(job.prompt);
+  const snippet = promptSnippet(job.fullPrompt || job.prompt);
   while (Date.now() < deadline) {
     if (job.cancelled) throw new Error('Cancelled');
     const fromApi = jobIdFromApi(job, knownIds);
@@ -729,7 +737,7 @@ const resolveJobId = async (job, knownIds) => {
     const claimed = claimedJobIds();
     const fresh = Object.keys(cards).filter((id) => !knownIds.has(id) && !claimed.has(id));
     // Only a new card that shows our prompt is ours; older cards keep loading in as the page scrolls.
-    const matching = fresh.find((id) => snippet && (cards[id].text || '').toLowerCase().replace(/\s+/g, ' ').includes(snippet));
+    const matching = fresh.find((id) => textHasSnippet(cards[id].text, snippet));
     if (matching) return matching;
     await sleep(1500);
   }
