@@ -240,6 +240,7 @@ releases need these GitHub Actions secrets: `MACOS_CERTIFICATE_BASE64`,
 
 ## Configuration and privacy
 
+- For step-by-step instructions on setting up credentials for Gemini, Replicate, FAL, xAI, ElevenLabs, and more, see the [BYOK Provider Setup Guide](docs/BYOK_PROVIDER_SETUP.md).
 - Provider keys are entered in the app and stored locally. `.env.local` is for
   development, hosted features and build signing only.
 - Never commit `.env`, certificates, private keys, release builds or provider
