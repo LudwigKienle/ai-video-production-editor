@@ -53,6 +53,11 @@
       "text": "Your clips land in the project's media. The Timeline works like an editing suite, with pages for cut, color and sound. And Export renders the result, with presets for YouTube, TikTok and Instagram."
     },
     {
+      "id": "s09b_agents",
+      "kind": "screen",
+      "text": "And one thing is new since this video. You can now drive the whole studio from an AI agent: Claude Code, Claude Desktop, or Codex with your ChatGPT account. Open Settings, then Claude and Codex, and connect with one click. The studio runs a local MCP server and a REST API, so your agent gets the same tools you have. Then just tell it what you want to make. It writes the script, builds the cast and locations, directs the storyboard and renders the frames, and every change appears in the studio while you watch. You stay the director, and you can take over at any moment."
+    },
+    {
       "id": "s10_outro",
       "kind": "motion",
       "text": "That's your first ten minutes. Next, open First Ten Minutes in the docs folder, and run the Rainline demo with a key connected. The project is open source under the GPL, so issues, ideas and pull requests are welcome. And if it helps you make something, a star on GitHub helps other filmmakers find it."

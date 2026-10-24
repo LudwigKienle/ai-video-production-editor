@@ -1,0 +1,542 @@
+{
+ "id": "s09b_agents",
+ "duration": 36.72,
+ "audio": "agents/s09b_agents.mp3",
+ "words": [
+  {
+   "word": "And",
+   "start": 0.0,
+   "end": 0.2
+  },
+  {
+   "word": "one",
+   "start": 0.2,
+   "end": 0.4
+  },
+  {
+   "word": "thing",
+   "start": 0.4,
+   "end": 0.62
+  },
+  {
+   "word": "is",
+   "start": 0.62,
+   "end": 0.8
+  },
+  {
+   "word": "new",
+   "start": 0.8,
+   "end": 1.16
+  },
+  {
+   "word": "since",
+   "start": 1.16,
+   "end": 1.42
+  },
+  {
+   "word": "this",
+   "start": 1.42,
+   "end": 1.7
+  },
+  {
+   "word": "video.",
+   "start": 1.7,
+   "end": 2.04
+  },
+  {
+   "word": "You",
+   "start": 2.52,
+   "end": 2.7
+  },
+  {
+   "word": "can",
+   "start": 2.7,
+   "end": 2.84
+  },
+  {
+   "word": "now",
+   "start": 2.84,
+   "end": 3.08
+  },
+  {
+   "word": "drive",
+   "start": 3.08,
+   "end": 3.34
+  },
+  {
+   "word": "the",
+   "start": 3.34,
+   "end": 3.52
+  },
+  {
+   "word": "whole",
+   "start": 3.52,
+   "end": 3.88
+  },
+  {
+   "word": "studio",
+   "start": 3.88,
+   "end": 4.32
+  },
+  {
+   "word": "from",
+   "start": 4.32,
+   "end": 4.7
+  },
+  {
+   "word": "an",
+   "start": 4.7,
+   "end": 4.88
+  },
+  {
+   "word": "AI",
+   "start": 4.88,
+   "end": 5.28
+  },
+  {
+   "word": "agent,",
+   "start": 5.28,
+   "end": 5.76
+  },
+  {
+   "word": "Claude",
+   "start": 6.38,
+   "end": 6.38
+  },
+  {
+   "word": "Code,",
+   "start": 6.38,
+   "end": 6.76
+  },
+  {
+   "word": "Claude",
+   "start": 7.24,
+   "end": 7.38
+  },
+  {
+   "word": "Desktop,",
+   "start": 7.38,
+   "end": 7.84
+  },
+  {
+   "word": "or",
+   "start": 8.08,
+   "end": 8.36
+  },
+  {
+   "word": "Codex",
+   "start": 8.36,
+   "end": 8.78
+  },
+  {
+   "word": "with",
+   "start": 8.78,
+   "end": 9.16
+  },
+  {
+   "word": "your",
+   "start": 9.16,
+   "end": 9.34
+  },
+  {
+   "word": "ChatGPT",
+   "start": 9.34,
+   "end": 10.0
+  },
+  {
+   "word": "account.",
+   "start": 10.0,
+   "end": 10.42
+  },
+  {
+   "word": "Open",
+   "start": 10.96,
+   "end": 11.22
+  },
+  {
+   "word": "Settings,",
+   "start": 11.22,
+   "end": 11.6
+  },
+  {
+   "word": "then",
+   "start": 12.12,
+   "end": 12.24
+  },
+  {
+   "word": "Claude",
+   "start": 12.24,
+   "end": 12.68
+  },
+  {
+   "word": "and",
+   "start": 12.68,
+   "end": 12.92
+  },
+  {
+   "word": "Codex,",
+   "start": 12.92,
+   "end": 13.28
+  },
+  {
+   "word": "and",
+   "start": 13.68,
+   "end": 13.86
+  },
+  {
+   "word": "connect",
+   "start": 13.86,
+   "end": 14.16
+  },
+  {
+   "word": "with",
+   "start": 14.16,
+   "end": 14.44
+  },
+  {
+   "word": "one",
+   "start": 14.44,
+   "end": 14.8
+  },
+  {
+   "word": "click.",
+   "start": 14.8,
+   "end": 15.08
+  },
+  {
+   "word": "The",
+   "start": 15.62,
+   "end": 15.78
+  },
+  {
+   "word": "studio",
+   "start": 15.78,
+   "end": 16.08
+  },
+  {
+   "word": "runs",
+   "start": 16.08,
+   "end": 16.38
+  },
+  {
+   "word": "a",
+   "start": 16.38,
+   "end": 16.6
+  },
+  {
+   "word": "local",
+   "start": 16.6,
+   "end": 16.9
+  },
+  {
+   "word": "MCP",
+   "start": 16.9,
+   "end": 17.42
+  },
+  {
+   "word": "server",
+   "start": 17.42,
+   "end": 17.82
+  },
+  {
+   "word": "and",
+   "start": 17.82,
+   "end": 18.32
+  },
+  {
+   "word": "a",
+   "start": 18.32,
+   "end": 18.48
+  },
+  {
+   "word": "REST",
+   "start": 18.48,
+   "end": 18.68
+  },
+  {
+   "word": "API,",
+   "start": 18.68,
+   "end": 19.08
+  },
+  {
+   "word": "so",
+   "start": 19.4,
+   "end": 19.6
+  },
+  {
+   "word": "your",
+   "start": 19.6,
+   "end": 19.78
+  },
+  {
+   "word": "agent",
+   "start": 19.78,
+   "end": 20.14
+  },
+  {
+   "word": "gets",
+   "start": 20.14,
+   "end": 20.42
+  },
+  {
+   "word": "the",
+   "start": 20.42,
+   "end": 20.56
+  },
+  {
+   "word": "same",
+   "start": 20.56,
+   "end": 20.94
+  },
+  {
+   "word": "tools",
+   "start": 20.94,
+   "end": 21.28
+  },
+  {
+   "word": "you",
+   "start": 21.28,
+   "end": 21.54
+  },
+  {
+   "word": "have.",
+   "start": 21.54,
+   "end": 21.86
+  },
+  {
+   "word": "Then",
+   "start": 22.28,
+   "end": 22.54
+  },
+  {
+   "word": "just",
+   "start": 22.54,
+   "end": 22.94
+  },
+  {
+   "word": "tell",
+   "start": 22.94,
+   "end": 23.24
+  },
+  {
+   "word": "it",
+   "start": 23.24,
+   "end": 23.38
+  },
+  {
+   "word": "what",
+   "start": 23.38,
+   "end": 23.5
+  },
+  {
+   "word": "you",
+   "start": 23.5,
+   "end": 23.62
+  },
+  {
+   "word": "want",
+   "start": 23.62,
+   "end": 23.76
+  },
+  {
+   "word": "to",
+   "start": 23.76,
+   "end": 23.84
+  },
+  {
+   "word": "make.",
+   "start": 23.84,
+   "end": 24.06
+  },
+  {
+   "word": "It",
+   "start": 24.5,
+   "end": 24.7
+  },
+  {
+   "word": "writes",
+   "start": 24.7,
+   "end": 24.94
+  },
+  {
+   "word": "the",
+   "start": 24.94,
+   "end": 25.14
+  },
+  {
+   "word": "script,",
+   "start": 25.14,
+   "end": 25.46
+  },
+  {
+   "word": "builds",
+   "start": 25.66,
+   "end": 26.0
+  },
+  {
+   "word": "the",
+   "start": 26.0,
+   "end": 26.2
+  },
+  {
+   "word": "cast",
+   "start": 26.2,
+   "end": 26.42
+  },
+  {
+   "word": "and",
+   "start": 26.42,
+   "end": 26.64
+  },
+  {
+   "word": "locations,",
+   "start": 26.64,
+   "end": 27.12
+  },
+  {
+   "word": "directs",
+   "start": 27.12,
+   "end": 27.82
+  },
+  {
+   "word": "the",
+   "start": 27.82,
+   "end": 28.08
+  },
+  {
+   "word": "storyboard",
+   "start": 28.08,
+   "end": 28.64
+  },
+  {
+   "word": "and",
+   "start": 28.64,
+   "end": 28.86
+  },
+  {
+   "word": "renders",
+   "start": 28.86,
+   "end": 29.14
+  },
+  {
+   "word": "the",
+   "start": 29.14,
+   "end": 29.36
+  },
+  {
+   "word": "frames,",
+   "start": 29.36,
+   "end": 29.72
+  },
+  {
+   "word": "and",
+   "start": 30.08,
+   "end": 30.24
+  },
+  {
+   "word": "every",
+   "start": 30.24,
+   "end": 30.72
+  },
+  {
+   "word": "change",
+   "start": 30.72,
+   "end": 31.08
+  },
+  {
+   "word": "appears",
+   "start": 31.08,
+   "end": 31.46
+  },
+  {
+   "word": "in",
+   "start": 31.46,
+   "end": 31.7
+  },
+  {
+   "word": "the",
+   "start": 31.7,
+   "end": 31.82
+  },
+  {
+   "word": "studio",
+   "start": 31.82,
+   "end": 32.22
+  },
+  {
+   "word": "while",
+   "start": 32.22,
+   "end": 32.58
+  },
+  {
+   "word": "you",
+   "start": 32.58,
+   "end": 32.8
+  },
+  {
+   "word": "watch.",
+   "start": 32.8,
+   "end": 33.1
+  },
+  {
+   "word": "You",
+   "start": 33.64,
+   "end": 33.8
+  },
+  {
+   "word": "stay",
+   "start": 33.8,
+   "end": 34.02
+  },
+  {
+   "word": "the",
+   "start": 34.02,
+   "end": 34.2
+  },
+  {
+   "word": "director,",
+   "start": 34.2,
+   "end": 34.54
+  },
+  {
+   "word": "and",
+   "start": 34.84,
+   "end": 35.0
+  },
+  {
+   "word": "you",
+   "start": 35.0,
+   "end": 35.1
+  },
+  {
+   "word": "can",
+   "start": 35.1,
+   "end": 35.24
+  },
+  {
+   "word": "take",
+   "start": 35.24,
+   "end": 35.44
+  },
+  {
+   "word": "over",
+   "start": 35.44,
+   "end": 35.72
+  },
+  {
+   "word": "at",
+   "start": 35.72,
+   "end": 35.88
+  },
+  {
+   "word": "any",
+   "start": 35.88,
+   "end": 36.12
+  },
+  {
+   "word": "moment.",
+   "start": 36.12,
+   "end": 36.4
+  }
+ ]
+}

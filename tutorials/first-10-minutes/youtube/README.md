@@ -42,7 +42,8 @@ Chapters
 2:29 The seven production steps
 2:54 Image & video generators, Node Space
 3:10 Timeline & export
-3:24 Next steps
+3:23 New: drive the studio from Claude Code & Codex (MCP)
+4:01 Next steps
 
 Providers you can connect: Google Gemini, fal.ai, Replicate, ElevenLabs, xAI, Runway and more – keys stay on your machine and only go to the provider.
 
@@ -68,6 +69,6 @@ image to video, ai video workflow
   voice is AI (ElevenLabs), but YouTube only asks for disclosure when realistic content
   could be mistaken for real people, places or events.
 - Audience: not made for kids
-- End screen (last 20 s, from 3:24): subscribe button plus the launch trailer
+- End screen (last 20 s, from 4:01): subscribe button plus the launch trailer
 - Cards: launch trailer at 0:25 (install)
 - Add the video to a "Tutorials" playlist, and pin a comment with the download link

@@ -113,3 +113,18 @@ them). Motion scenes follow the new timings automatically.
 - 4K screen recording on the real timings, edit, click/whoosh sound design (done).
 - Music bed (ducked under the voice) and foley (done). Master: −16.6 LUFS, −1.4 dBTP,
   3:43. To swap the track, replace `build/audio/music.wav` (or `music.mp3`) and re-render.
+
+## Chapter 09 · Claude Code & Codex (added 24 Oct 2026)
+
+The agent connection shipped after the video was published, so it was added as its own chapter
+and spliced in before the outro of the published cut instead of re-recording everything:
+
+- Narration: `s09b_agents` in `script/scenes.json`, ElevenLabs `eleven_v4`, voice *Vino – Warm
+  Leadership Narrator* (same as the original), word timings via faster-whisper →
+  `remotion/src/agents.data.json`.
+- Picture: 4K captures of the running app (Settings → Claude & Codex, Concept), the Claude Code
+  terminal and the editor from the BROTHER WOLF agent run, in the same window, camera easing,
+  highlights, chapter pill and captions → `remotion/src/AgentsChapter.tsx`
+  (`npx remotion render src/agents-index.ts Agents ../build/agents/chapter.mp4`).
+- Splice: published video up to 3:23.55, 0.3 s cross-fade into the chapter, 0.3 s cross-fade into the
+  original outro (from 3:24.2) → `build/tutorial_with_agents.mp4` (4:20).
