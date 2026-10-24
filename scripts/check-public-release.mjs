@@ -49,6 +49,13 @@ const forbiddenPatterns = [
   new RegExp('charit' + '[eé]|' + 'dali' + '-esque|' + 'la' + 'ika', 'iu'),
 ];
 
+// Ludwig's own public open-source plugin repo may be named; the brand rule still catches every other mention.
+const allowedPhrases = [
+  new RegExp('bucks' + 'wood-post-plugins', 'giu'),
+  new RegExp('Bucks' + 'wood Post Plugins', 'gu'),
+];
+const withoutAllowed = (line) => allowedPhrases.reduce((text, pattern) => text.replace(pattern, ''), line);
+
 const findings = [];
 const artifactFindings = [];
 
@@ -83,7 +90,7 @@ const walk = (dir) => {
 
     const lines = text.split(/\r?\n/);
     lines.forEach((line, index) => {
-      if (forbiddenPatterns.some((pattern) => pattern.test(line))) {
+      if (forbiddenPatterns.some((pattern) => pattern.test(withoutAllowed(line)))) {
         findings.push(`${relPath}:${index + 1}: ${line.trim()}`);
       }
     });
