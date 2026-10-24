@@ -113,7 +113,8 @@ Read the [First 10 minutes](docs/FIRST_10_MINUTES.md), the
   connects Claude Code, Codex or Claude Desktop in one click (MCP, plus a REST API
   for scripts). Agents read and write the script, cast, locations and storyboard
   and start generations; you watch every change in the app. See
-  [docs/agent-connect.md](docs/agent-connect.md).
+  [docs/agent-connect.md](docs/agent-connect.md), and copy a ready prompt from the
+  [MCP recipes](docs/mcp-recipes.md).
 
 ## Earlier (September 2026)
 

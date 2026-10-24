@@ -19,6 +19,7 @@ into the clients' configs and a new token or port needs no reconnect.
 | Claude Desktop | `mcpServers.ai-video-studio` in `claude_desktop_config.json` (restart Claude) |
 
 Start a new agent session afterwards; the tools appear as `mcp__ai-video-studio__*`.
+Ready-to-paste prompts for common jobs are in [mcp-recipes.md](mcp-recipes.md).
 
 ## Endpoints
 
