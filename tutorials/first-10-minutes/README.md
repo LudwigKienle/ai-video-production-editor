@@ -126,5 +126,8 @@ and spliced in before the outro of the published cut instead of re-recording eve
   terminal and the editor from the BROTHER WOLF agent run, in the same window, camera easing,
   highlights, chapter pill and captions → `remotion/src/AgentsChapter.tsx`
   (`npx remotion render src/agents-index.ts Agents ../build/agents/chapter.mp4`).
+- Music: the tutorial's own bed (*Uplifting Tech Tutorial Bed 112 BPM*, Magnific/ElevenLabs, from the
+  asset library) from 2:30 under the chapter, ducked under the voice (sidechain, ≈ −11 dB) to the
+  original levels; chapter −16.7 LUFS like the surrounding cut.
 - Splice: published video up to 3:23.55, 0.3 s cross-fade into the chapter, 0.3 s cross-fade into the
   original outro (from 3:24.2) → `build/tutorial_with_agents.mp4` (4:20).
