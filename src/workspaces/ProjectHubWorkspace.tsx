@@ -153,7 +153,7 @@ export type ProjectHubStudioAutomationBindings = {
     generateStoryboardVideos: (payload?: { limit?: number }) => Promise<{ detail: string; generatedCount: number }>;
     /** Image and video model pickers: current choice and every option. */
     getModels: () => ProjectHubModelCatalog;
-    setModels: (payload: { imageModel?: string; videoModel?: string }) => { imageModel: string; videoModel: string };
+    setModels: (payload: { imageModel?: string; videoModel?: string; aspectRatio?: string }) => { imageModel: string; videoModel: string; aspectRatio: string };
     /** One shot's storyboard frame / video, or one reference image, with the selected models. Throws with the hub's error. */
     generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
     generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
@@ -178,6 +178,8 @@ export type ProjectHubModelOption = { id: string; label: string; provider: strin
 export type ProjectHubModelCatalog = {
     image: { current: string; options: ProjectHubModelOption[] };
     video: { current: string; options: ProjectHubModelOption[] };
+    /** Frame for concept and storyboard renders (the Concept tab's aspect picker). */
+    aspectRatio: { current: string; options: string[] };
 };
 
 interface ProjectHubWorkspaceProps {
@@ -234,7 +236,8 @@ type ConceptCharacterSubtab = 'base_ref' | 'angles' | 'outfits' | 'ages';
 type ConceptEnvironmentSubtab = 'base_ref' | 'angles' | 'time_of_day';
 type ConceptPropSubtab = 'base_ref' | 'angles' | 'state';
 type ConceptBrandingSubtab = 'base_ref' | 'variations';
-type AspectRatioOption = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '2.39:1' | '235:100' | '239:100';
+type AspectRatioOption = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '21:9' | '2.39:1' | '235:100' | '239:100';
+const ASPECT_RATIO_VALUES: AspectRatioOption[] = ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9', '2.39:1', '235:100', '239:100'];
 type ModelAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1';
 
 /** Models that can dress a character from reference images (outfits and garment pieces). */
@@ -673,6 +676,7 @@ const formatSceneNumberRanges = (sceneNumbers: number[]) => {
 };
 
 const CINEMASCOPE_RATIOS: Record<string, number> = {
+    '21:9': 21 / 9,
     '2.39:1': 2.39,
     '239:100': 2.39,
     '235:100': 2.35,
@@ -697,6 +701,7 @@ const aspectRatioToCss = (ratio: AspectRatioOption | undefined): string => {
         case '4:3': return '4 / 3';
         case '3:4': return '3 / 4';
         case '1:1': return '1 / 1';
+        case '21:9': return '21 / 9';
         case '2.39:1': return '2.39 / 1';
         case '235:100': return '2.35 / 1';
         case '239:100': return '2.39 / 1';
@@ -1449,6 +1454,7 @@ const ASPECT_RATIO_OPTIONS: Array<{ value: AspectRatioOption; label: string; ico
     { value: '4:3', label: '4:3', icon: { w: 18, h: 14 } },
     { value: '3:4', label: '3:4', icon: { w: 14, h: 18 } },
     { value: '1:1', label: '1:1', icon: { w: 14, h: 14 } },
+    { value: '21:9', label: '21:9', icon: { w: 24, h: 10 } },
     { value: '2.39:1', label: '2.39', icon: { w: 24, h: 10 } },
     { value: '235:100', label: '235:100', icon: { w: 24, h: 10 } },
     { value: '239:100', label: '239:100', icon: { w: 24, h: 10 } },
@@ -13328,8 +13334,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     storyboardOptionsRef.current = { autoRefine: useStoryboardContinuityAutoRefine };
     const continuityAgentRef = useRef({ reviewShotFrameVisually, generateReferenceAngleForYaw, references });
     continuityAgentRef.current = { reviewShotFrameVisually, generateReferenceAngleForYaw, references };
-    const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
-    agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
+    const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, referenceAspectRatio, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
+    agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, referenceAspectRatio, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
 
     /** Run a hub action and turn the error it would only show in the UI into a thrown error. */
     const runReportingErrors = async (action: () => Promise<unknown>) => {
@@ -13346,8 +13352,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             getModels: () => ({
                 image: { current: agentHandlersRef.current.referenceImageModel, options: REFERENCE_MODEL_OPTIONS.map(toOption) },
                 video: { current: agentHandlersRef.current.videoModel, options: FILMING_VIDEO_MODEL_OPTIONS.map(toOption) },
+                aspectRatio: { current: agentHandlersRef.current.referenceAspectRatio, options: ASPECT_RATIO_VALUES },
             }),
-            setModels: ({ imageModel, videoModel: nextVideoModel }) => {
+            setModels: ({ imageModel, videoModel: nextVideoModel, aspectRatio }) => {
+                if (aspectRatio !== undefined) {
+                    if (!ASPECT_RATIO_VALUES.includes(aspectRatio as AspectRatioOption)) throw new Error(`Unknown aspect ratio: ${aspectRatio}. Use one of ${ASPECT_RATIO_VALUES.join(', ')}.`);
+                    setReferenceAspectRatio(aspectRatio as AspectRatioOption);
+                }
                 if (imageModel !== undefined) {
                     if (!REFERENCE_MODEL_OPTIONS.some((option) => option.id === imageModel)) throw new Error(`Unknown image model: ${imageModel}. Use project_list_models.`);
                     setReferenceImageModel(imageModel as ReferenceImageModel);
@@ -13359,6 +13370,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return {
                     imageModel: imageModel ?? agentHandlersRef.current.referenceImageModel,
                     videoModel: nextVideoModel ?? agentHandlersRef.current.videoModel,
+                    aspectRatio: aspectRatio ?? agentHandlersRef.current.referenceAspectRatio,
                 };
             },
             generateShotImage: async ({ shot }) => {

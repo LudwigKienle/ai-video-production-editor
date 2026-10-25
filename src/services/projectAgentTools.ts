@@ -82,6 +82,7 @@ export const upsertReference = (references: ReferenceItem[], input: Record<strin
     consistencyNotes: asString(input.consistencyNotes),
     baseReferenceMode: (['auto', 'neutral', 'outfit'] as const).find((mode) => mode === input.baseReferenceMode),
     characterPerspective: (['auto', 'close_up', 'full_body', 'side', 'profile_full', 'back'] as const).find((value) => value === input.perspective),
+    characterBackground: (['auto', 'white', 'black', 'green', 'natural'] as const).find((value) => value === input.background),
   });
   const image = mediaFrom(input, 'image');
   if (existing) {
@@ -404,6 +405,7 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
         consistencyNotes: str('Visual traits that are ALWAYS true (e.g. "emerald ring on a gold chain"). They are appended to every image prompt of this reference, so no episode lists or alternative outfits.'),
         baseReferenceMode: str('Characters only: "outfit" renders the signature look as described (best for series leads), "neutral" a neutral base layer in T-pose for wardrobe work, "auto" lets the editor decide.'),
         perspective: str('Characters only: framing of the reference image — auto, close_up, full_body, side, profile_full or back.'),
+        background: str('Characters only: backdrop of the reference image — auto (as the prompt says), white, black, green (screen) or natural (their environment, for cinematic portraits).'),
         imageUrl: str('Reference image: https URL or data URL.'),
         imagePath: str('Reference image: local file path.'),
       },
@@ -564,8 +566,8 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
   },
   {
     name: 'project_set_models',
-    description: 'Select the image model (concepts, storyboard frames) and/or the video model (filming) in the editor. Ids come from project_list_models. The user sees the change in the model pickers.',
-    parameters: { type: 'object', properties: { imageModel: str('Image model id.'), videoModel: str('Video model id.') } },
+    description: 'Select the image model (concepts, storyboard frames), the video model (filming) and/or the frame (aspect ratio) of concept and storyboard renders in the editor. Ids come from project_list_models. The user sees the change in the pickers.',
+    parameters: { type: 'object', properties: { imageModel: str('Image model id.'), videoModel: str('Video model id.'), aspectRatio: str('Frame for concept/storyboard renders: 16:9, 9:16, 4:3, 3:4, 1:1, 21:9, 2.39:1 …') } },
   },
   {
     name: 'project_generate_shot_images',
@@ -673,8 +675,9 @@ export type ProjectAgentAutomation = {
   getModels: () => {
     image: { current: string; options: Array<{ id: string; label: string; provider: string; goodFor?: string }> };
     video: { current: string; options: Array<{ id: string; label: string; provider: string; goodFor?: string }> };
+    aspectRatio?: { current: string; options: string[] };
   };
-  setModels: (payload: { imageModel?: string; videoModel?: string }) => { imageModel: string; videoModel: string };
+  setModels: (payload: { imageModel?: string; videoModel?: string; aspectRatio?: string }) => { imageModel: string; videoModel: string; aspectRatio?: string };
   generateShotImage: (payload: { shot: number }) => Promise<{ detail: string }>;
   generateShotVideo: (payload: { shot: number }) => Promise<{ detail: string }>;
   generateReferenceImage: (payload: { referenceId: string; instruction?: string }) => Promise<{ detail: string }>;
@@ -724,12 +727,13 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
     return [...new Set(numbers)];
   };
   /** Select models in the hub and wait until its handlers run with them. */
-  const switchModels = async (models: { imageModel?: string; videoModel?: string }) => {
+  const switchModels = async (models: { imageModel?: string; videoModel?: string; aspectRatio?: string }) => {
     (await ctx.automation()).setModels(models);
     for (let attempt = 0; attempt < 30; attempt += 1) {
       await ctx.settle();
       const current = (await ctx.automation()).getModels();
-      if ((!models.imageModel || current.image.current === models.imageModel) && (!models.videoModel || current.video.current === models.videoModel)) return;
+      if ((!models.imageModel || current.image.current === models.imageModel) && (!models.videoModel || current.video.current === models.videoModel)
+        && (!models.aspectRatio || current.aspectRatio?.current === models.aspectRatio)) return;
     }
     throw new Error('The editor did not switch models in time.');
   };
@@ -1072,16 +1076,18 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       return {
         image: { selected: models.image.current, options: models.image.options },
         video: { selected: models.video.current, options: models.video.options },
+        aspectRatio: models.aspectRatio ? { selected: models.aspectRatio.current, options: models.aspectRatio.options } : undefined,
       };
     },
 
     project_set_models: async (args: Record<string, unknown>) => {
       const imageModel = asString(args.imageModel);
       const videoModel = asString(args.videoModel);
-      if (!imageModel && !videoModel) throw new Error('Pass imageModel and/or videoModel.');
-      await switchModels({ imageModel, videoModel });
+      const aspectRatio = asString(args.aspectRatio);
+      if (!imageModel && !videoModel && !aspectRatio) throw new Error('Pass imageModel, videoModel and/or aspectRatio.');
+      await switchModels({ imageModel, videoModel, aspectRatio });
       const current = (await ctx.automation()).getModels();
-      return { ok: true, imageModel: current.image.current, videoModel: current.video.current };
+      return { ok: true, imageModel: current.image.current, videoModel: current.video.current, aspectRatio: current.aspectRatio?.current };
     },
 
     project_generate_shot_images: async (args: Record<string, unknown>) => {

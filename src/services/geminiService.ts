@@ -170,10 +170,10 @@ ${body}`,
     if (!rewritten) return prompt;
     return params ? `${rewritten} ${params}` : rewritten;
 };
-type StoryboardAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '2.39:1' | '235:100' | '239:100';
+type StoryboardAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '21:9' | '2.39:1' | '235:100' | '239:100';
 
 const isCinemascopeStoryboardRatio = (aspectRatio: StoryboardAspectRatio) =>
-    aspectRatio === '2.39:1' || aspectRatio === '235:100' || aspectRatio === '239:100';
+    aspectRatio === '21:9' || aspectRatio === '2.39:1' || aspectRatio === '235:100' || aspectRatio === '239:100';
 
 const buildStoryboardAspectRatioGuidance = (aspectRatio: StoryboardAspectRatio) => {
     if (aspectRatio === '9:16') {
