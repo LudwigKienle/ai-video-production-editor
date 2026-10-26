@@ -1,0 +1,77 @@
+/* Keyframe controls (stopwatch, navigator) and the Effect Controls keyframe lane.
+   Generic, own visual language; colours fall back when the pro editor variables are absent. */
+:root {
+  --kfx-accent: var(--ppx-accent, #5aa8ff);
+  --kfx-dim: var(--ppx-dim, rgba(255, 255, 255, 0.5));
+  --kfx-line: var(--ppx-line, rgba(255, 255, 255, 0.08));
+  --kfx-key: #c9ccd2;
+  --kfx-key-summary: #7d828c;
+  --kfx-key-selected: #ffb13b;
+  --kfx-playhead: #4aa3ff;
+}
+
+/* Stopwatch */
+.kfx-stopwatch-wrap { position: relative; display: inline-flex; }
+.kfx-stopwatch { width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kfx-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.kfx-stopwatch:hover:not(:disabled) { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.07); }
+.kfx-stopwatch--on { color: var(--kfx-accent); }
+.kfx-stopwatch:disabled { opacity: 0.3; cursor: default; }
+.kfx-confirm { position: absolute; z-index: 30; left: 0; top: 18px; display: flex; flex-direction: column; gap: 4px; width: 190px; padding: 7px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 5px; background: #17181a; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); color: rgba(255, 255, 255, 0.86); font-size: 11px; line-height: 1.35; }
+.kfx-confirm button { border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; background: #222428; color: inherit; font-size: 11px; padding: 3px 6px; cursor: pointer; }
+.kfx-confirm .kfx-confirm__danger { background: #5a2323; border-color: #8a3434; }
+
+/* Navigator ◀ ◆ ▶ */
+.kfx-nav { display: inline-flex; align-items: center; gap: 1px; min-width: 46px; justify-content: center; }
+.kfx-nav--empty { display: inline-block; }
+.kfx-nav__btn { width: 14px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--kfx-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 2px; }
+.kfx-nav__btn:hover:not(:disabled) { color: rgba(255, 255, 255, 0.92); background: rgba(255, 255, 255, 0.07); }
+.kfx-nav__btn:disabled { opacity: 0.28; cursor: default; }
+.kfx-nav__key--on { color: var(--kfx-key-selected); }
+
+/* Effect Controls: two-column body (controls | lane) */
+.kfx-body { display: grid; grid-template-columns: minmax(0, 1fr); position: relative; }
+.kfx-body--lane { grid-template-columns: minmax(0, 1fr) var(--kfx-lane-width, 42%); }
+.kfx-left { min-width: 0; }
+.kfx-lane-col { position: relative; border-left: 1px solid var(--kfx-line); background: rgba(0, 0, 0, 0.18); min-width: 0; }
+.kfx-colhead { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 10.5px; color: var(--kfx-dim); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--kfx-line); position: sticky; top: 0; z-index: 3; background: var(--ppx-panel, #1f1f20); }
+.kfx-colhead strong { color: rgba(255, 255, 255, 0.8); font-weight: 600; }
+
+/* Prop rows with keyframe columns (Motion, Opacity, Volume) */
+.ppx-prop.kfx-prop { grid-template-columns: 16px minmax(74px, 36%) 1fr 46px; padding-left: 6px; gap: 4px; }
+.kfx-prop .ppx-prop__value { gap: 8px; }
+
+/* FX rows with keyframe columns */
+.fxp-row.fxp-row--kf { grid-template-columns: 16px minmax(70px, 38%) 1fr 46px 18px; gap: 4px; padding-left: 4px; }
+@container (max-width: 330px) {
+  .fxp-row.fxp-row--kf { grid-template-columns: 16px minmax(64px, 50%) 1fr 46px 16px; padding-left: 2px; }
+}
+
+/* Lane */
+.kfx-lane { position: relative; height: 100%; outline: none; user-select: none; }
+.kfx-lane:focus-visible { box-shadow: inset 0 0 0 1px var(--kfx-accent); }
+.kfx-ruler { position: sticky; top: 0; z-index: 4; border-bottom: 1px solid var(--kfx-line); background: var(--ppx-panel, #1f1f20); cursor: text; overflow: hidden; }
+.kfx-ruler__tick { position: absolute; bottom: 0; height: 6px; border-left: 1px solid rgba(255, 255, 255, 0.28); }
+.kfx-ruler__label { position: absolute; bottom: 5px; left: 2px; font-size: 9.5px; color: var(--kfx-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kfx-ruler__end { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(255, 255, 255, 0.22); }
+.kfx-ruler__head { position: absolute; bottom: 0; width: 0; height: 0; margin-left: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--kfx-playhead); }
+.kfx-toolbar { position: absolute; right: 2px; top: 2px; display: flex; gap: 4px; align-items: center; cursor: default; padding: 0 2px 0 6px; background: var(--ppx-panel, #1f1f20); }
+.kfx-toolbar__count { font-size: 9.5px; color: var(--kfx-key-selected); }
+.kfx-toolbar__btn { border: 1px solid var(--kfx-line); border-radius: 3px; background: #18191b; color: rgba(255, 255, 255, 0.8); font-size: 9.5px; padding: 0 5px; height: 15px; cursor: pointer; }
+.kfx-toolbar__btn:disabled { opacity: 0.35; cursor: default; }
+.kfx-strip { position: absolute; left: 0; right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.025); }
+.kfx-strip--summary { background: rgba(255, 255, 255, 0.025); }
+.kfx-key { position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; padding: 3px; cursor: ew-resize; z-index: 2; }
+.kfx-key:hover svg { filter: brightness(1.25); }
+.kfx-playhead { position: absolute; width: 1px; margin-left: -0.5px; background: var(--kfx-playhead); pointer-events: none; z-index: 3; }
+.kfx-menu { position: absolute; z-index: 40; min-width: 150px; padding: 4px 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 5px; background: #17181a; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55); }
+.kfx-menu__title { padding: 3px 10px 5px; font-size: 10px; color: var(--kfx-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.kfx-menu__item { display: flex; width: 100%; align-items: center; gap: 4px; padding: 4px 10px 4px 6px; border: 0; background: transparent; color: rgba(255, 255, 255, 0.88); font-size: 11.5px; text-align: left; cursor: pointer; }
+.kfx-menu__item:hover { background: rgba(90, 168, 255, 0.18); }
+.kfx-menu__item--danger { color: #ff8f8f; }
+.kfx-menu__check { width: 14px; display: inline-block; color: var(--kfx-accent); }
+.kfx-menu__sep { height: 1px; margin: 4px 0; background: rgba(255, 255, 255, 0.1); }
+
+/* Effect Controls header: "Quelle · …" / "Sequenz · …" */
+.kfx-head { gap: 6px; }
+.kfx-head__tab { min-width: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kfx-dim); font-size: 11px; padding: 1px 6px; border-radius: 3px; }
+.kfx-head__tab--active { color: rgba(255, 255, 255, 0.9); font-weight: 600; background: rgba(255, 255, 255, 0.06); flex: 1; max-width: none; }

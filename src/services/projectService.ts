@@ -37,6 +37,8 @@ type ProjectSnapshot = {
   mediaItems: MediaItem[];
   timelineClips: TimelineClip[];
   timelineTracks: TimelineTrack[];
+  /** Optional sequence markers (pro editor). Older projects simply omit the field. */
+  sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
   waveformCache: WaveformCache;
   projectHub?: {
     shotPrompts: ShotPrompt[];
@@ -131,6 +133,7 @@ type ProjectFile = {
   mediaItems: ProjectMediaRecord[];
   timelineClips: TimelineClip[];
   timelineTracks: TimelineTrack[];
+  sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
   waveformCache: WaveformCache;
   projectHub?: ProjectHubRecord;
   reviewData?: ReviewData;
@@ -156,6 +159,8 @@ type ProjectLoadResult = {
   mediaItems: ProjectMediaRecord[];
   timelineClips: TimelineClip[];
   timelineTracks: TimelineTrack[];
+  /** Optional sequence markers (pro editor). Older projects simply omit the field. */
+  sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
   waveformCache: WaveformCache;
   projectHub?: {
     shotPrompts: ShotPrompt[];
@@ -1232,6 +1237,7 @@ export const saveProjectToFolder = async (folderPath: string, snapshot: ProjectS
     mediaItems,
     timelineClips: snapshot.timelineClips,
     timelineTracks: snapshot.timelineTracks,
+    sequenceMarkers: snapshot.sequenceMarkers,
     waveformCache: snapshot.waveformCache,
     projectHub,
     reviewData,

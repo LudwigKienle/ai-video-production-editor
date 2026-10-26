@@ -87,6 +87,7 @@ import ProjectHubWorkspace, { type ProjectHubStudioAutomationBindings } from './
 import OutfitWorkspace from './workspaces/OutfitWorkspace';
 import ImportWorkspace from './workspaces/ImportWorkspace';
 import EditWorkspace from './workspaces/EditWorkspace';
+import { normalizeMarkers, type SequenceMarker } from './workspaces/edit-pro/markers';
 import AssetLibraryWorkspace from './workspaces/AssetLibraryWorkspace';
 import DesignWorkspace from './workspaces/DesignWorkspace';
 import ImageGenerationWorkspace from './workspaces/ImageGenerationWorkspace';
@@ -939,6 +940,7 @@ function App() {
         resetTimelineClips,
     ] = useHistoryState<TimelineClip[]>([]);
     const [timelineTracks, setTimelineTracks] = useState<TimelineTrack[]>(INITIAL_TRACKS);
+    const [sequenceMarkers, setSequenceMarkers] = useState<SequenceMarker[]>([]);
     const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
     const [activeTrackId, setActiveTrackId] = useState<string | null>(INITIAL_TRACKS[0]?.id || null);
     const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -3058,6 +3060,7 @@ function App() {
             ensureTargeted('video');
             ensureTargeted('audio');
             setTimelineTracks(loadedTracks);
+            setSequenceMarkers(normalizeMarkers((project as { sequenceMarkers?: unknown }).sequenceMarkers));
             setActiveTrackId(loadedTracks[0]?.id || null);
             setWaveformCache(project.waveformCache || {});
             setNodeGraph(project.nodeGraph || null);
@@ -3294,6 +3297,7 @@ function App() {
                     mediaItems,
                     timelineClips,
                     timelineTracks,
+                    sequenceMarkers,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3409,6 +3413,7 @@ function App() {
                     mediaItems,
                     timelineClips,
                     timelineTracks,
+                    sequenceMarkers,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3470,6 +3475,7 @@ function App() {
         mediaItems,
         timelineClips,
         timelineTracks,
+        sequenceMarkers,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -3527,6 +3533,7 @@ function App() {
         mediaItems,
         timelineClips,
         timelineTracks,
+        sequenceMarkers,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -8743,6 +8750,8 @@ function App() {
                     onUpdateMediaItem={(item) => setMediaItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, ...item } : entry))}
                     onAddMediaItems={addMediaItems}
                     onAddClips={addTimelineClips}
+                    sequenceMarkers={sequenceMarkers}
+                    onSequenceMarkersChange={setSequenceMarkers}
                 />
             );
             case 'IMAGE_GEN': return (
@@ -8843,6 +8852,7 @@ function App() {
             case 'UPSCALE': return (
                 <UpscaleWorkspace
                     apiKeyReady={apiKeyReady}
+                    costRates={effectiveCostRates}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
                     mediaItems={mediaItems}
                     references={references}

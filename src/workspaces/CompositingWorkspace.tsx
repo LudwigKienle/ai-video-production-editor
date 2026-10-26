@@ -23,6 +23,7 @@ import NatronCompositorPanel from '../components/NatronCompositorPanel';
 import ArtRelightPanel from '../components/ArtRelightPanel';
 import CompositingNodeStudioView from '../components/CompositingNodeStudioView';
 import { type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
+import CompShell from './fusion-pro/CompShell';
 
 interface CompositingWorkspaceProps extends SharedSequenceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -44,6 +45,15 @@ type CorridorKeySourceRole = 'source' | 'alpha';
 type CompositeTab = 'layer' | 'key' | 'relight' | 'pose' | 'reframe' | 'kling';
 
 const CORRIDOR_KEY_REPO_STORAGE_KEY = 'ai-video-studio:corridor-key-repo-path';
+const FUSION_PAGE_MODE_KEY = 'avpe.fusion.pageMode';
+type FusionPageMode = 'comp' | 'tools';
+const loadPageMode = (): FusionPageMode => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(FUSION_PAGE_MODE_KEY) === 'tools' ? 'tools' : 'comp';
+  } catch {
+    return 'comp';
+  }
+};
 
 const loadImage = (url: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -162,6 +172,15 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
   const [isKlingBridgeRunning, setIsKlingBridgeRunning] = useState(false);
   const [compositingView, setCompositingView] = useState<CompositingWorkspaceView>('tools');
   const [compositeTab, setCompositeTab] = useState<CompositeTab>('layer');
+  const [pageMode, setPageModeState] = useState<FusionPageMode>(loadPageMode);
+  const setPageMode = (mode: FusionPageMode) => {
+    setPageModeState(mode);
+    try {
+      window.localStorage.setItem(FUSION_PAGE_MODE_KEY, mode);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const readyForGeneration = apiKeyReady !== false;
   const hasDesktopCorridorKey = typeof window !== 'undefined' && Boolean(window.electron?.corridorKey);
@@ -1625,16 +1644,37 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
   const toolbar = (
     <div className="edit-toolbar__group">
       <span style={{ color: 'var(--app-accent-strong)' }}><LayersIcon className="w-4 h-4" /></span>
-      <span className="text-sm font-semibold">Fusion</span>
+      <span className="text-sm font-semibold">Fusion · Werkzeuge</span>
       <span className="edit-toolbar__hint">{activeTool.label} · {activeTool.hint}</span>
     </div>
   );
+
+  const toolbarEnd = (
+    <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={() => setPageMode('comp')} data-automation-id="fusion-back-to-comp" title="Zurück zur Komposition (Fusion / After Effects / Nuke)">
+      Zur Komposition
+    </button>
+  );
+
+  if (pageMode === 'comp') {
+    return (
+      <CompShell
+        mediaItems={mediaItems}
+        currentProjectPath={currentProjectPath}
+        onAddGeneratedMedia={onAddGeneratedMedia}
+        onAddToTimeline={onAddToTimeline}
+        clipMedia={timelineMedia && timelineMedia.type !== 'audio' ? timelineMedia : null}
+        clipDuration={timelineClip ? Math.max(0.04, timelineClip.end - timelineClip.start) : null}
+        onOpenTools={() => setPageMode('tools')}
+      />
+    );
+  }
 
   return (
     <EditorPageShell
       {...props}
       page="fusion"
       toolbar={toolbar}
+      toolbarEnd={toolbarEnd}
       left={left}
       main={main}
       transportPlacement="bar"

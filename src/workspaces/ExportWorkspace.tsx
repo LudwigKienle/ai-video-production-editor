@@ -1,811 +1,588 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+/**
+ * Export page (EXPORT workspace, bottom bar "Deliver"). Two switchable layouts over one model
+ * and one render queue (src/workspaces/export-pro):
+ *   - "Premiere": Ziele | Einstellungen | Vorschau, bottom bar with Exportieren / Warteschlange
+ *   - "DaVinci":  Render-Einstellungen | Viewer | Render-Warteschlange, timeline bar with range
+ * This file owns the side effects: preview playback, the queue runner (FFmpeg via IPC with the
+ * GPU FX bake, browser canvas recording, interchange downloads) and the MCP live commands.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { bakeFxForExport, clipsNeedingBake } from '../fx/bake';
 import { startTask, type TaskHandle } from '../services/taskCenter';
 import { MediaItem, TimelineClip, TimelineTrack } from '../types';
-import { ExportIcon } from '../components/icons';
-import PreviewPlayer, { PreviewPlayerHandle } from '../components/PreviewPlayer';
-import {
-    EXPORT_PRESETS,
-    ExportColorProfile,
-    ExportContainer,
-    ExportVideoCodec,
-    NormalizedExportSettings,
-    getBitDepthOptions,
-    getQuickExportFormat,
-    normalizeBitDepthForCodec,
-    normalizeExportSettings,
-    replaceFileExtension,
-    resolveContainerForCodec,
-    sanitizeExportFilename,
-} from '../utils/exportSettings';
+import type { PreviewPlayerHandle } from '../components/PreviewPlayer';
+import { getQuickExportFormat, type ExportColorProfile, type ExportContainer, type ExportVideoCodec } from '../utils/exportSettings';
 import { buildFcpxmlFromTimeline, downloadTextFile } from '../utils/fcpxmlExport';
 import { buildOpenTimelineIOFromTimeline } from '../utils/openTimelineIOExport';
-import {
-    DEFAULT_OPEN_COLOR_IO_CONFIG_ID,
-    OPEN_COLOR_IO_CONFIG_OPTIONS,
-    buildOpenColorIOManifest,
-    type OpenColorIOConfigId,
-} from '../utils/openColorIO';
+import { buildOpenColorIOManifest, type OpenColorIOConfigId } from '../utils/openColorIO';
 import { buildVfxHandoffManifest } from '../utils/vfxHandoffManifest';
+import { buildNatronPythonScriptFromVfxHandoffManifest, buildNukeScriptFromVfxHandoffManifest } from '../utils/vfxScriptExport';
+import { registerLiveCommands } from '../mcp/liveCommands';
 import {
-    buildNatronPythonScriptFromVfxHandoffManifest,
-    buildNukeScriptFromVfxHandoffManifest,
-} from '../utils/vfxScriptExport';
+    DESTINATION_KINDS,
+    buildRenderPayload,
+    constrainVideo,
+    outputFileName,
+    resolveRange,
+    sanitizeStem,
+    type DeliverySettings,
+    type DestinationKind,
+    type SourceInfo,
+} from './export-pro/deliveryModel';
+import { ffmpegPreflight } from './export-pro/preflight';
+import { finishRun, nextRunnableJob, queueSummary, updateJob, type ExportJob } from './export-pro/exportState';
+import { dispatchExportCommand, getExportState, setExportState, subscribeExportState } from './export-pro/exportStore';
+import type { ExportDispatch } from './export-pro/ExportFields';
+import type { ExportViewModel } from './export-pro/ExportViewShared';
+import ExportViewer from './export-pro/ExportViewer';
+import PremiereExportView from './export-pro/PremiereExportView';
+import DavinciDeliverView from './export-pro/DavinciDeliverView';
+import './export-pro/exportPro.css';
 
 interface ExportWorkspaceProps {
     mediaItems: MediaItem[];
     timelineClips: TimelineClip[];
     timelineTracks: TimelineTrack[];
     projectPath?: string | null;
+    /** Optional Sound-workspace mix (project.soundMix); forwarded to the renderer's mixdown hook. */
+    soundMix?: unknown;
 }
 
-type ExportStatus = 'IDLE' | 'RENDERING' | 'DONE' | 'ERROR';
+const CANCELLED = 'Export abgebrochen.';
+type ElectronProject = {
+    exportVideo?: (payload: { folderPath: string; project: unknown; settings: unknown }) => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
+    onExportProgress?: (callback: (progress: Record<string, unknown>) => void) => void;
+    removeExportProgressListener?: () => void;
+    writeProjectFile?: (payload: { folderPath: string; relativePath: string; data: string }) => Promise<unknown>;
+    selectFolder?: () => Promise<string | null>;
+    selectFile?: () => Promise<string | null>;
+    openFolder?: (payload: { folderPath: string }) => Promise<unknown>;
+};
+const electronProject = (): ElectronProject | null => {
+    if (typeof window === 'undefined') return null;
+    return ((window as unknown as { electron?: { project?: ElectronProject } }).electron?.project) ?? null;
+};
 
-const ExportWorkspace: React.FC<ExportWorkspaceProps> = ({ mediaItems, timelineClips, timelineTracks, projectPath }) => {
-    const [status, setStatus] = useState<ExportStatus>('IDLE');
-    const [progress, setProgress] = useState(0);
-    const [settings, setSettings] = useState({
-        presetId: 'youtube-1080p',
-        filename: 'my-ai-video.mp4',
-        width: 1920,
-        height: 1080,
-        fps: 30,
-        bitrateKbps: 12000,
-        useFfmpeg: false,
-        styleTransferPreset: 'none',
-        styleTransferStrength: 70,
-        gpuAcceleration: 'auto',
-        container: 'mp4' as ExportContainer,
-        videoCodec: 'h264' as ExportVideoCodec,
-        bitDepth: 8,
-        colorProfile: 'source' as ExportColorProfile,
-        ocioConfigId: DEFAULT_OPEN_COLOR_IO_CONFIG_ID as OpenColorIOConfigId,
-        ocioConfigPath: '',
-        vfxHandleFrames: 8,
-    });
-    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-    const [downloadName, setDownloadName] = useState('my-ai-video.webm');
-    const [exportOutputPath, setExportOutputPath] = useState<string | null>(null);
-    const [renderDetail, setRenderDetail] = useState('');
-    const [activeRenderSettings, setActiveRenderSettings] = useState<NormalizedExportSettings | null>(null);
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const dirname = (target: string) => target.replace(/[/\\][^/\\]*$/, '') || target;
 
-    // Rendering State
-    const [renderPlayhead, setRenderPlayhead] = useState(0);
-    const [isRendering, setIsRendering] = useState(false);
-    // Mirror the render into the Activity drawer so it lines up with generations and agent jobs.
-    const renderTaskRef = useRef<TaskHandle | null>(null);
-    useEffect(() => {
-        if (status === 'RENDERING') {
-            if (!renderTaskRef.current) {
-                renderTaskRef.current = startTask({ label: `Render · ${downloadName}`, kind: 'export', provider: settings.useFfmpeg ? 'ffmpeg' : 'browser', message: 'Rendering…', progress: 0 });
-            }
-            renderTaskRef.current.update({ progress: Math.max(0, Math.min(1, progress / 100)), message: `Rendering ${Math.round(progress)}%` });
-        } else if (renderTaskRef.current) {
-            if (status === 'DONE') renderTaskRef.current.complete(exportOutputPath ? `Saved ${exportOutputPath}` : 'Ready to download');
-            else if (status === 'ERROR') renderTaskRef.current.fail(renderDetail || 'Render failed');
-            else renderTaskRef.current.cancel();
-            renderTaskRef.current = null;
+/** Natural size of the first picture clip's media (for "Quelle anpassen" and the summary). */
+const useSourceInfo = (mediaItems: MediaItem[], timelineClips: TimelineClip[]): SourceInfo => {
+    const media = useMemo(() => {
+        const byId = new Map(mediaItems.map((item) => [item.id, item]));
+        const sorted = [...timelineClips].sort((a, b) => a.start - b.start);
+        for (const clip of sorted) {
+            const item = byId.get(clip.mediaId);
+            if (item && (item.type === 'video' || item.type === 'image') && item.url) return item;
         }
-    }, [status, progress]);
+        return null;
+    }, [mediaItems, timelineClips]);
+    const [info, setInfo] = useState<SourceInfo>(null);
+    useEffect(() => {
+        setInfo(null);
+        if (!media || typeof document === 'undefined') return undefined;
+        let alive = true;
+        if (media.type === 'video') {
+            const el = document.createElement('video');
+            el.preload = 'metadata';
+            el.muted = true;
+            el.onloadedmetadata = () => { if (alive && el.videoWidth) setInfo({ width: el.videoWidth, height: el.videoHeight }); };
+            el.src = media.url;
+            return () => { alive = false; el.removeAttribute('src'); el.load(); };
+        }
+        const img = new Image();
+        img.onload = () => { if (alive && img.naturalWidth) setInfo({ width: img.naturalWidth, height: img.naturalHeight }); };
+        img.src = media.url;
+        return () => { alive = false; };
+    }, [media]);
+    return info;
+};
 
-    const playerRef = useRef<PreviewPlayerHandle>(null);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const chunksRef = useRef<Blob[]>([]);
-    const requestRef = useRef<number>(0);
-    const timelineDuration = useMemo(() => {
-        if (timelineClips.length === 0) return 0;
-        return Math.max(...timelineClips.map((clip) => clip.end || 0));
-    }, [timelineClips]);
-    const activeTrackCount = useMemo(
-        () => timelineTracks.filter((track) => !track.isLocked && !track.isMuted).length,
-        [timelineTracks],
+const ExportWorkspace: React.FC<ExportWorkspaceProps> = ({ mediaItems, timelineClips, timelineTracks, projectPath, soundMix }) => {
+    const state = useSyncExternalStore(subscribeExportState, getExportState, getExportState);
+    const { settings } = state;
+    const [previewTime, setPreviewTime] = useState(0);
+    const [previewPlaying, setPreviewPlaying] = useState(false);
+    const [recordingSize, setRecordingSize] = useState<{ width: number; height: number } | null>(null);
+    const [message, setMessage] = useState<ExportViewModel['message']>(null);
+    const [runTick, setRunTick] = useState(0);
+    const playerRef = useRef<PreviewPlayerHandle | null>(null);
+    const sourceInfo = useSourceInfo(mediaItems, timelineClips);
+    const project = electronProject();
+    const hasElectron = Boolean(project?.exportVideo);
+
+    const timelineDuration = useMemo(
+        () => (timelineClips.length === 0 ? 0 : Math.max(...timelineClips.map((clip) => clip.end || 0))),
+        [timelineClips],
+    );
+    const timelineName = useMemo(() => {
+        const base = projectPath ? projectPath.replace(/[/\\]+$/, '').split(/[/\\]/).pop() : '';
+        return base || 'Sequenz 01';
+    }, [projectPath]);
+    const range = resolveRange(settings.range, timelineDuration);
+    const fps = settings.video.fps;
+
+    // Latest props/context for callbacks that outlive a render (runner, live commands).
+    const live = useRef({ mediaItems, timelineClips, timelineTracks, projectPath, soundMix, timelineDuration, timelineName, previewTime, sourceInfo });
+    live.current = { mediaItems, timelineClips, timelineTracks, projectPath, soundMix, timelineDuration, timelineName, previewTime, sourceInfo };
+
+    const dispatch: ExportDispatch = useCallback((id, args) => {
+        const ctx = live.current;
+        dispatchExportCommand(id, args, {
+            timelineDuration: ctx.timelineDuration,
+            stillTime: ctx.previewTime,
+            timelineName: ctx.timelineName,
+            source: ctx.sourceInfo,
+        });
+    }, []);
+
+    useEffect(() => {
+        if (previewTime > timelineDuration) setPreviewTime(timelineDuration);
+    }, [timelineDuration, previewTime]);
+
+    // ─── Preview playback ────────────────────────────────────────────────
+    useEffect(() => {
+        if (!previewPlaying) return undefined;
+        let last = performance.now();
+        let frame = 0;
+        const end = settings.range.mode === 'full' ? timelineDuration : range.end;
+        const step = (now: number) => {
+            const dt = (now - last) / 1000;
+            last = now;
+            let stop = false;
+            setPreviewTime((time) => {
+                const next = time + dt;
+                if (next >= end) { stop = true; return end; }
+                return next;
+            });
+            if (stop) setPreviewPlaying(false);
+            else frame = requestAnimationFrame(step);
+        };
+        frame = requestAnimationFrame(step);
+        return () => cancelAnimationFrame(frame);
+    }, [previewPlaying, timelineDuration, range.end, settings.range.mode]);
+
+    const seek = useCallback((seconds: number) => {
+        setPreviewTime(Math.max(0, Math.min(live.current.timelineDuration, seconds)));
+    }, []);
+    const togglePlay = useCallback(() => {
+        setPreviewPlaying((playing) => {
+            if (!playing && live.current.previewTime >= live.current.timelineDuration - 0.01) setPreviewTime(0);
+            return !playing;
+        });
+    }, []);
+    const markIn = useCallback(() => {
+        const s = getExportState().settings.range;
+        const t = live.current.previewTime;
+        dispatch('export.range.set', { mode: 'inout', inPoint: t, outPoint: s.outPoint !== null && s.outPoint <= t ? null : s.outPoint });
+    }, [dispatch]);
+    const markOut = useCallback(() => {
+        const s = getExportState().settings.range;
+        const t = live.current.previewTime;
+        dispatch('export.range.set', { mode: 'inout', outPoint: t, inPoint: s.inPoint !== null && s.inPoint >= t ? null : s.inPoint });
+    }, [dispatch]);
+    const clearMarks = useCallback(() => dispatch('export.range.set', { mode: 'full', inPoint: null, outPoint: null }), [dispatch]);
+
+    // ─── Queue runner ───────────────────────────────────────────────────
+    const runningRef = useRef(false);
+    const cancelRef = useRef(false);
+    const currentJobRef = useRef<ExportJob | null>(null);
+    const bakeCacheRef = useRef<{ key: string; project: { timelineClips: TimelineClip[]; timelineTracks: TimelineTrack[]; mediaItems: MediaItem[] } } | null>(null);
+
+    const patchJob = useCallback((jobId: string, patch: Partial<ExportJob>) => setExportState((s) => updateJob(s, jobId, patch)), []);
+
+    const runInterchange = (job: ExportJob) => {
+        const { mediaItems: media, timelineClips: clips, timelineTracks: tracks } = live.current;
+        const s = job.settings;
+        const video = constrainVideo(s.video);
+        const projectName = sanitizeStem(s.filename);
+        const base = {
+            projectName,
+            filename: `${projectName}.${video.codec === 'prores' ? 'mov' : video.container}`,
+            fps: video.fps,
+            width: video.width,
+            height: video.height,
+            colorProfile: video.colorProfile as ExportColorProfile,
+            bitDepth: video.bitDepth,
+            videoCodec: video.codec as ExportVideoCodec,
+            container: (video.codec === 'prores' ? 'mov' : video.container) as ExportContainer,
+            ocioConfigId: s.interchange.ocioConfigId as OpenColorIOConfigId,
+            ocioConfigPath: s.interchange.ocioConfigPath,
+        };
+        if (job.interchangeFormat !== 'ocio-manifest' && clips.length === 0) throw new Error('Timeline ist leer.');
+        const vfx = () => buildVfxHandoffManifest({ ...base, handleFrames: s.interchange.vfxHandleFrames, mediaItems: media, timelineClips: clips, timelineTracks: tracks });
+        switch (job.interchangeFormat) {
+            case 'otio':
+                downloadTextFile(job.fileName, buildOpenTimelineIOFromTimeline({ projectName, fps: video.fps, width: video.width, height: video.height, mediaItems: media, timelineClips: clips, timelineTracks: tracks }), 'application/vnd.opentimelineio+json');
+                return 'OpenTimelineIO für Schnitt- und VFX-Übergabe.';
+            case 'nuke':
+                downloadTextFile(job.fileName, buildNukeScriptFromVfxHandoffManifest(vfx()), 'text/plain');
+                return 'Nuke-Skript mit Read-Nodes, Handles und OCIO-Hinweisen.';
+            case 'natron':
+                downloadTextFile(job.fileName, buildNatronPythonScriptFromVfxHandoffManifest(vfx()), 'text/x-python');
+                return 'Natron-Python-Skript mit Projekt-Einstellungen und Read-Nodes.';
+            case 'vfx-manifest':
+                downloadTextFile(job.fileName, vfx(), 'application/json');
+                return 'VFX-Übergabe-Manifest (Resolve, Nuke, Natron, OpenRV, Blender).';
+            case 'ocio-manifest':
+                downloadTextFile(job.fileName, buildOpenColorIOManifest(base), 'application/json');
+                return 'OCIO-/ACES-Farbmanifest.';
+            case 'fcpxml':
+            default:
+                downloadTextFile(job.fileName, buildFcpxmlFromTimeline({ projectName, fps: video.fps, width: video.width, height: video.height, mediaItems: media, timelineClips: clips, timelineTracks: tracks }), 'application/xml');
+                return 'FCPXML für Premiere und Resolve.';
+        }
+    };
+
+    /** "Schnell (Browser)": real-time MediaRecorder capture of the preview canvas (WebM, no audio). */
+    const recordInBrowser = async (job: ExportJob, onProgress: (percent: number, detail: string) => void) => {
+        const quickFormat = getQuickExportFormat();
+        if (!quickFormat) throw new Error('Dieser Browser kann kein WebM aufnehmen. Bitte FFmpeg-Export in der Desktop-App nutzen.');
+        const video = constrainVideo(job.settings.video);
+        setPreviewPlaying(false);
+        setRecordingSize({ width: video.width, height: video.height });
+        setPreviewTime(job.range.start);
+        try {
+            await wait(500);
+            const canvas = playerRef.current?.getCanvas();
+            if (!canvas) throw new Error('Render-Canvas ist nicht verfügbar.');
+            const stream = canvas.captureStream(Math.max(1, video.fps));
+            const recorder = new MediaRecorder(new MediaStream([...stream.getTracks()]), {
+                mimeType: quickFormat.mimeType,
+                videoBitsPerSecond: Math.max(500, video.bitrateKbps) * 1000,
+            });
+            const chunks: Blob[] = [];
+            recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+            const stopped = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+            recorder.start();
+            setPreviewPlaying(true);
+            const startedAt = performance.now();
+            const total = Math.max(0.05, job.range.duration);
+            await new Promise<void>((resolve) => {
+                const tick = () => {
+                    const elapsed = (performance.now() - startedAt) / 1000;
+                    if (cancelRef.current || elapsed >= total) { resolve(); return; }
+                    setPreviewTime(job.range.start + elapsed);
+                    onProgress((elapsed / total) * 100, `Aufnahme ${Math.round(elapsed)} / ${Math.round(total)} s`);
+                    requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            });
+            recorder.stop();
+            await stopped;
+            setPreviewPlaying(false);
+            if (cancelRef.current) throw new Error(CANCELLED);
+            const blob = new Blob(chunks, { type: quickFormat.mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = job.fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            return job.fileName;
+        } finally {
+            setPreviewPlaying(false);
+            setRecordingSize(null);
+        }
+    };
+
+    /** Browser fallback for Einzelbild: PNG straight from the preview canvas. */
+    const snapshotInBrowser = async (job: ExportJob) => {
+        if (job.settings.still.format !== 'png') throw new Error('EXR, TIFF und DPX gibt es nur in der Desktop-App (FFmpeg).');
+        const video = constrainVideo(job.settings.video);
+        setPreviewPlaying(false);
+        setRecordingSize({ width: video.width, height: video.height });
+        setPreviewTime(job.stillTime);
+        try {
+            await wait(600);
+            const canvas = playerRef.current?.getCanvas();
+            if (!canvas) throw new Error('Render-Canvas ist nicht verfügbar.');
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) throw new Error('PNG konnte nicht erzeugt werden.');
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = job.fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            return job.fileName;
+        } finally {
+            setRecordingSize(null);
+        }
+    };
+
+    /** FFmpeg render through project:exportVideo (renderTimeline with a `delivery` block). */
+    const renderWithFfmpeg = async (job: ExportJob, onProgress: (percent: number, detail: string) => void) => {
+        const ipc = electronProject();
+        if (!ipc?.exportVideo) throw new Error('Der FFmpeg-Export braucht die Desktop-App.');
+        const { projectPath: folder, timelineClips: clips, timelineTracks: tracks, mediaItems: media, soundMix: mix } = live.current;
+        if (!folder) throw new Error('Projekt zuerst in einem Ordner speichern, dann exportieren.');
+        if (job.kind === 'interchange') throw new Error('Interchange jobs are not rendered.');
+        const normalizedSettings = buildRenderPayload(job.kind, job.settings, job.range, job.id, job.stillTime);
+        const setProgress = (percent: number) => onProgress(percent, '');
+        const setRenderDetail = (detail: string) => onProgress(-1, detail);
+
+        let exportProject = { timelineClips: clips, timelineTracks: tracks, mediaItems: media };
+        if (job.kind !== 'audio') {
+            const bakeKey = `${normalizedSettings.fps}`;
+            if (bakeCacheRef.current?.key === bakeKey) {
+                exportProject = bakeCacheRef.current.project;
+            } else {
+                const projectPath = folder;
+                // GPU effect stacks (Buckswood Post Plugins FX) are baked through the same
+                // renderer as the preview so the export matches what you saw.
+                if (clipsNeedingBake(exportProject).length > 0) {
+                    setRenderDetail('Rendering Lens & Film FX …');
+                    exportProject = await bakeFxForExport(exportProject, {
+                        folderPath: projectPath,
+                        fps: Math.max(1, normalizedSettings.fps || 24),
+                        onProgress: ({ clipIndex, clipCount, frame, frameCount, note }) => {
+                            setProgress(Math.round(((clipIndex + frame / Math.max(1, frameCount)) / clipCount) * 100));
+                            setRenderDetail(`${note} · Clip ${clipIndex + 1}/${clipCount} · Frame ${frame}/${frameCount}`);
+                        },
+                    });
+                    setProgress(0);
+                }
+                bakeCacheRef.current = { key: bakeKey, project: exportProject };
+            }
+        }
+        if (cancelRef.current) throw new Error(CANCELLED);
+
+        ipc.removeExportProgressListener?.();
+        ipc.onExportProgress?.((p) => {
+            if (p.jobId && p.jobId !== job.id) return;
+            const stage = typeof p.stage === 'string' ? p.stage : 'render';
+            const detail = [stage === 'audio-mixdown' ? 'Audio-Mixdown' : stage, typeof p.encoder === 'string' ? p.encoder : '', typeof p.note === 'string' ? p.note : ''].filter(Boolean).join(' · ');
+            onProgress(typeof p.percent === 'number' ? p.percent : -1, detail);
+        });
+        try {
+            const result = await ipc.exportVideo({
+                folderPath: folder,
+                project: mix ? { ...exportProject, soundMix: mix } : exportProject,
+                settings: normalizedSettings,
+            });
+            if (!result.ok || !result.outputPath) throw new Error(result.error || 'Unbekannter Fehler.');
+            return result.outputPath;
+        } finally {
+            ipc.removeExportProgressListener?.();
+        }
+    };
+
+    const executeJob = async (job: ExportJob) => {
+        let lastPercent = 0;
+        let lastDetail = '';
+        const task: TaskHandle = startTask({ label: `Export · ${job.fileName}`, kind: 'export', provider: job.kind === 'interchange' ? 'text' : job.settings.engine, message: 'Startet …', progress: 0 });
+        const onProgress = (percent: number, detail: string) => {
+            if (percent >= 0) lastPercent = Math.max(0, Math.min(100, percent));
+            if (detail) lastDetail = detail;
+            patchJob(job.id, { progress: lastPercent, detail: lastDetail });
+            task.update({ progress: lastPercent / 100, message: lastDetail || `${Math.round(lastPercent)} %` });
+        };
+        try {
+            let outputPath: string;
+            let detail = '';
+            if (job.kind === 'interchange') {
+                detail = runInterchange(job);
+                outputPath = job.fileName;
+            } else if (job.kind === 'media' && job.settings.engine === 'browser') {
+                outputPath = await recordInBrowser(job, onProgress);
+                detail = 'WebM heruntergeladen.';
+            } else if (job.kind === 'still' && !electronProject()?.exportVideo) {
+                outputPath = await snapshotInBrowser(job);
+                detail = 'PNG aus der Vorschau heruntergeladen.';
+            } else {
+                outputPath = await renderWithFfmpeg(job, onProgress);
+                detail = 'Gespeichert.';
+            }
+            patchJob(job.id, { status: 'done', progress: 100, detail, outputPath });
+            task.complete(`Gespeichert: ${outputPath}`);
+            setMessage({ text: `Fertig: ${outputPath}`, tone: 'info' });
+        } catch (error) {
+            const text = error instanceof Error ? error.message : String(error);
+            const cancelled = cancelRef.current || text === CANCELLED;
+            patchJob(job.id, { status: cancelled ? 'cancelled' : 'error', detail: cancelled ? CANCELLED : text });
+            if (cancelled) task.cancel(); else task.fail(text);
+            setMessage({ text: cancelled ? CANCELLED : text, tone: cancelled ? 'info' : 'error' });
+        }
+    };
+
+    useEffect(() => {
+        if (runningRef.current) return;
+        const job = nextRunnableJob(state);
+        if (!job) {
+            if ((state.runner.active || state.runner.cancelRequested) && !state.queue.some((entry) => entry.status === 'running')) {
+                bakeCacheRef.current = null;
+                setExportState(finishRun);
+            }
+            return;
+        }
+        runningRef.current = true;
+        cancelRef.current = false;
+        currentJobRef.current = job;
+        patchJob(job.id, { status: 'running', progress: 0, detail: 'Startet …' });
+        void executeJob(job).finally(() => {
+            runningRef.current = false;
+            currentJobRef.current = null;
+            setRunTick((tick) => tick + 1);
+        });
+        // executeJob reads live refs; re-run only on queue/runner changes.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.queue, state.runner, runTick]);
+
+    // Cancel: stop the browser recording loop or drop the sentinel file the FFmpeg renderer polls.
+    useEffect(() => {
+        const job = currentJobRef.current;
+        if (!state.runner.cancelRequested || !job || cancelRef.current) return;
+        cancelRef.current = true;
+        const folder = live.current.projectPath;
+        const ipc = electronProject();
+        if (folder && ipc?.writeProjectFile && job.kind !== 'interchange' && job.settings.engine !== 'browser') {
+            void ipc.writeProjectFile({ folderPath: folder, relativePath: `exports/.cancel-${job.id}`, data: '1' }).catch(() => undefined);
+        }
+    }, [state.runner.cancelRequested]);
+
+    // ─── MCP live commands (rendering needs this page) ──────────────────
+    useEffect(() => registerLiveCommands({
+        'export.queue.renderAll': () => { dispatch('export.queue.renderAll', {}); return queueSummary(getExportState().queue); },
+        'export.queue.renderJob': (args) => { dispatch('export.queue.renderJob', { jobId: String(args.jobId) }); return queueSummary(getExportState().queue); },
+        'export.queue.cancel': () => { dispatch('export.queue.cancel', {}); return queueSummary(getExportState().queue); },
+        'export.preview.seek': (args) => { seek(Number(args.seconds) || 0); return { seconds: live.current.previewTime }; },
+    }), [dispatch, seek]);
+
+    // ─── Pickers ────────────────────────────────────────────────────────
+    const pickFolder = useCallback(async () => {
+        const folder = await electronProject()?.selectFolder?.();
+        if (folder) dispatch('export.settings.patch', { section: 'root', patch: { outputDirectory: folder } });
+    }, [dispatch]);
+    const pickFile = useCallback(async (target: 'overlay' | 'lut') => {
+        const file = await electronProject()?.selectFile?.();
+        if (!file) return;
+        const fx = getExportState().settings.effects;
+        if (target === 'overlay') dispatch('export.settings.patch', { section: 'effects', patch: { imageOverlay: { ...fx.imageOverlay, path: file, enabled: true } } });
+        else dispatch('export.settings.patch', { section: 'effects', patch: { outputLut: { ...fx.outputLut, path: file, enabled: true } } });
+    }, [dispatch]);
+    const openOutput = useCallback((job: ExportJob) => {
+        if (!job.outputPath) return;
+        void electronProject()?.openFolder?.({ folderPath: job.kind === 'sequence' ? job.outputPath : dirname(job.outputPath) });
+    }, []);
+
+    // ─── Keyboard: Leertaste, I/O, ←/→, Pos1/Ende ───────────────────────
+    const onKeyDown = (event: React.KeyboardEvent) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('input, textarea, select')) return;
+        const frame = 1 / Math.max(1, fps);
+        if (event.key === ' ') { event.preventDefault(); togglePlay(); }
+        else if (event.key === 'i' || event.key === 'I') markIn();
+        else if (event.key === 'o' || event.key === 'O') markOut();
+        else if (event.key === 'ArrowLeft') seek(previewTime - frame);
+        else if (event.key === 'ArrowRight') seek(previewTime + frame);
+        else if (event.key === 'Home') seek(0);
+        else if (event.key === 'End') seek(timelineDuration);
+    };
+
+    // ─── View model ─────────────────────────────────────────────────────
+    const needsDesktop = (kind: DestinationKind, s: DeliverySettings) => {
+        if (kind === 'interchange') return false;
+        if (kind === 'media') return s.engine !== 'browser';
+        if (kind === 'still') return hasElectron || s.still.format !== 'png';
+        return true;
+    };
+    const relevantKinds = state.view === 'davinci' ? [state.davinciKind] : DESTINATION_KINDS.filter((kind) => state.enabledDestinations[kind]);
+    const exportBlockReason = (() => {
+        if (timelineClips.length === 0) return 'Die Timeline ist leer.';
+        const desktopKinds = relevantKinds.filter((kind) => needsDesktop(kind, settings));
+        if (desktopKinds.length > 0 && !hasElectron) return 'FFmpeg-Export nur in der Desktop-App – im Browser: Vorgabe „Schnell (Browser)“, Einzelbild PNG oder Austauschdateien.';
+        if (desktopKinds.length > 0 && !projectPath) return 'Projekt zuerst in einem Ordner speichern.';
+        return null;
+    })();
+
+    const preflight = useMemo(
+        () => (relevantKinds.some((kind) => kind !== 'interchange' && kind !== 'audio' && needsDesktop(kind, settings))
+            ? ffmpegPreflight(timelineClips, mediaItems, timelineTracks).map((issue) => issue.message)
+            : []),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [timelineClips, mediaItems, timelineTracks, relevantKinds.join(','), settings.engine, settings.still.format, hasElectron],
     );
 
-    const resolveAspectClassName = (renderSettings: Pick<NormalizedExportSettings, 'width' | 'height'> = settings) => {
-        const ratio = renderSettings.width / renderSettings.height;
-        if (Math.abs(ratio - 16 / 9) < 0.05) return 'aspect-video';
-        if (Math.abs(ratio - 9 / 16) < 0.05) return 'aspect-[9/16]';
-        if (Math.abs(ratio - 1) < 0.05) return 'aspect-square';
-        if (Math.abs(ratio - 4 / 3) < 0.05) return 'aspect-[4/3]';
-        return 'aspect-video';
-    };
+    const previewCanvas = recordingSize ?? (() => {
+        const video = constrainVideo(settings.video);
+        const scale = Math.min(1, 1920 / Math.max(video.width, video.height));
+        return { width: Math.round(video.width * scale), height: Math.round(video.height * scale) };
+    })();
+    const recording = recordingSize !== null;
+    const showRange = settings.range.mode !== 'full';
 
-    const handleSettingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const target = e.target;
-        const value = target.type === 'checkbox' ? target.checked : target.value;
-        setSettings(prev => ({ ...prev, [target.name]: value }));
-    };
+    const viewer = (
+        <ExportViewer
+            playerRef={playerRef}
+            timelineClips={timelineClips}
+            timelineTracks={timelineTracks}
+            mediaItems={mediaItems}
+            time={previewTime}
+            duration={timelineDuration}
+            fps={fps}
+            playing={previewPlaying}
+            recording={recording}
+            canvasWidth={previewCanvas.width}
+            canvasHeight={previewCanvas.height}
+            rangeStart={range.start}
+            rangeEnd={range.end}
+            showRange={showRange}
+            inPoint={showRange ? range.start : null}
+            outPoint={showRange ? range.end : null}
+            effects={settings.engine === 'browser' ? undefined : settings.effects}
+            filename={sanitizeStem(settings.filename)}
+            onSeek={seek}
+            onTogglePlay={togglePlay}
+            onMarkIn={markIn}
+            onMarkOut={markOut}
+            onClearMarks={clearMarks}
+            automationPrefix={`export.viewer.${state.view}`}
+        />
+    );
 
-    const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const preset = EXPORT_PRESETS.find(item => item.id === e.target.value);
-        if (!preset) return;
-        setSettings(prev => ({
-            ...prev,
-            presetId: preset.id,
-            width: preset.width,
-            height: preset.height,
-            fps: preset.fps,
-            bitrateKbps: preset.bitrateKbps,
-        }));
-    };
-
-    const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = Number(e.target.value);
-        setSettings(prev => ({
-            ...prev,
-            presetId: 'custom',
-            [e.target.name]: Number.isFinite(value) ? value : prev[e.target.name as keyof typeof prev],
-        }));
-    };
-
-    const handleCodecChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const videoCodec = event.target.value as ExportVideoCodec;
-        setSettings((prev) => {
-            const container = resolveContainerForCodec(videoCodec, prev.container);
-            const bitDepth = normalizeBitDepthForCodec(videoCodec, prev.bitDepth);
-            return {
-                ...prev,
-                videoCodec,
-                container,
-                bitDepth,
-                filename: replaceFileExtension(prev.filename, container),
-            };
-        });
-    };
-
-    const handleContainerChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const container = resolveContainerForCodec(settings.videoCodec, event.target.value);
-        setSettings((prev) => ({
-            ...prev,
-            container,
-            filename: replaceFileExtension(prev.filename, container),
-        }));
-    };
-
-    const handleBitDepthChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const nextDepth = Number(event.target.value) || 8;
-        setSettings((prev) => ({
-            ...prev,
-            bitDepth: normalizeBitDepthForCodec(prev.videoCodec, nextDepth),
-        }));
-    };
-
-    const handleExportModeChange = (useFfmpeg: boolean) => {
-        setSettings((prev) => {
-            if (!useFfmpeg) {
-                return {
-                    ...prev,
-                    useFfmpeg,
-                    filename: replaceFileExtension(prev.filename, 'webm'),
-                };
-            }
-            const container = resolveContainerForCodec(prev.videoCodec, prev.container === 'webm' ? 'mp4' : prev.container);
-            return {
-                ...prev,
-                useFfmpeg,
-                container,
-                filename: replaceFileExtension(prev.filename, container),
-            };
-        });
-    };
-
-    const handleExportTimelineXml = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const xml = buildFcpxmlFromTimeline({
-                projectName: sanitizeExportFilename(normalizedSettings.filename, 'Timeline Export'),
-                fps: normalizedSettings.fps,
-                width: normalizedSettings.width,
-                height: normalizedSettings.height,
-                mediaItems,
-                timelineClips,
-                timelineTracks,
-            });
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'fcpxml'), xml, 'application/xml');
-            setRenderDetail('Timeline XML exported as FCPXML for Premiere and Resolve.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
-    };
-
-    const handleExportTimelineOtio = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const otio = buildOpenTimelineIOFromTimeline({
-                projectName: sanitizeExportFilename(normalizedSettings.filename, 'Timeline Export'),
-                fps: normalizedSettings.fps,
-                width: normalizedSettings.width,
-                height: normalizedSettings.height,
-                mediaItems,
-                timelineClips,
-                timelineTracks,
-            });
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'otio'), otio, 'application/vnd.opentimelineio+json');
-            setRenderDetail('Timeline exported as OpenTimelineIO for editorial and VFX handoff.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
-    };
-
-    const handleExportOcioManifest = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const manifest = buildOpenColorIOManifest({
-                projectName: sanitizeExportFilename(normalizedSettings.filename, 'Timeline Export'),
-                filename: normalizedSettings.filename,
-                width: normalizedSettings.width,
-                height: normalizedSettings.height,
-                fps: normalizedSettings.fps,
-                colorProfile: normalizedSettings.colorProfile,
-                bitDepth: normalizedSettings.bitDepth,
-                videoCodec: normalizedSettings.videoCodec,
-                container: normalizedSettings.container,
-                ocioConfigId: settings.ocioConfigId,
-                ocioConfigPath: settings.ocioConfigPath,
-            });
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'ocio.json'), manifest, 'application/json');
-            setRenderDetail('OCIO/ACES color handoff manifest exported.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
-    };
-
-    const buildCurrentVfxHandoffManifest = (normalizedSettings: NormalizedExportSettings) => buildVfxHandoffManifest({
-        projectName: sanitizeExportFilename(normalizedSettings.filename, 'VFX Handoff'),
-        filename: normalizedSettings.filename,
-        fps: normalizedSettings.fps,
-        width: normalizedSettings.width,
-        height: normalizedSettings.height,
-        colorProfile: normalizedSettings.colorProfile,
-        bitDepth: normalizedSettings.bitDepth,
-        videoCodec: normalizedSettings.videoCodec,
-        container: normalizedSettings.container,
-        ocioConfigId: settings.ocioConfigId,
-        ocioConfigPath: settings.ocioConfigPath,
-        handleFrames: settings.vfxHandleFrames,
-        mediaItems,
+    const vm: ExportViewModel = {
+        state,
+        dispatch,
+        hasElectron,
+        pickFolder: hasElectron ? () => { void pickFolder(); } : undefined,
+        pickFile: hasElectron ? (target) => { void pickFile(target); } : undefined,
+        viewer,
+        duration: timelineDuration,
+        range,
+        previewTime,
+        sourceInfo,
+        timelineName,
+        message,
+        exportBlockReason,
+        preflight,
         timelineClips,
         timelineTracks,
-    });
-
-    const handleExportVfxHandoffManifest = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const manifest = buildCurrentVfxHandoffManifest(normalizedSettings);
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'vfx-handoff.json'), manifest, 'application/json');
-            setRenderDetail('VFX handoff manifest exported for Resolve, Nuke, Natron, OpenRV, and Blender.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
+        mediaItems,
+        onSeek: seek,
+        onOpenOutput: openOutput,
     };
-
-    const handleExportNukeScript = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const manifest = buildCurrentVfxHandoffManifest(normalizedSettings);
-            const script = buildNukeScriptFromVfxHandoffManifest(manifest);
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'nk'), script, 'text/plain');
-            setRenderDetail('Nuke script exported with Read nodes, frame handles, and OCIO setup notes.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
-    };
-
-    const handleExportNatronScript = () => {
-        try {
-            const normalizedSettings = normalizeExportSettings(settings);
-            const manifest = buildCurrentVfxHandoffManifest(normalizedSettings);
-            const script = buildNatronPythonScriptFromVfxHandoffManifest(manifest);
-            downloadTextFile(replaceFileExtension(normalizedSettings.filename, 'natron.py'), script, 'text/x-python');
-            setRenderDetail('Natron Python script exported with project settings, Read nodes, and OCIO hints.');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            setRenderDetail(message);
-            setStatus('ERROR');
-        }
-    };
-
-    const startRender = async () => {
-        if (timelineClips.length === 0) {
-            setStatus('ERROR');
-            setRenderDetail('Add at least one clip to the timeline before exporting.');
-            return;
-        }
-
-        const quickFormat = settings.useFfmpeg ? undefined : getQuickExportFormat();
-        if (!settings.useFfmpeg && !quickFormat) {
-            setStatus('ERROR');
-            setRenderDetail('This browser cannot record WebM video with MediaRecorder. Use HQ FFmpeg export in the desktop app.');
-            return;
-        }
-
-        const normalizedSettings = normalizeExportSettings(settings, { quickFormat });
-
-        setStatus('RENDERING');
-        setProgress(0);
-        setRenderPlayhead(0);
-        setIsRendering(true);
-        setRenderDetail('');
-        setDownloadUrl(null);
-        setDownloadName(normalizedSettings.filename);
-        setExportOutputPath(null);
-        setActiveRenderSettings(normalizedSettings);
-        chunksRef.current = [];
-
-        // Wait for player to mount and be ready
-        setTimeout(async () => {
-            if (normalizedSettings.useFfmpeg) {
-                if (!window.electron?.project?.exportVideo) {
-                    setRenderDetail('FFmpeg export relies on the desktop app environment.');
-                    setIsRendering(false);
-                    setStatus('IDLE');
-                    return;
-                }
-
-                if (!projectPath) {
-                    setRenderDetail('Save the project to a folder before using High Quality Export.');
-                    setIsRendering(false);
-                    setStatus('IDLE');
-                    return;
-                }
-
-                try {
-                    setStatus('RENDERING');
-                    setIsRendering(true);
-                    setProgress(0);
-
-                    // Listen for progress
-                    const handleProgress = (p: any) => {
-                        if (p && typeof p.percent === 'number') {
-                            setProgress(p.percent);
-                            const stage = typeof p.stage === 'string' ? p.stage : 'render';
-                            const encoder = typeof p.encoder === 'string' ? p.encoder : '';
-                            const note = typeof p.note === 'string' ? p.note : '';
-                            const detail = [stage, encoder].filter(Boolean).join(' · ');
-                            setRenderDetail(note ? `${detail}${detail ? ' · ' : ''}${note}` : detail);
-                        }
-                    };
-
-                    (window as any).electron.project.removeExportProgressListener();
-                    (window as any).electron.project.onExportProgress(handleProgress);
-
-                    // GPU effect stacks (Buckswood Post Plugins FX) are baked through the same
-                    // renderer as the preview so the export matches what you saw.
-                    let exportProject = { timelineClips, timelineTracks, mediaItems };
-                    if (clipsNeedingBake(exportProject).length > 0) {
-                        setRenderDetail('Rendering Lens & Film FX …');
-                        exportProject = await bakeFxForExport(exportProject, {
-                            folderPath: projectPath,
-                            fps: Math.max(1, normalizedSettings.fps || 24),
-                            onProgress: ({ clipIndex, clipCount, frame, frameCount, note }) => {
-                                setProgress(Math.round(((clipIndex + frame / Math.max(1, frameCount)) / clipCount) * 100));
-                                setRenderDetail(`${note} · Clip ${clipIndex + 1}/${clipCount} · Frame ${frame}/${frameCount}`);
-                            },
-                        });
-                        setProgress(0);
-                    }
-
-                    // Invoke Export
-                    const result = await (window as any).electron.project.exportVideo({
-                        folderPath: projectPath,
-                        project: exportProject,
-                        settings: normalizedSettings
-                    });
-
-                    if (result.ok && result.outputPath) {
-                        setStatus('DONE');
-                        setDownloadUrl(null); // Clear blobs
-                        setExportOutputPath(result.outputPath);
-                        setRenderDetail(`Export saved to ${result.outputPath}`);
-                    } else {
-                        throw new Error(result.error || "Unknown error");
-                    }
-                } catch (e) {
-                    console.error(e);
-                    setStatus('ERROR');
-                    setRenderDetail((e as Error).message || 'Export failed.');
-                } finally {
-                    setIsRendering(false);
-                    (window as any).electron.project.removeExportProgressListener();
-                }
-                return;
-            }
-
-            const canvas = playerRef.current?.getCanvas();
-
-            if (!canvas) {
-                setStatus('ERROR');
-                setRenderDetail('Render canvas is not available.');
-                setIsRendering(false);
-                return;
-            }
-
-            const fps = Math.max(1, normalizedSettings.fps || 30);
-            const bitrateKbps = Math.max(500, normalizedSettings.bitrateKbps || 6000);
-            const stream = canvas.captureStream(fps);
-            // Preview audio is still driven by HTMLAudioElements, so Quick Export records the visual canvas only.
-            const combinedStream = new MediaStream([...stream.getTracks()]);
-
-            let recorder: MediaRecorder;
-            try {
-                recorder = new MediaRecorder(combinedStream, {
-                    mimeType: normalizedSettings.mimeType || 'video/webm',
-                    videoBitsPerSecond: bitrateKbps * 1000,
-                });
-            } catch (error) {
-                setStatus('ERROR');
-                setIsRendering(false);
-                setRenderDetail(error instanceof Error ? error.message : 'Could not start MediaRecorder.');
-                return;
-            }
-
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunksRef.current.push(e.data);
-            };
-
-            recorder.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: normalizedSettings.mimeType || 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                setDownloadUrl(url);
-                setStatus('DONE');
-                setIsRendering(false);
-            };
-
-            mediaRecorderRef.current = recorder;
-            recorder.start();
-
-            // Start playback loop
-            const totalDuration = Math.max(...timelineClips.map(c => c.end));
-            const startTime = Date.now();
-
-            const renderLoop = () => {
-                const elapsed = (Date.now() - startTime) / 1000;
-                setRenderPlayhead(elapsed);
-                setProgress(Math.min((elapsed / totalDuration) * 100, 100));
-
-                if (elapsed >= totalDuration) {
-                    recorder.stop();
-                } else {
-                    requestRef.current = requestAnimationFrame(renderLoop);
-                }
-            };
-
-            requestRef.current = requestAnimationFrame(renderLoop);
-
-        }, 500);
-    };
-
-    const handleReset = () => {
-        setStatus('IDLE');
-        setProgress(0);
-        if (downloadUrl) {
-            URL.revokeObjectURL(downloadUrl);
-        }
-        setDownloadUrl(null);
-        setExportOutputPath(null);
-        setActiveRenderSettings(null);
-        setRenderPlayhead(0);
-        setRenderDetail('');
-    }
-
-    const renderContent = () => {
-        switch (status) {
-            case 'IDLE':
-                return (
-                    <>
-                        <h2 className="text-2xl font-bold text-white mb-1">Render Setup</h2>
-                        <p className="text-gray-400 text-sm mb-6">Choose a preset, confirm codec details, then render the timeline.</p>
-
-                        {/* Preset Cards */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xl mx-auto mb-6">
-                            {EXPORT_PRESETS.map(preset => (
-                                <button
-                                    key={preset.id}
-                                    onClick={() => handlePresetChange({ target: { value: preset.id } } as React.ChangeEvent<HTMLSelectElement>)}
-                                    className={`p-3 rounded-lg border text-left transition-all ${settings.presetId === preset.id ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500/50' : 'border-gray-700 bg-gray-800/50 hover:border-gray-500'}`}
-                                >
-                                    <div className="text-xs font-bold text-white truncate">{preset.id === 'custom' ? 'Custom' : preset.label.split(' ')[0]}</div>
-                                    <div className="text-[10px] text-gray-400 mt-0.5">{preset.width}x{preset.height}</div>
-                                    <div className="text-[10px] text-gray-500">{preset.fps}fps</div>
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="max-w-md mx-auto text-left mb-6 space-y-4">
-                            <div>
-                                <label htmlFor="filename" className="block text-xs font-medium text-gray-400 mb-1">Filename</label>
-                                <input type="text" name="filename" id="filename" value={settings.filename} onChange={handleSettingChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                            </div>
-
-                            <details className="group">
-                                <summary className="cursor-pointer flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors select-none py-1">
-                                    <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" /></svg>
-                                    Resolution &amp; Bitrate
-                                </summary>
-                                <div className="mt-2 grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label htmlFor="width" className="block text-xs font-medium text-gray-400 mb-1">Width</label>
-                                        <input type="number" name="width" id="width" min={256} value={settings.width} onChange={handleNumberChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="height" className="block text-xs font-medium text-gray-400 mb-1">Height</label>
-                                        <input type="number" name="height" id="height" min={256} value={settings.height} onChange={handleNumberChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="fps" className="block text-xs font-medium text-gray-400 mb-1">FPS</label>
-                                        <input type="number" name="fps" id="fps" min={10} max={60} value={settings.fps} onChange={handleNumberChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="bitrateKbps" className="block text-xs font-medium text-gray-400 mb-1">Bitrate (kbps)</label>
-                                        <input type="number" name="bitrateKbps" id="bitrateKbps" min={500} value={settings.bitrateKbps} onChange={handleNumberChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                                    </div>
-                                </div>
-                            </details>
-
-                            {/* Export Mode Tabs */}
-                            <div className="flex gap-1 bg-gray-900 p-1 rounded-lg">
-                                <button onClick={() => handleExportModeChange(false)} className={`flex-1 py-2 rounded text-xs font-bold transition-colors ${!settings.useFfmpeg ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>Quick Export</button>
-                                <button onClick={() => handleExportModeChange(true)} className={`flex-1 py-2 rounded text-xs font-bold transition-colors ${settings.useFfmpeg ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>HQ FFmpeg</button>
-                            </div>
-
-                            {settings.useFfmpeg && (
-                                <div className="space-y-3 rounded-lg border border-gray-700 bg-gray-900/50 p-3">
-                                    <div>
-                                        <label htmlFor="gpuAcceleration" className="block text-xs font-medium text-gray-400 mb-1">Hardware Encoder</label>
-                                        <select id="gpuAcceleration" name="gpuAcceleration" value={settings.gpuAcceleration} onChange={(event) => setSettings((prev) => ({ ...prev, gpuAcceleration: event.target.value }))} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                            <option value="auto">Auto (recommended)</option>
-                                            <option value="videotoolbox">Apple VideoToolbox (Mac)</option>
-                                            <option value="nvenc">NVIDIA NVENC</option>
-                                            <option value="off">CPU only</option>
-                                        </select>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label htmlFor="videoCodec" className="block text-xs font-medium text-gray-400 mb-1">Codec</label>
-                                            <select id="videoCodec" name="videoCodec" value={settings.videoCodec} onChange={handleCodecChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                                <option value="h264">H.264</option>
-                                                <option value="hevc">HEVC / H.265</option>
-                                                <option value="prores">Apple ProRes 422 HQ</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="container" className="block text-xs font-medium text-gray-400 mb-1">Container</label>
-                                            <select id="container" name="container" value={settings.container} onChange={handleContainerChange} disabled={settings.videoCodec === 'prores'} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">
-                                                <option value="mp4">MP4</option>
-                                                <option value="mov">MOV</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="bitDepth" className="block text-xs font-medium text-gray-400 mb-1">Bit Depth</label>
-                                            <select id="bitDepth" name="bitDepth" value={settings.bitDepth} onChange={handleBitDepthChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                                {getBitDepthOptions(settings.videoCodec).map((option) => (
-                                                    <option key={`${settings.videoCodec}-${option.value}`} value={option.value}>
-                                                        {option.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="colorProfile" className="block text-xs font-medium text-gray-400 mb-1">Color Tags</label>
-                                            <select id="colorProfile" name="colorProfile" value={settings.colorProfile} onChange={(event) => setSettings((prev) => ({ ...prev, colorProfile: event.target.value as ExportColorProfile }))} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                                <option value="source">Best effort from source</option>
-                                                <option value="rec709">Rec.709 SDR</option>
-                                                <option value="rec2020-hlg">Rec.2020 HLG</option>
-                                                <option value="rec2020-pq">Rec.2020 PQ</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label htmlFor="ocioConfigId" className="block text-xs font-medium text-gray-400 mb-1">OCIO Config</label>
-                                            <select id="ocioConfigId" name="ocioConfigId" value={settings.ocioConfigId} onChange={(event) => setSettings((prev) => ({ ...prev, ocioConfigId: event.target.value as OpenColorIOConfigId }))} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                                {OPEN_COLOR_IO_CONFIG_OPTIONS.map((option) => (
-                                                    <option key={option.id} value={option.id}>{option.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        {settings.ocioConfigId === 'custom' && (
-                                            <div className="col-span-2">
-                                                <label htmlFor="ocioConfigPath" className="block text-xs font-medium text-gray-400 mb-1">Custom OCIO Path</label>
-                                                <input
-                                                    type="text"
-                                                    id="ocioConfigPath"
-                                                    name="ocioConfigPath"
-                                                    value={settings.ocioConfigPath}
-                                                    onChange={(event) => setSettings((prev) => ({ ...prev, ocioConfigPath: event.target.value }))}
-                                                    placeholder="/show/config/aces/shot.ocio"
-                                                    className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500"
-                                                />
-                                            </div>
-                                        )}
-                                        <div>
-                                            <label htmlFor="vfxHandleFrames" className="block text-xs font-medium text-gray-400 mb-1">VFX Handles (frames)</label>
-                                            <input type="number" name="vfxHandleFrames" id="vfxHandleFrames" min={0} max={240} value={settings.vfxHandleFrames} onChange={handleNumberChange} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] text-gray-500">
-                                        HQ FFmpeg can now render H.264 10-bit, HEVC up to 12-bit, and ProRes 422 HQ with color metadata tags. Quick Export stays browser-safe and lower fidelity.
-                                    </p>
-                                    <div>
-                                        <label htmlFor="styleTransferPreset" className="block text-xs font-medium text-gray-400 mb-1">Style Transfer</label>
-                                        <select id="styleTransferPreset" name="styleTransferPreset" value={settings.styleTransferPreset} onChange={(event) => setSettings((prev) => ({ ...prev, styleTransferPreset: event.target.value }))} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                                            <option value="none">None</option>
-                                            <option value="van-gogh">Van Gogh</option>
-                                            <option value="anime">Anime</option>
-                                            <option value="watercolor">Watercolor</option>
-                                            <option value="comic">Comic Ink</option>
-                                            <option value="cinematic-noir">Cinematic Noir</option>
-                                        </select>
-                                    </div>
-                                    {settings.styleTransferPreset !== 'none' && (
-                                        <div>
-                                            <label htmlFor="styleTransferStrength" className="block text-xs font-medium text-gray-400 mb-1">Style Strength ({settings.styleTransferStrength}%)</label>
-                                            <input type="range" id="styleTransferStrength" min={0} max={100} value={settings.styleTransferStrength} onChange={(event) => setSettings((prev) => ({ ...prev, styleTransferStrength: Number(event.target.value) }))} className="w-full" />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                        {renderDetail && (
-                            <p className="text-xs text-gray-400 mb-3">{renderDetail}</p>
-                        )}
-                        <div className="flex flex-col items-center gap-3">
-                            <button onClick={startRender} className="app-button app-primary px-8 py-3 text-base">
-                                {settings.useFfmpeg ? 'Start HQ Render' : 'Start Render'}
-                            </button>
-                            <details className="pk-details w-full max-w-xl">
-                                <summary>More export formats<small>timeline &amp; VFX handoff</small></summary>
-                                <div className="pk-details__body">
-                                    <div className="pk-actions">
-                                        <button type="button" onClick={handleExportTimelineXml} disabled={timelineClips.length === 0} className="app-button app-secondary">FCPXML</button>
-                                        <button type="button" onClick={handleExportTimelineOtio} disabled={timelineClips.length === 0} className="app-button app-secondary">OTIO</button>
-                                        <button type="button" onClick={handleExportOcioManifest} className="app-button app-secondary">OCIO manifest</button>
-                                        <button type="button" onClick={handleExportVfxHandoffManifest} disabled={timelineClips.length === 0} className="app-button app-secondary">VFX handoff</button>
-                                        <button type="button" onClick={handleExportNukeScript} disabled={timelineClips.length === 0} className="app-button app-secondary">Nuke script</button>
-                                        <button type="button" onClick={handleExportNatronScript} disabled={timelineClips.length === 0} className="app-button app-secondary">Natron script</button>
-                                    </div>
-                                    <p className="pk-hint">FCPXML and OTIO carry the cut into other editors; OCIO, VFX handoff, Nuke and Natron package colour and shot data for compositing.</p>
-                                </div>
-                            </details>
-                        </div>
-                    </>
-                );
-            case 'RENDERING':
-                const renderSettings = activeRenderSettings || normalizeExportSettings(settings);
-                if (renderSettings.useFfmpeg) {
-                    return (
-                        <div className="w-full h-full flex flex-col items-center justify-center">
-                            <h2 className="text-2xl font-bold text-white mb-4">HQ Rendering... {Math.round(progress)}%</h2>
-                            <div className="w-full max-w-lg h-4 rounded-full bg-gray-700 overflow-hidden">
-                                <div className="h-full bg-indigo-500 transition-all duration-300" style={{ width: `${Math.round(progress)}%` }} />
-                            </div>
-                            <p className="text-xs text-gray-400 mt-3">
-                                Running FFmpeg export ({renderSettings.videoCodec.toUpperCase()} {renderSettings.bitDepth}-bit {renderSettings.container.toUpperCase()}){settings.styleTransferPreset !== 'none' ? ` + ${settings.styleTransferPreset} style pass` : ''}.
-                            </p>
-                            {renderDetail && <p className="text-[11px] text-gray-500 mt-1">{renderDetail}</p>}
-                        </div>
-                    );
-                }
-                return (
-                    <div className="w-full h-full flex flex-col items-center justify-center">
-                        <h2 className="text-2xl font-bold text-white mb-4">Rendering... {Math.round(progress)}%</h2>
-
-                        {/* Hidden Player for Rendering */}
-                        <div className="border border-indigo-500 rounded-lg overflow-hidden shadow-2xl mb-4 relative" style={{ width: 640, height: Math.round(640 * (renderSettings.height / renderSettings.width)) }}>
-                            <PreviewPlayer
-                                ref={playerRef}
-                                timelineClips={timelineClips}
-                                timelineTracks={timelineTracks}
-                                mediaItems={mediaItems}
-                                playheadPosition={renderPlayhead}
-                                isPlaying={isRendering}
-                                canvasWidth={renderSettings.width}
-                                canvasHeight={renderSettings.height}
-                                aspectClassName={resolveAspectClassName(renderSettings)}
-                            />
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
-                                <div className="text-red-500 font-bold animate-pulse">REC</div>
-                            </div>
-                        </div>
-                        <p className="text-gray-400 animate-pulse">Please wait while we capture your masterpiece.</p>
-                    </div>
-                );
-            case 'DONE':
-                return (
-                    <>
-                        <h2 className="text-3xl font-bold text-green-400 mb-4">Export Complete!</h2>
-                        <p className="text-gray-400 mb-6">Your video has been successfully rendered.</p>
-                        {downloadUrl ? (
-                            <a href={downloadUrl} download={downloadName} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 inline-block">
-                                Download Video
-                            </a>
-                        ) : (
-                            <div className="rounded-lg border border-green-500/40 bg-green-900/20 px-4 py-3 text-sm text-green-200">
-                                {exportOutputPath ? `File exported to ${exportOutputPath}` : 'File exported to project exports folder.'}
-                            </div>
-                        )}
-                        {exportOutputPath && window.electron?.project?.openFolder && projectPath && (
-                            <button
-                                onClick={() => window.electron?.project?.openFolder?.({ folderPath: `${projectPath.replace(/[/\\]+$/, '')}/exports` })}
-                                className="mt-4 ml-4 text-gray-300 hover:text-white"
-                            >
-                                Open exports folder
-                            </button>
-                        )}
-                        <button onClick={handleReset} className="mt-4 ml-4 text-gray-400 hover:text-white">Export another</button>
-                    </>
-                );
-            case 'ERROR':
-                return (
-                    <>
-                        <h2 className="text-3xl font-bold text-red-400 mb-4">Export Failed</h2>
-                        <p className="text-gray-400 mb-6">{renderDetail || 'Could not start export. Ensure you have clips on the timeline.'}</p>
-                        <button onClick={handleReset} className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded-lg">
-                            Go Back
-                        </button>
-                    </>
-                );
-        }
-    }
-
+    const summary = queueSummary(state.queue);
 
     return (
-        <div className="studio-workspace p-6 h-full overflow-auto">
-            <div className="max-w-5xl mx-auto space-y-6">
-                {status !== 'RENDERING' && (
-                    <section className="workspace-hero text-left">
-                        <div className="workspace-hero__content">
-                            <div className="workspace-hero__eyebrow">Delivery</div>
-                            <h2 className="workspace-hero__title">Export Project</h2>
-                            <p className="workspace-hero__body">Prepare a clean render with the right platform preset, codec, and bitrate before delivery.</p>
-                        </div>
-                        <div className="workspace-hero__icon">
-                            <ExportIcon className="w-7 h-7" />
-                        </div>
-                        <div className="workspace-stat-grid">
-                            <div className="workspace-stat">
-                                <ExportIcon className="workspace-stat__icon" />
-                                <div>
-                                    <div className="workspace-stat__value">{timelineClips.length}</div>
-                                    <div className="workspace-stat__label">Clips</div>
-                                </div>
-                            </div>
-                            <div className="workspace-stat">
-                                <ExportIcon className="workspace-stat__icon" />
-                                <div>
-                                    <div className="workspace-stat__value">{timelineDuration.toFixed(1)}s</div>
-                                    <div className="workspace-stat__label">Timeline</div>
-                                </div>
-                            </div>
-                            <div className="workspace-stat">
-                                <ExportIcon className="workspace-stat__icon" />
-                                <div>
-                                    <div className="workspace-stat__value">{settings.width}x{settings.height}</div>
-                                    <div className="workspace-stat__label">Frame</div>
-                                </div>
-                            </div>
-                            <div className="workspace-stat">
-                                <ExportIcon className="workspace-stat__icon" />
-                                <div>
-                                    <div className="workspace-stat__value">{activeTrackCount}</div>
-                                    <div className="workspace-stat__label">Active tracks</div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                )}
-                <section className={`app-panel p-8 text-center ${status === 'RENDERING' ? 'min-h-[70vh] flex items-center justify-center' : ''}`}>
-                    {renderContent()}
-                </section>
+        <div className="xp-root" data-automation-id="export.page" data-view={state.view} tabIndex={-1} onKeyDown={onKeyDown}>
+            <div className="xp-topbar">
+                <span className="xp-topbar__title">Export</span>
+                <span className="xp-topbar__meta">
+                    {timelineName} · {timelineClips.length} Clips · {outputFileName(state.view === 'davinci' ? state.davinciKind : state.selectedDestination, settings, settings.interchange.formats[0])}
+                    {summary.running > 0 ? ` · rendert (${summary.overallProgress} %)` : summary.pending > 0 ? ` · ${summary.pending} wartend` : ''}
+                </span>
+                <span className="xp-topbar__spacer" />
+                <div className="xp-seg" role="group" aria-label="Ansicht">
+                    <button type="button" className="xp-seg__btn" aria-pressed={state.view === 'premiere'} data-automation-id="export.view.premiere" onClick={() => dispatch('export.view.set', { view: 'premiere' })}>Premiere</button>
+                    <button type="button" className="xp-seg__btn" aria-pressed={state.view === 'davinci'} data-automation-id="export.view.davinci" onClick={() => dispatch('export.view.set', { view: 'davinci' })}>DaVinci</button>
+                </div>
             </div>
+            {state.view === 'davinci' ? <DavinciDeliverView vm={vm} /> : <PremiereExportView vm={vm} />}
         </div>
     );
 };

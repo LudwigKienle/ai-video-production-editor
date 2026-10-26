@@ -321,9 +321,11 @@ export type Keyframe = {
   id: string;
   time: number;
   value: number;
-  property: 'scale' | 'x' | 'y' | 'opacity' | 'volume' | 'effectIntensity' | 'textBlur';
+  /** 'rotation' is in degrees (clockwise), like `transform.rotation`. */
+  property: 'scale' | 'x' | 'y' | 'rotation' | 'opacity' | 'volume' | 'effectIntensity' | 'textBlur';
   targetEffectId?: string;
-  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  /** Curve of the segment arriving at this keyframe; 'hold' keeps this keyframe's value until the next one (see src/fx/keyframes.ts). */
+  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'hold';
 };
 
 export type TitleMotionPreset = 'slide-in' | 'soft-fade' | 'blur-settle' | 'clear';
@@ -391,6 +393,8 @@ export type TimelineClip = {
     scale: number;
     opacity: number;
     position: { x: number; y: number };
+    /** Degrees, clockwise, around the clip centre (preview + FX bake; optional for older projects). */
+    rotation?: number;
   };
   keyframes?: Keyframe[];
   chromaKey?: {

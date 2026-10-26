@@ -1,0 +1,227 @@
+/* Cut page. Own dense dark NLE chrome; accent from the app theme. */
+
+.cutp {
+  --cutp-gap: #0f0f10;
+  --cutp-panel: #1d1d1f;
+  --cutp-well: #151516;
+  --cutp-head: #252527;
+  --cutp-line: rgb(255 255 255 / 0.07);
+  --cutp-line-strong: rgb(255 255 255 / 0.14);
+  --cutp-text: #d6d6d9;
+  --cutp-dim: #8d8d93;
+  --cutp-hover: rgb(255 255 255 / 0.07);
+  --cutp-accent: var(--app-accent, #7c8cff);
+  --cutp-accent-rgb: var(--app-accent-rgb, 124 140 255);
+  --cutp-video: #3e5d86;
+  --cutp-image: #5a4e86;
+  --cutp-audio: #2f6b52;
+  --cutp-trim: #46d67b;
+  --cutp-tc: #6cc3ff;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--cutp-gap);
+  color: var(--cutp-text);
+  font-size: 11.5px;
+  color-scheme: dark;
+  user-select: none;
+}
+
+.cutp .cutp-spacer { flex: 1 1 auto; }
+.cutp .cutp-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--cutp-line-strong); }
+.cutp .cutp-dim { color: var(--cutp-dim); }
+.cutp .cutp-hint { color: var(--cutp-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cutp .cutp-empty { padding: 1rem; color: var(--cutp-dim); line-height: 1.5; }
+
+/* Buttons */
+.cutp .cutp-btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  height: 24px; padding: 0 0.55rem;
+  border: 1px solid transparent; border-radius: 3px;
+  background: rgb(255 255 255 / 0.04); color: var(--cutp-text);
+  font-size: 11px; white-space: nowrap; cursor: pointer;
+}
+.cutp .cutp-btn:hover { background: var(--cutp-hover); border-color: var(--cutp-line-strong); }
+.cutp .cutp-btn:focus-visible { outline: 2px solid rgb(var(--cutp-accent-rgb) / 0.9); outline-offset: 1px; }
+.cutp .cutp-btn--icon { width: 26px; padding: 0; justify-content: center; }
+.cutp .cutp-btn--on { background: rgb(var(--cutp-accent-rgb) / 0.22); border-color: rgb(var(--cutp-accent-rgb) / 0.55); color: #fff; }
+.cutp .cutp-btn--ghost { background: transparent; color: var(--cutp-dim); }
+.cutp .cutp-btn:disabled { opacity: 0.4; cursor: default; }
+.cutp .cutp-seg { display: inline-flex; gap: 1px; padding: 1px; border-radius: 4px; background: rgb(0 0 0 / 0.35); }
+.cutp .cutp-seg .cutp-btn { border-radius: 3px; }
+.cutp .cutp-select {
+  height: 24px; padding: 0 0.3rem; border-radius: 3px; border: 1px solid var(--cutp-line-strong);
+  background: var(--cutp-well); color: var(--cutp-text); font-size: 11px;
+}
+.cutp .cutp-tc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--cutp-tc); letter-spacing: 0.02em; }
+.cutp .cutp-tc--dim { color: var(--cutp-dim); font-size: 11px; }
+
+/* Page bar */
+.cutp-bar {
+  display: flex; align-items: center; gap: 0.6rem;
+  min-height: 34px; padding: 0 0.6rem;
+  background: var(--cutp-head); border-bottom: 1px solid var(--cutp-line);
+}
+.cutp-bar__title { font-size: 12px; letter-spacing: 0.04em; }
+.cutp-bar__project { color: var(--cutp-dim); }
+.cutp-notice {
+  padding: 2px 8px; border-radius: 3px; background: rgb(var(--cutp-accent-rgb) / 0.18);
+  border: 1px solid rgb(var(--cutp-accent-rgb) / 0.4); color: #fff; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Upper area: pool | viewer */
+.cutp-top {
+  flex: 1 1 0%; min-height: 220px;
+  display: grid; grid-template-columns: minmax(260px, 36%) minmax(0, 1fr);
+  gap: 2px; padding: 2px 2px 0;
+}
+@media (max-width: 900px) { .cutp-top { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(160px, 40%) minmax(0, 1fr); } }
+
+/* Media pool */
+.cutp-pool { display: flex; flex-direction: column; min-height: 0; background: var(--cutp-panel); border: 1px solid var(--cutp-line); }
+.cutp-pool__head { display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--cutp-head); border-bottom: 1px solid var(--cutp-line); }
+.cutp-pool__head small { color: var(--cutp-dim); }
+.cutp-pool__body { flex: 1 1 0%; min-height: 0; overflow: auto; padding: 6px; }
+.cutp-pool__body--thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; align-content: start; }
+.cutp-pool__body--list { display: flex; flex-direction: column; gap: 1px; padding: 2px; }
+.cutp-pool__item {
+  position: relative; display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 3px; border-radius: 3px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer;
+}
+.cutp-pool__item:hover { background: var(--cutp-hover); }
+.cutp-pool__item--active { border-color: rgb(var(--cutp-accent-rgb) / 0.8); background: rgb(var(--cutp-accent-rgb) / 0.12); }
+.cutp-pool__thumb {
+  display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; overflow: hidden;
+  border-radius: 2px; background: #0a0a0b; color: var(--cutp-dim);
+}
+.cutp-pool__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cutp-pool__thumb--audio { background: linear-gradient(180deg, #173a2c, #0d1f17); color: #7fd6ac; }
+.cutp-pool__meta { display: flex; flex-direction: column; min-width: 0; }
+.cutp-pool__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.cutp-pool__info { color: var(--cutp-dim); font-size: 10px; }
+.cutp-pool__used { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #e0a43a; box-shadow: 0 0 0 1px #000; }
+.cutp-pool__body--list .cutp-pool__item { flex-direction: row; align-items: center; gap: 8px; padding: 2px 4px; }
+.cutp-pool__body--list .cutp-pool__thumb { width: 52px; flex: 0 0 52px; }
+.cutp-pool__body--list .cutp-pool__meta { flex-direction: row; gap: 10px; flex: 1; justify-content: space-between; }
+.cutp-pool__body--list .cutp-pool__used { top: 50%; right: auto; left: 2px; transform: translateY(-50%); }
+
+/* Smart edit buttons under the pool */
+.cutp-smart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 4px; border-top: 1px solid var(--cutp-line); background: var(--cutp-head); }
+.cutp-smart__btn {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px;
+  border: 1px solid transparent; border-radius: 3px; background: rgb(255 255 255 / 0.03); color: var(--cutp-text); cursor: pointer;
+}
+.cutp-smart__btn span { font-size: 9.5px; color: var(--cutp-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cutp-smart__btn:hover:not(:disabled) { background: var(--cutp-hover); border-color: var(--cutp-line-strong); }
+.cutp-smart__btn:hover:not(:disabled) span { color: var(--cutp-text); }
+.cutp-smart__btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Viewer */
+.cutp-viewer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--cutp-panel); border: 1px solid var(--cutp-line); }
+.cutp-viewer__head { display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: var(--cutp-head); border-bottom: 1px solid var(--cutp-line); }
+.cutp-viewer__title { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; overflow: hidden; }
+.cutp-viewer__title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cutp-viewer__title small { color: var(--cutp-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cutp-viewer__shuttle { padding: 1px 6px; border-radius: 3px; background: #b5462e; color: #fff; font-weight: 600; font-size: 10.5px; }
+.cutp-viewer__stage { position: relative; flex: 1 1 0%; min-height: 0; display: flex; align-items: center; justify-content: center; background: #050506; overflow: hidden; }
+.cutp-viewer__program { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.cutp-viewer__program .rounded-lg.border-gray-700 { border: 0 !important; border-radius: 0 !important; }
+.cutp-viewer__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: rgb(255 255 255 / 0.55); text-align: center; padding: 1rem; pointer-events: none; }
+.cutp-hide-narrow { display: inline; }
+@media (max-width: 1250px) { .cutp-hide-narrow { display: none; } }
+
+.cutp-surface { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+.cutp-surface video, .cutp-surface img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cutp-surface--empty { color: var(--cutp-dim); background: #08080a; }
+.cutp-surface--audio { background: linear-gradient(180deg, #0f1f18, #070d0a); }
+.cutp-surface__wave { position: absolute; inset: 15% 2%; width: 96%; height: 70%; fill: #5fd39b; opacity: 0.85; }
+.cutp-surface__label { color: #7fd6ac; }
+.cutp-surface__cursor { position: absolute; top: 10%; bottom: 10%; width: 1px; background: #ff5050; }
+
+/* Scrubber */
+.cutp-scrub { position: relative; height: 16px; margin: 0; background: #101012; border-top: 1px solid var(--cutp-line); cursor: pointer; touch-action: none; }
+.cutp-scrub__seg { position: absolute; top: 0; bottom: 0; width: 1px; background: rgb(255 255 255 / 0.18); }
+.cutp-scrub__range { position: absolute; top: 3px; bottom: 3px; background: rgb(var(--cutp-accent-rgb) / 0.35); }
+.cutp-scrub__mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cutp-accent); }
+.cutp-scrub__head { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: #ff4040; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.5); }
+
+/* Transport */
+.cutp-transport { display: flex; align-items: center; gap: 3px; padding: 3px 6px; background: var(--cutp-head); border-top: 1px solid var(--cutp-line); }
+
+/* Trim view */
+.cutp-trimview { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; background: #08080a; }
+.cutp-trimview__frame { position: relative; margin: 0; display: flex; flex-direction: column; border: 2px solid transparent; min-height: 0; }
+.cutp-trimview__frame--active { border-color: var(--cutp-trim); }
+.cutp-trimview__frame .cutp-surface { position: relative; inset: auto; flex: 1 1 0%; min-height: 0; }
+.cutp-trimview__frame figcaption { display: flex; justify-content: space-between; gap: 6px; padding: 3px 6px; background: rgb(0 0 0 / 0.7); font-size: 10.5px; }
+.cutp-trimview__frame figcaption span { color: var(--cutp-dim); font-family: ui-monospace, Menlo, monospace; }
+.cutp-trimview__badge {
+  position: absolute; left: 50%; top: 8px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; border-radius: 4px;
+  background: rgb(10 10 12 / 0.85); border: 1px solid var(--cutp-line-strong);
+}
+.cutp-trimview__badge strong { color: var(--cutp-trim); font-family: ui-monospace, Menlo, monospace; }
+
+/* Divider + timeline toolbar */
+.cutp-divider { height: 5px; cursor: row-resize; background: var(--cutp-gap); }
+.cutp-divider:hover { background: rgb(var(--cutp-accent-rgb) / 0.35); }
+.cutp-tlbar { display: flex; align-items: center; gap: 4px; padding: 3px 6px; background: var(--cutp-head); border-top: 1px solid var(--cutp-line); border-bottom: 1px solid var(--cutp-line); min-width: 0; }
+.cutp-zoom { width: 110px; accent-color: var(--cutp-accent); }
+
+/* Dual timeline */
+.cutp-tl { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; background: var(--cutp-panel); }
+.cutp-ov { display: flex; border-bottom: 2px solid #000; background: #18181a; }
+.cutp-ov__label { width: 54px; flex: 0 0 54px; display: flex; align-items: center; justify-content: center; color: var(--cutp-dim); font-size: 10px; border-right: 1px solid var(--cutp-line); }
+.cutp-ov__lanes { position: relative; flex: 1; min-width: 0; overflow: hidden; cursor: pointer; touch-action: none; min-height: 40px; }
+.cutp-ov__ruler { position: absolute; left: 0; right: 0; top: 0; height: 13px; border-bottom: 1px solid var(--cutp-line); }
+.cutp-ov__ruler span { position: absolute; top: 0; padding-left: 3px; border-left: 1px solid rgb(255 255 255 / 0.2); font-size: 9px; color: var(--cutp-dim); line-height: 12px; }
+.cutp-ov__row { position: absolute; left: 0; right: 0; }
+.cutp-ov__clip { position: absolute; top: 0; bottom: 0; border-radius: 1px; background: var(--cutp-video); }
+.cutp-ov__clip--image { background: var(--cutp-image); }
+.cutp-ov__clip--audio { background: var(--cutp-audio); }
+.cutp-ov__clip--sel { box-shadow: inset 0 0 0 1px #f3c14b; }
+.cutp-ov__range { position: absolute; top: 13px; bottom: 0; background: rgb(var(--cutp-accent-rgb) / 0.16); }
+.cutp-ov__window { position: absolute; top: 13px; bottom: 0; border: 1px solid rgb(255 255 255 / 0.45); background: rgb(255 255 255 / 0.05); pointer-events: none; }
+
+.cutp-playhead { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; background: #ff4040; pointer-events: none; z-index: 5; }
+.cutp-playhead--fixed { width: 2px; margin-left: -1px; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35); }
+.cutp-playhead--fixed::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: #ff4040; }
+
+.cutp-dt { display: flex; flex: 1 1 0%; min-height: 0; }
+.cutp-dt__heads { flex: 0 0 auto; display: flex; flex-direction: column; gap: 1px; background: var(--cutp-head); border-right: 1px solid var(--cutp-line); overflow: hidden; }
+.cutp-dt__corner { display: flex; align-items: center; justify-content: center; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--cutp-tc); border-bottom: 1px solid var(--cutp-line); flex: 0 0 auto; }
+.cutp-dt__head { display: flex; align-items: center; justify-content: center; gap: 2px; flex: 0 0 auto; border: 0; background: transparent; color: var(--cutp-dim); font-weight: 600; font-size: 10.5px; cursor: pointer; }
+.cutp-dt__head:hover { color: var(--cutp-text); background: var(--cutp-hover); }
+.cutp-dt__head--active { color: #fff; background: rgb(var(--cutp-accent-rgb) / 0.25); box-shadow: inset 3px 0 0 var(--cutp-accent); }
+.cutp-dt__head--locked { opacity: 0.6; }
+.cutp-dt__lanes { position: relative; flex: 1 1 0%; min-width: 0; overflow: hidden; cursor: grab; touch-action: none; background: var(--cutp-well); }
+.cutp-dt__lanes:active { cursor: grabbing; }
+.cutp-dt__ruler { position: absolute; left: 0; right: 0; top: 0; background: #1b1b1d; border-bottom: 1px solid var(--cutp-line); }
+.cutp-dt__tick { position: absolute; bottom: 0; width: 1px; height: 4px; background: rgb(255 255 255 / 0.2); }
+.cutp-dt__tick--major { height: 9px; background: rgb(255 255 255 / 0.45); }
+.cutp-dt__tick em { position: absolute; bottom: 8px; left: 3px; font-style: normal; font-size: 9.5px; color: var(--cutp-dim); white-space: nowrap; }
+.cutp-dt__mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cutp-accent); }
+.cutp-dt__before { position: absolute; left: 0; top: 20px; bottom: 0; background: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.025) 0 6px, transparent 6px 12px); pointer-events: none; }
+.cutp-dt__row { position: absolute; left: 0; right: 0; border-bottom: 1px solid rgb(0 0 0 / 0.4); }
+.cutp-dt__row--active { background: rgb(var(--cutp-accent-rgb) / 0.04); }
+
+.cutp-clip {
+  position: absolute; top: 1px; bottom: 1px; overflow: hidden; border-radius: 2px;
+  background: var(--cutp-video); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.55);
+}
+.cutp-clip--image { background: var(--cutp-image); }
+.cutp-clip--audio { background: var(--cutp-audio); }
+.cutp-clip--sel { box-shadow: inset 0 0 0 2px #f3c14b; }
+.cutp-clip--trim { box-shadow: inset 0 0 0 2px var(--cutp-trim); }
+.cutp-clip__thumbs { position: absolute; left: 0; right: 0; top: 13px; bottom: 30%; background-repeat: repeat-x; background-size: auto 100%; opacity: 0.9; }
+.cutp-clip__name { position: absolute; left: 4px; right: 4px; top: 0; height: 13px; font-size: 10px; line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; text-shadow: 0 1px 1px #000; }
+.cutp-clip__wave { position: absolute; left: 0; bottom: 0; width: 100%; height: 30%; fill: rgb(170 230 200 / 0.75); background: rgb(0 0 0 / 0.25); }
+.cutp-clip__wave--full { top: 13px; height: auto; background: transparent; fill: rgb(170 240 205 / 0.85); }
+.cutp-clip__fx { position: absolute; right: 0; top: 13px; bottom: 0; background: linear-gradient(to bottom right, transparent 48%, rgb(255 255 255 / 0.6) 50%, transparent 52%), rgb(255 255 255 / 0.18); border-left: 1px solid rgb(255 255 255 / 0.5); }
+.cutp-clip__edge { position: absolute; top: 0; bottom: 0; width: 4px; background: var(--cutp-trim); }
+.cutp-clip__edge--in { left: 0; }
+.cutp-clip__edge--out { right: 0; }
+
+.cutp-dt__lanes--roll { cursor: col-resize; }
+.cutp-dt__lanes--slip, .cutp-dt__lanes--slide { cursor: ew-resize; }
