@@ -59,6 +59,7 @@ const MACHGEN_VIDEO_IDS: Partial<Record<VideoModelId, MachgenVideoModelId>> = {
 import { getProductionFormat, type ProductionFormatId } from '../data/productionFormats';
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
+import BurstFramePanel from '../components/BurstFramePanel';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -543,6 +544,8 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
   const storedUiPrefs = useMemo(() => readVideoWorkspaceUiPrefs(uiPrefsScope), [uiPrefsScope]);
   const [modelId, setModelId] = useState<VideoModelId>(() => storedUiPrefs.modelId || 'veo-fast');
   const [prompt, setPrompt] = useState('');
+  // Burst Frame (Phil Langer): prompt is sent verbatim, 5 s, audio off.
+  const [burstMode, setBurstMode] = useState(false);
   const [smartPromptStructure, setSmartPromptStructure] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<AspectRatioOption>('16:9');
   useEffect(() => {
@@ -1098,10 +1101,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         ? 'End frame reference provided; match the ending composition and lighting.'
         : '';
       const activeFormat = productionFormatId ? getProductionFormat(productionFormatId) : null;
-      const structured = smartPromptStructure && prompt.trim()
+      const structured = !burstMode && smartPromptStructure && prompt.trim()
         ? structurePromptForModel(`${modelId} ${modelOption?.label || ''}`, prompt.trim(), 'video', { formatSuffix: activeFormat?.lookSuffix, appendDefaultStyle: !activeFormat })
         : null;
-      const finalPrompt = [structured ? structured.prompt : [prompt.trim(), activeFormat?.lookSuffix].filter(Boolean).join('. '), elementHint, elementReferenceHint, endFrameHint].filter(Boolean).join(' ');
+      // Burst Frame prompts carry their own numbered shot list: never append or reshape.
+      const finalPrompt = burstMode
+        ? prompt.trim()
+        : [structured ? structured.prompt : [prompt.trim(), activeFormat?.lookSuffix].filter(Boolean).join('. '), elementHint, elementReferenceHint, endFrameHint].filter(Boolean).join(' ');
       if (structured && structured.notes.length > 0) setStatus(structured.notes.join(' '));
       const veoStartReference = reference || veoElementReferences[0];
 
@@ -1116,7 +1122,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
         : null;
       const resolvedModelId: VideoModelId = autoPick ? autoPick.model : modelId;
       // Per-model shaping happens last, once the model is known (see PromptPreview under the prompt box).
-      const shapedPrompt = adaptPromptForModel(resolvedModelId, finalPrompt, { kind: 'video', aspectRatio, hasReferences: Boolean(reference || seedanceStoryboardReference), durationSeconds: normalizedDurationSeconds });
+      const shapedPrompt = burstMode ? finalPrompt : adaptPromptForModel(resolvedModelId, finalPrompt, { kind: 'video', aspectRatio, hasReferences: Boolean(reference || seedanceStoryboardReference), durationSeconds: normalizedDurationSeconds });
       if (autoPick) setStatus(`Auto picked ${MODEL_OPTIONS.find((option) => option.id === resolvedModelId)?.label || resolvedModelId}: ${autoPick.reason}`);
       switch (resolvedModelId) {
         case 'veo-fast':
@@ -1554,6 +1560,31 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     Write what should happen in the clip. This should be enough for a first result.
                   </p>
                 </div>
+                <label className="flex items-center gap-2 text-xs text-gray-300" data-automation-id="burst-frame.toggle">
+                  <input type="checkbox" checked={burstMode} onChange={(event) => setBurstMode(event.target.checked)} />
+                  Burst Frame (Phil Langer): 20 Einstellungen aus einem Startbild
+                </label>
+                {burstMode && (
+                  <BurstFramePanel
+                    startImage={{ file: referenceFile, url: referenceUrl }}
+                    prompt={prompt}
+                    aspectOptions={availableAspectRatios as string[]}
+                    modelLabel={modelOption?.label}
+                    modelSupportsImage={modelId === 'auto' || Boolean(modelOption?.supportsImage)}
+                    analysisReady={readyForGeneration}
+                    onPickImageModel={() => setModelId('seedance-25-i2v-fal')}
+                    onApply={({ prompt: burstPrompt, aspectRatio: burstAspect }) => {
+                      setPrompt(burstPrompt);
+                      setVideoDurationSeconds(5);
+                      setSeedanceGenerateAudio(false);
+                      setSeedanceOmniGenerateAudio(false);
+                      setKlingGenerateAudio(false);
+                      setLtxGenerateAudio(false);
+                      setPixverseGenerateAudio(false);
+                      if (burstAspect && (availableAspectRatios as string[]).includes(burstAspect)) setAspectRatio(burstAspect as AspectRatioOption);
+                    }}
+                  />
+                )}
                 <div>
                   <label className="text-xs uppercase tracking-[0.12em] text-gray-500">What Should The Video Show?</label>
                   <textarea
@@ -1562,7 +1593,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     placeholder="Describe the action, subject, mood, and camera feel..."
                     className="app-textarea mt-2 h-32"
                   />
-                  <PromptPreview modelId={modelId} modelLabel={modelOption?.label} prompt={prompt} kind="video" aspectRatio={aspectRatio} hasReferences={Boolean(referenceFile)} durationSeconds={normalizedDurationSeconds} />
+                  {!burstMode && <PromptPreview modelId={modelId} modelLabel={modelOption?.label} prompt={prompt} kind="video" aspectRatio={aspectRatio} hasReferences={Boolean(referenceFile)} durationSeconds={normalizedDurationSeconds} />}
                 </div>
               </div>
 
