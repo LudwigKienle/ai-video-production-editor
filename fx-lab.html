@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FX Lab</title>
+    <style>
+      body { margin: 0; padding: 16px; background: #1d1d1d; color: #ddd; font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+      h1 { font-size: 16px; margin: 0 0 12px; }
+      table { border-collapse: collapse; margin-bottom: 16px; }
+      td, th { border: 1px solid #333; padding: 3px 8px; text-align: left; }
+      .ok { color: #7c7; } .bad { color: #e66; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+      .grid figure { margin: 0; background: #111; }
+      .grid canvas { width: 100%; display: block; }
+      .grid figcaption { padding: 4px 6px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Buckswood Post Plugins FX Lab – GPU-Parität &amp; Preset-Übersicht</h1>
+    <div id="parity"></div>
+    <p><label>Bild laden: <input type="file" id="file" accept="image/*" /></label></p>
+    <div class="grid" id="grid"></div>
+    <script type="module" src="/src/fx/dev/fxLab.ts"></script>
+  </body>
+</html>

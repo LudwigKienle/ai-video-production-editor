@@ -43,7 +43,7 @@ interface TitlesPanelProps {
   onSelectClip: (clipId: string | null) => void;
 }
 
-const TITLE_PRESETS: TitlePreset[] = [
+export const TITLE_PRESETS: TitlePreset[] = [
   {
     id: 'lower-third-clean',
     label: 'Clean Lower Third',

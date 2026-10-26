@@ -5,7 +5,9 @@ const fs = require('fs/promises');
 const fsSync = require('fs');
 const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
-const { renderTimeline, prepareVideoProxy } = require('./ffmpeg-handler');
+const { renderTimeline, prepareVideoProxy, resolveSourcePath, ffmpegBinaryPath } = require('./ffmpeg-handler');
+const { registerFxBakeIpc } = require('./fx-bake');
+const { registerOfxIpc } = require('./ofx/registerOfxIpc');
 const {
   ensureAudioMasteringEnvironment,
   probeAudioMasteringEnvironment,
@@ -433,6 +435,11 @@ ipcMain.handle('project:listSystemFonts', async () => {
     return { fonts: [], error: reason };
   }
 });
+
+registerFxBakeIpc(ipcMain, { getFfmpegPath: () => ffmpegBinaryPath, resolveSourcePath });
+// Native OpenFX host sidecar (native/ofx-host): scan, proxy renders and bakes.
+const ofxIpc = registerOfxIpc(ipcMain, { getFfmpegPath: () => ffmpegBinaryPath });
+app.on('will-quit', () => ofxIpc.dispose());
 
 ipcMain.handle('project:exportVideo', async (event, { folderPath, project, settings }) => {
   try {

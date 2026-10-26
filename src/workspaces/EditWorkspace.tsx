@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 import {
     AgentApplyBatchSummary,
     AgentReviewPassResult,
@@ -37,6 +37,37 @@ import LookbookPanel from '../components/LookbookPanel';
 import MusicAssistantPanel from '../components/MusicAssistantPanel';
 import { VideoSegment } from '../services/autoCutService';
 import { useLibraryAssets, type LibraryAsset } from '../hooks/useLibraryAssets';
+import { Frame, Maximize } from 'lucide-react';
+import { createFxInstance } from '../fx/registry';
+import ProDock from './edit-pro/ProDock';
+import {
+    AudioMetersPanel,
+    AudioMixerPanel,
+    EffectControlsPanel,
+    EffectsBrowserPanel,
+    HistoryPanel,
+    InfoPanel,
+    MarkersPanel,
+    ProjectViewToggle,
+    ToolsPanel,
+    WorkspaceBar,
+    useSessionHistory,
+    useTrackLevels,
+} from './edit-pro/ProPanels';
+import {
+    EDITOR_TOOLS,
+    loadProLayoutState,
+    proLayoutReducer,
+    resolveProShortcut,
+    saveProLayoutState,
+    textPositionForPoint,
+    toolForTrimMode,
+    trimModeForTool,
+    type EditorToolId,
+    type MonitorZoom,
+    type ProPanelId,
+} from './edit-pro/proLayout';
+import './edit-pro/proEditor.css';
 
 interface EditWorkspaceProps {
     mediaItems: MediaItem[];
@@ -158,6 +189,114 @@ const LIBRARY_TAB_META: Array<{ id: LibraryTabId; label: string; description: st
 ];
 const LIBRARY_TAB_KEY = 'edit_workspace_browser_tab_v1';
 
+/** Content of the library tabs; shared by the classic browser rail and the pro layout panels. */
+const renderLibraryContent = (activeTab: LibraryTabId, props: any): React.ReactNode => {
+    switch (activeTab) {
+        case 'lookbook':
+            return <LookbookPanel references={props.references || []} onGenerateVideoFromRef={props.onGenerateVideoFromReference} onEditImageRef={props.onEditReferenceImage} />;
+        case 'media':
+            return (
+                <MediaBin
+                    mediaItems={props.mediaItems}
+                    timelineClips={props.timelineClips}
+                    timelineTracks={props.timelineTracks}
+                    activeTrackId={props.activeTrackId}
+                    playheadPosition={props.playheadPosition}
+                    onAddMedia={props.onAddMedia}
+                    onAddToTimeline={props.onAddToTimeline}
+                    onLoadMediaToSource={props.onLoadMediaToSource}
+                    onLoadLibraryAssetToSource={props.onLoadLibraryAssetToSource}
+                    currentProjectName={props.projectName}
+                    currentProjectPath={props.currentProjectPath}
+                    references={props.references}
+                    shotPrompts={props.shotPrompts}
+                    recentProjects={props.recentProjects}
+                    onImportLibraryAsset={props.onImportLibraryAsset}
+                />
+            );
+        case 'titles':
+            return (
+                <TitlesPanel
+                    timelineClips={props.timelineClips}
+                    mediaItems={props.mediaItems}
+                    selectedClip={props.selectedClip}
+                    apiKeyReady={props.apiKeyReady}
+                    previewFrameUrl={props.sourcePreviewFrame}
+                    previewSourceLabel={props.sourcePreviewLabel}
+                    onCreateTitleClip={props.onCreateTitleClip}
+                    onApplyPresetToSelected={props.onApplyTitlePresetToSelected}
+                    onApplyTreatmentToSelected={props.onApplyTitleTreatmentToSelected}
+                    onApplyMotionToSelected={props.onApplyTitleMotionToSelected}
+                    onToggleAutoContrastForSelected={props.onToggleTitleAutoContrastForSelected}
+                    onGenerateSubtitlesFromSelected={props.onGenerateSubtitlesFromSelected}
+                    onUpdateSubtitleClipContent={props.onUpdateSubtitleClipContent}
+                    onSplitSubtitleClip={props.onSplitSubtitleClip}
+                    onMergeSubtitleClip={props.onMergeSubtitleClip}
+                    onSelectClip={props.onSelectClip}
+                />
+            );
+        case 'effects':
+            return (
+                <EffectsPanel
+                    onApplyEffect={props.onApplyCSSEffect}
+                    onApplyAIEffect={props.onApplyAIEffect}
+                    onApplyNativeEffect={props.onApplyNativeEffect}
+                    onApplyEffectStack={props.onApplyEffectStack}
+                    disabled={!props.selectedClipId}
+                    previewFrameUrl={props.sourcePreviewFrame}
+                    previewSourceLabel={props.sourcePreviewLabel}
+                />
+            );
+        case 'transitions':
+            return <TransitionsPanel onApplyTransition={(type: TransitionType) => props.selectedClipId && props.onApplyTransition(props.selectedClipId, type)} disabled={!props.selectedClipId} />;
+        case 'music':
+            return <MusicAssistantPanel timelineClips={props.timelineClips} mediaItems={props.mediaItems} onAddGeneratedMedia={props.onAddGeneratedMedia} apiKeyReady={props.apiKeyReady} />;
+        case 'autocut':
+            return (
+                <AutoCutPanel
+                        timelineClips={props.timelineClips}
+                        timelineTracks={props.timelineTracks}
+                        mediaItems={props.mediaItems}
+                        selectedClipId={props.selectedClipId}
+                        scriptText={props.scriptText}
+                        storyContext={props.storyContext}
+                        onUpdateClip={props.onUpdateClip}
+                        onAddMediaItems={props.onAddMediaItems}
+                        onAddClips={(clips: TimelineClip[]) => props.onAddClips(clips)}
+                        onSplitClipWithSegments={(clipId: string, segments: VideoSegment[]) => {
+                            const clip = props.timelineClips.find((c: TimelineClip) => c.id === clipId);
+                            if (clip && segments.length > 0) {
+                                const seg = segments[0];
+                                props.onUpdateClip({ ...clip, sourceIn: seg.startTime, sourceOut: seg.endTime, duration: seg.endTime - seg.startTime });
+                            }
+                        }}
+                    />
+            );
+        case 'agent':
+            return (
+                <EditorAgentPanel
+                    mediaItems={props.mediaItems}
+                    timelineClips={props.timelineClips}
+                    timelineTracks={props.timelineTracks}
+                    selectedClipId={props.selectedClipId}
+                    playheadPosition={props.playheadPosition}
+                    apiKeyReady={props.apiKeyReady}
+                    projectName={props.projectName}
+                    storyContext={props.storyContext}
+                    analysisResult={props.analysisResult}
+                    lastAppliedBatch={props.lastAgentApplyBatch}
+                    canUndoLastAppliedBatch={props.canUndoLastAgentApply}
+                    onPreviewPlan={props.onPreviewEditPlan}
+                    onSelectClip={props.onSelectClip}
+                    onApplyPlan={props.onApplyEditPlan}
+                    onUndoLastAppliedBatch={props.onUndoLastAgentApply}
+                    onRunReviewPass={props.onRunAgentReviewPass}
+                />
+            );
+        default: return null;
+    }
+};
+
 const LibraryPanel: React.FC<any> = (props) => {
     const [activeTab, setActiveTabState] = useState<LibraryTabId>(() => {
         if (typeof window === 'undefined') return 'media';
@@ -169,112 +308,7 @@ const LibraryPanel: React.FC<any> = (props) => {
         try { window.localStorage?.setItem(LIBRARY_TAB_KEY, id); } catch { /* ignore */ }
     };
 
-    const renderTabContent = () => {
-        switch (activeTab) {
-            case 'lookbook':
-                return <LookbookPanel references={props.references || []} onGenerateVideoFromRef={props.onGenerateVideoFromReference} onEditImageRef={props.onEditReferenceImage} />;
-            case 'media':
-                return (
-                    <MediaBin
-                        mediaItems={props.mediaItems}
-                        timelineClips={props.timelineClips}
-                        timelineTracks={props.timelineTracks}
-                        activeTrackId={props.activeTrackId}
-                        playheadPosition={props.playheadPosition}
-                        onAddMedia={props.onAddMedia}
-                        onAddToTimeline={props.onAddToTimeline}
-                        onLoadMediaToSource={props.onLoadMediaToSource}
-                        onLoadLibraryAssetToSource={props.onLoadLibraryAssetToSource}
-                        currentProjectName={props.projectName}
-                        currentProjectPath={props.currentProjectPath}
-                        references={props.references}
-                        shotPrompts={props.shotPrompts}
-                        recentProjects={props.recentProjects}
-                        onImportLibraryAsset={props.onImportLibraryAsset}
-                    />
-                );
-            case 'titles':
-                return (
-                    <TitlesPanel
-                        timelineClips={props.timelineClips}
-                        mediaItems={props.mediaItems}
-                        selectedClip={props.selectedClip}
-                        apiKeyReady={props.apiKeyReady}
-                        previewFrameUrl={props.sourcePreviewFrame}
-                        previewSourceLabel={props.sourcePreviewLabel}
-                        onCreateTitleClip={props.onCreateTitleClip}
-                        onApplyPresetToSelected={props.onApplyTitlePresetToSelected}
-                        onApplyTreatmentToSelected={props.onApplyTitleTreatmentToSelected}
-                        onApplyMotionToSelected={props.onApplyTitleMotionToSelected}
-                        onToggleAutoContrastForSelected={props.onToggleTitleAutoContrastForSelected}
-                        onGenerateSubtitlesFromSelected={props.onGenerateSubtitlesFromSelected}
-                        onUpdateSubtitleClipContent={props.onUpdateSubtitleClipContent}
-                        onSplitSubtitleClip={props.onSplitSubtitleClip}
-                        onMergeSubtitleClip={props.onMergeSubtitleClip}
-                        onSelectClip={props.onSelectClip}
-                    />
-                );
-            case 'effects':
-                return (
-                    <EffectsPanel
-                        onApplyEffect={props.onApplyCSSEffect}
-                        onApplyAIEffect={props.onApplyAIEffect}
-                        onApplyNativeEffect={props.onApplyNativeEffect}
-                        onApplyEffectStack={props.onApplyEffectStack}
-                        disabled={!props.selectedClipId}
-                        previewFrameUrl={props.sourcePreviewFrame}
-                        previewSourceLabel={props.sourcePreviewLabel}
-                    />
-                );
-            case 'transitions':
-                return <TransitionsPanel onApplyTransition={(type: TransitionType) => props.selectedClipId && props.onApplyTransition(props.selectedClipId, type)} disabled={!props.selectedClipId} />;
-            case 'music':
-                return <MusicAssistantPanel timelineClips={props.timelineClips} mediaItems={props.mediaItems} onAddGeneratedMedia={props.onAddGeneratedMedia} apiKeyReady={props.apiKeyReady} />;
-            case 'autocut':
-                return (
-                    <AutoCutPanel
-                            timelineClips={props.timelineClips}
-                            timelineTracks={props.timelineTracks}
-                            mediaItems={props.mediaItems}
-                            selectedClipId={props.selectedClipId}
-                            scriptText={props.scriptText}
-                            storyContext={props.storyContext}
-                            onUpdateClip={props.onUpdateClip}
-                            onAddMediaItems={props.onAddMediaItems}
-                            onAddClips={(clips: TimelineClip[]) => props.onAddClips(clips)}
-                            onSplitClipWithSegments={(clipId: string, segments: VideoSegment[]) => {
-                                const clip = props.timelineClips.find((c: TimelineClip) => c.id === clipId);
-                                if (clip && segments.length > 0) {
-                                    const seg = segments[0];
-                                    props.onUpdateClip({ ...clip, sourceIn: seg.startTime, sourceOut: seg.endTime, duration: seg.endTime - seg.startTime });
-                                }
-                            }}
-                        />
-                );
-            case 'agent':
-                return (
-                    <EditorAgentPanel
-                        mediaItems={props.mediaItems}
-                        timelineClips={props.timelineClips}
-                        timelineTracks={props.timelineTracks}
-                        selectedClipId={props.selectedClipId}
-                        playheadPosition={props.playheadPosition}
-                        apiKeyReady={props.apiKeyReady}
-                        projectName={props.projectName}
-                        storyContext={props.storyContext}
-                        analysisResult={props.analysisResult}
-                        lastAppliedBatch={props.lastAgentApplyBatch}
-                        canUndoLastAppliedBatch={props.canUndoLastAgentApply}
-                        onPreviewPlan={props.onPreviewEditPlan}
-                        onSelectClip={props.onSelectClip}
-                        onApplyPlan={props.onApplyEditPlan}
-                        onUndoLastAppliedBatch={props.onUndoLastAgentApply}
-                        onRunReviewPass={props.onRunAgentReviewPass}
-                    />
-                );
-            default: return null;
-        }
-    };
+    const renderTabContent = () => renderLibraryContent(activeTab, props);
 
     return (
         <div className="edit-browser">
@@ -400,6 +434,17 @@ const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: Array<{ keys: string;
             { keys: 'F11', desc: 'Fullscreen program monitor' },
             { keys: 'Esc', desc: 'Exit fullscreen / close' },
             { keys: 'Ctrl+Wheel', desc: 'Zoom timeline around cursor' },
+        ],
+    },
+    {
+        title: 'Profi-Layout (Schnitt/Farbe/Effekte/Audio)',
+        shortcuts: [
+            { keys: 'V / A / B / C', desc: 'Auswahl / Spur vorwärts / Ripple / Rasierklinge' },
+            { keys: 'Y / H / T', desc: 'Slip / Hand / Text' },
+            { keys: 'Cmd/Ctrl+K', desc: 'Clip an der Abspielposition teilen' },
+            { keys: 'I / O', desc: 'In/Out (Quelle, wenn Quellmonitor fokussiert)' },
+            { keys: 'Space', desc: 'Abspielen (fokussierter Monitor)' },
+            { keys: '`', desc: 'Panel maximieren' },
         ],
     },
     {
@@ -568,6 +613,47 @@ const getInitTL = () => {
     return Math.max(MIN_TL, Math.min(MAX_TL, Number.isFinite(v) ? v : DEFAULT_TIMELINE));
 };
 
+/** Callback-ref based element size (works for panels that mount and unmount with tabs). */
+const useElementSize = () => {
+    const [size, setSize] = useState({ width: 0, height: 0 });
+    const observerRef = useRef<ResizeObserver | null>(null);
+    const ref = useCallback((element: HTMLElement | null) => {
+        observerRef.current?.disconnect();
+        observerRef.current = null;
+        if (!element || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver((entries) => {
+            const rect = entries[0]?.contentRect;
+            if (rect) setSize((prev) => (prev.width === rect.width && prev.height === rect.height ? prev : { width: rect.width, height: rect.height }));
+        });
+        observer.observe(element);
+        observerRef.current = observer;
+        setSize({ width: element.clientWidth, height: element.clientHeight });
+    }, []);
+    useEffect(() => () => observerRef.current?.disconnect(), []);
+    return [ref, size] as const;
+};
+
+const safeStorage = (): Storage | null => {
+    try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
+};
+
+const isTypingTarget = (target: EventTarget | null) => {
+    if (!target || !(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+};
+
+const MONITOR_ZOOM_OPTIONS: Array<{ value: MonitorZoom; label: string }> = [
+    { value: 'fit', label: 'Einpassen' },
+    { value: 25, label: '25 %' },
+    { value: 50, label: '50 %' },
+    { value: 75, label: '75 %' },
+    { value: 100, label: '100 %' },
+    { value: 150, label: '150 %' },
+    { value: 200, label: '200 %' },
+];
+
 /* ─── Main Component ─── */
 
 const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
@@ -611,6 +697,17 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     useEffect(() => { window.localStorage?.setItem(MASK_KEY, JSON.stringify(mask)); }, [mask]);
 
     const [isFullscreen, setIsFullscreen] = useState(false);
+
+    /* ─── Pro layout state (workspaces, docked panels, tool) ─── */
+    const [pro, dispatchPro] = useReducer(proLayoutReducer, undefined, () => loadProLayoutState(safeStorage()));
+    const isPro = pro.workspace !== 'classic';
+    const isProRef = useRef(isPro);
+    isProRef.current = isPro;
+    useEffect(() => {
+        const id = window.setTimeout(() => saveProLayoutState(safeStorage(), pro), 250);
+        return () => window.clearTimeout(id);
+    }, [pro]);
+    const [proStageRef, proStageSize] = useElementSize();
     const [savedLayouts, setSavedLayouts] = useState<LayoutPreset[]>(loadSavedLayouts);
     const [activeLayoutName, setActiveLayoutName] = useState<string>(() => {
         if (typeof window === 'undefined') return '';
@@ -653,7 +750,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (e.key === '?' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); setShowShortcuts(prev => !prev); }
             if (e.key === 'F11') { e.preventDefault(); setIsFullscreen(prev => !prev); }
-            if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFocus(); }
+            if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !isProRef.current) { e.preventDefault(); toggleFocus(); }
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             const frame = 1 / DEFAULT_TIMELINE_FPS;
             const sequenceEnd = timelineClipsRef.current.reduce((max, clip) => Math.max(max, clip.end), 0);
@@ -1081,7 +1178,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     }, [browserLibraryAssets, loadLibraryAssetToSource, loadMediaToSource, mediaItems, props, recentLibraryCandidates, timelineClips, usedMediaIds]);
 
     useEffect(() => {
-        const sourceHotkeysArmed = Boolean(srcSource && effective !== 'program');
+        const sourceHotkeysArmed = Boolean(srcSource && (isPro ? pro.focusedPanel === 'source' : effective !== 'program'));
         if (!sourceHotkeysArmed) return;
 
         const handler = (e: KeyboardEvent) => {
@@ -1140,7 +1237,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
         window.addEventListener('keydown', handler, true);
         return () => window.removeEventListener('keydown', handler, true);
-    }, [captureSourcePreviewFrame, effective, pauseSourcePlayback, srcPlay, srcSource, stepSourceFrame, toggleSrcPlay]);
+    }, [captureSourcePreviewFrame, effective, isPro, pro.focusedPanel, pauseSourcePlayback, srcPlay, srcSource, stepSourceFrame, toggleSrcPlay]);
 
     const handleDrag = (idx: number) => (dx: number) => {
         if (!containerRef.current) return;
@@ -1179,14 +1276,16 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     useEffect(() => { window.localStorage?.setItem(PANEL_COLLAPSE_KEY, JSON.stringify(collapsed)); }, [collapsed]);
     useEffect(() => { window.localStorage?.setItem(TIMELINE_HEIGHT_KEY, String(tlHeight)); }, [tlHeight]);
 
+    // Classic layout: the source monitor follows the timeline selection. The pro
+    // layout keeps source and program independent (source = media bin selection).
+    useEffect(() => {
+        if (externalSourceAsset || isProRef.current) return;
+        if (props.selectedMedia?.id) setSrcId(props.selectedMedia.id);
+    }, [externalSourceAsset, props.selectedMedia?.id]);
     useEffect(() => {
         if (externalSourceAsset) return;
-        if (props.selectedMedia?.id) {
-            setSrcId(props.selectedMedia.id);
-            return;
-        }
         if (!srcId && mediaItems.length > 0) setSrcId(mediaItems[0].id);
-    }, [externalSourceAsset, props.selectedMedia?.id, mediaItems, srcId]);
+    }, [externalSourceAsset, mediaItems, srcId]);
     useEffect(() => { setSrcPlay(0); setSrcPlaying(false); }, [srcId, externalSourceAsset?.id]);
     useEffect(() => {
         if (!srcSource) return;
@@ -1271,6 +1370,95 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
             : { horizontal: false, size: Math.max(0, (fitted.width - fitted.height * maskRatio) / 2) })
         : null;
 
+    /* ─── Pro layout: tools, keys, derived data ─── */
+
+    const selectTool = useCallback((tool: EditorToolId) => {
+        if (EDITOR_TOOLS.find((entry) => entry.id === tool)?.status === 'planned') return;
+        dispatchPro({ type: 'setTool', tool });
+        const mode = trimModeForTool(tool);
+        if (mode && mode !== props.trimMode) props.onTrimModeChange(mode);
+    }, [props.trimMode, props.onTrimModeChange]);
+
+    // Keep the tool strip in sync when the trim mode changes elsewhere (R/O/U keys, Trim page, agents).
+    useEffect(() => {
+        const next = toolForTrimMode(props.trimMode, pro.tool);
+        if (next !== pro.tool) dispatchPro({ type: 'setTool', tool: next });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props.trimMode]);
+
+    const splitAtPlayhead = useCallback(() => {
+        const time = props.playheadPosition;
+        const inside = (clip: TimelineClip) => time > clip.start + 1e-4 && time < clip.end - 1e-4;
+        const unlocked = (clip: TimelineClip) => !timelineTracks.find((track) => track.id === clip.trackId)?.isLocked;
+        const selected = props.selectedClip && inside(props.selectedClip) && unlocked(props.selectedClip) ? props.selectedClip : null;
+        const onActive = timelineClips.find((clip) => clip.trackId === props.activeTrackId && inside(clip) && unlocked(clip));
+        const anyClip = timelineClips.find((clip) => inside(clip) && unlocked(clip));
+        const target = selected || onActive || anyClip;
+        if (target) props.onSplitClip(target.id, time);
+    }, [props.playheadPosition, props.selectedClip, props.activeTrackId, props.onSplitClip, timelineClips, timelineTracks]);
+
+    const proKeyRef = useRef({ focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay });
+    proKeyRef.current = { focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay };
+    useEffect(() => {
+        if (!isPro) return;
+        // Capture phase: runs before the App/Timeline window listeners so pro-only keys
+        // (C = razor tool, T = type tool, Cmd/Ctrl+K, I/O) don't also trigger their classic meaning.
+        const handler = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || event.repeat || isTypingTarget(event.target)) return;
+            const current = proKeyRef.current;
+            const action = resolveProShortcut(event, current.focusedPanel);
+            if (!action) return;
+            if (action.kind === 'tool' && EDITOR_TOOLS.find((entry) => entry.id === action.tool)?.status === 'planned') return;
+            event.preventDefault();
+            event.stopPropagation();
+            switch (action.kind) {
+                case 'tool': current.selectTool(action.tool); break;
+                case 'splitAtPlayhead': current.splitAtPlayhead(); break;
+                case 'toggleMaximize': dispatchPro({ type: 'toggleMaximize' }); break;
+                case 'mark': if (action.edge === 'in') current.markPgmIn(); else current.markPgmOut(); break;
+                case 'toggleSourcePlayback': current.toggleSrcPlay(); break;
+                default: break;
+            }
+        };
+        window.addEventListener('keydown', handler, true);
+        return () => window.removeEventListener('keydown', handler, true);
+    }, [isPro]);
+
+    const hiddenTrackSet = useMemo(() => new Set(isPro ? pro.hiddenTrackIds : []), [isPro, pro.hiddenTrackIds]);
+    const programClips = useMemo(
+        () => (hiddenTrackSet.size > 0 ? timelineClips.filter((clip) => !hiddenTrackSet.has(clip.trackId)) : timelineClips),
+        [hiddenTrackSet, timelineClips],
+    );
+    const trackLevels = useTrackLevels(timelineTracks, timelineClips, mediaItems, waveformCache, props.playheadPosition);
+    const sessionHistory = useSessionHistory(timelineClips, timelineTracks, mediaItems);
+    const trackLabelById = useMemo(() => {
+        let v = 0;
+        let a = 0;
+        return Object.fromEntries(timelineTracks.map((track) => [track.id, track.type === 'video' ? `V${++v}` : `A${++a}`])) as Record<string, string>;
+    }, [timelineTracks]);
+    const selectedClipMedia = props.selectedClip ? mediaItems.find((item) => item.id === props.selectedClip!.mediaId) ?? null : null;
+
+    const appendFxToClip = useCallback((clipId: string, fxId: string, reveal = false) => {
+        const clip = timelineClipsRef.current.find((entry) => entry.id === clipId);
+        if (!clip) return;
+        onUpdateClip({ ...clip, fxStack: [...(clip.fxStack ?? []), createFxInstance(fxId)] });
+        props.onSelectClip(clip.id);
+        if (reveal) dispatchPro({ type: 'openPanel', panel: 'effectControls' });
+    }, [onUpdateClip, props.onSelectClip]);
+
+    const handleTypeToolClick = (event: React.MouseEvent<HTMLDivElement>) => {
+        if (pro.tool !== 'type') return;
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        props.onCreateTextClip({
+            content: 'Neuer Text',
+            position: textPositionForPoint((event.clientX - rect.left) / Math.max(1, rect.width), (event.clientY - rect.top) / Math.max(1, rect.height)),
+            startTime: props.playheadPosition,
+        });
+        selectTool('selection');
+        dispatchPro({ type: 'openPanel', panel: 'inspector' });
+    };
+
     /* ─── Source Monitor ─── */
     const sourcePanel = (
         <div className="edit-monitor-panel">
@@ -1287,6 +1475,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                         onChange={e => { setExternalSourceAsset(null); setSrcId(e.target.value || null); }}
                         className="edit-select max-w-[190px]"
                         title="Load project media into the source monitor"
+                        data-automation-id="pp.source.load"
                     >
                         <option value="">Load media…</option>
                         {mediaItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -1336,6 +1525,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 )}
             </div>
             <EditTransportBar
+                automationId="pp.source"
                 isPlaying={srcPlaying}
                 position={srcPlay}
                 duration={srcSource ? srcDur : 0}
@@ -1350,8 +1540,8 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 onClearMarks={() => { setSrcIn(null); setSrcOut(null); }}
                 trailing={(
                     <div className="edit-transport__actions">
-                        <button onClick={() => do3PE('insert')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--primary" title="Insert the marked range at the playhead, pushing later clips back">Insert</button>
-                        <button onClick={() => do3PE('overwrite')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--outline" title="Overwrite the timeline at the playhead with the marked range">Overwrite</button>
+                        <button onClick={() => do3PE('insert')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--primary" title="Insert the marked range at the playhead, pushing later clips back" data-automation-id="pp.source.insert">Insert</button>
+                        <button onClick={() => do3PE('overwrite')} disabled={!canThreePointEdit} className="edit-text-btn edit-text-btn--outline" title="Overwrite the timeline at the playhead with the marked range" data-automation-id="pp.source.overwrite">Overwrite</button>
                     </div>
                 )}
             />
@@ -1448,28 +1638,334 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
         </div>
     );
 
+    /* ─── Shared props for library-style panels (classic rail + pro tabs) ─── */
+    const libraryProps = {
+        ...props,
+        onCreateTitleClip: createTitleClipFromPreset,
+        onApplyTitlePresetToSelected: applyTitlePresetToSelected,
+        onApplyTitleTreatmentToSelected: applyTitleTreatmentToSelected,
+        onApplyTitleMotionToSelected: applyTitleMotionToSelected,
+        onToggleTitleAutoContrastForSelected: toggleTitleAutoContrastForSelected,
+        onGenerateSubtitlesFromSelected: generateSubtitlesFromSelected,
+        onUpdateSubtitleClipContent: props.onUpdateSubtitleClipContent,
+        onSplitSubtitleClip: props.onSplitSubtitleClip,
+        onMergeSubtitleClip: props.onMergeSubtitleClip,
+        onLoadMediaToSource: loadMediaToSource,
+        onLoadLibraryAssetToSource: loadLibraryAssetToSource,
+        sourcePreviewFrame,
+        sourcePreviewLabel: srcSource ? `${srcSource.name} @ ${formatTimecode(srcPlay)}` : 'Source monitor',
+    };
+
+    /* ─── Pro program monitor ─── */
+    const proCanvas = (() => {
+        if (pro.monitorZoom !== 'fit') {
+            const factor = pro.monitorZoom / 100;
+            return { width: Math.round(preview.width * factor), height: Math.round(preview.height * factor) };
+        }
+        if (!proStageSize.width || !proStageSize.height) return null;
+        const availableW = Math.max(1, proStageSize.width - 12);
+        const availableH = Math.max(1, proStageSize.height - 12);
+        const width = Math.min(availableW, availableH * previewRatio);
+        return { width: Math.round(width), height: Math.round(width / previewRatio) };
+    })();
+    const proMaskBars = proCanvas && maskRatio
+        ? (maskRatio > previewRatio
+            ? { horizontal: true, size: Math.max(0, (proCanvas.height - proCanvas.width / maskRatio) / 2) }
+            : { horizontal: false, size: Math.max(0, (proCanvas.width - proCanvas.height * maskRatio) / 2) })
+        : null;
+
+    const proProgramPanel = (
+        <div className={`ppx-monitor ${pro.tool === 'type' ? 'ppx-monitor--type' : ''}`} data-automation-id="pp.program">
+            <div
+                ref={proStageRef}
+                className={`ppx-monitor__stage ${pro.monitorZoom !== 'fit' ? 'ppx-monitor__stage--zoomed' : ''}`}
+                onDoubleClick={() => { if (pro.tool !== 'type') setIsFullscreen(true); }}
+                title={pro.tool === 'type' ? 'Klicken: Textclip an der Abspielposition anlegen' : 'Doppelklick: Vollbild'}
+            >
+                <div
+                    className="ppx-monitor__canvas"
+                    style={proCanvas ? { width: proCanvas.width, height: proCanvas.height } : { width: '100%', height: '100%' }}
+                    onClick={handleTypeToolClick}
+                    data-automation-id="pp.program.canvas"
+                >
+                    <PreviewPlayer
+                        timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
+                        playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
+                        canvasWidth={preview.width} canvasHeight={preview.height} aspectStyle={aspect} showControls={false}
+                    />
+                    {(guides !== 'off' || maskRatio) && (
+                        <div className="edit-guides" style={{ inset: 0 }} aria-hidden>
+                            {proMaskBars && (
+                                <>
+                                    <div className="edit-guides__mask" style={proMaskBars.horizontal ? { left: 0, right: 0, top: 0, height: proMaskBars.size } : { top: 0, bottom: 0, left: 0, width: proMaskBars.size }} />
+                                    <div className="edit-guides__mask" style={proMaskBars.horizontal ? { left: 0, right: 0, bottom: 0, height: proMaskBars.size } : { top: 0, bottom: 0, right: 0, width: proMaskBars.size }} />
+                                </>
+                            )}
+                            {(guides === 'thirds' || guides === 'both') && (
+                                <>
+                                    <div className="edit-guides__line edit-guides__line--v" style={{ left: '33.333%' }} />
+                                    <div className="edit-guides__line edit-guides__line--v" style={{ left: '66.666%' }} />
+                                    <div className="edit-guides__line edit-guides__line--h" style={{ top: '33.333%' }} />
+                                    <div className="edit-guides__line edit-guides__line--h" style={{ top: '66.666%' }} />
+                                </>
+                            )}
+                            {(guides === 'safe' || guides === 'both') && (
+                                <>
+                                    <div className="edit-guides__safe" style={{ inset: '5%' }} />
+                                    <div className="edit-guides__safe edit-guides__safe--title" style={{ inset: '10%' }} />
+                                </>
+                            )}
+                        </div>
+                    )}
+                    {pro.safeMargins && (
+                        <div className="ppx-safe" aria-hidden data-automation-id="pp.program.safe-overlay">
+                            <div className="ppx-safe__box" style={{ inset: '5%' }} title="Aktionssicher" />
+                            <div className="ppx-safe__box" style={{ inset: '10%' }} title="Titelsicher" />
+                            <div className="ppx-safe__cross" />
+                        </div>
+                    )}
+                </div>
+                {timelineClips.length === 0 && (
+                    <div className="edit-monitor-empty">
+                        <strong>Die Sequenz ist leer</strong>
+                        <span>Medien aus dem Projekt-Panel auf eine Spur ziehen oder im Quellmonitor In/Out setzen und „Insert“ drücken.</span>
+                    </div>
+                )}
+                {props.selectedMedia?.type === 'image' && (
+                    <button onClick={(e) => { e.stopPropagation(); setImageEditorOpen(true); }} className="edit-monitor-panel__overlay-btn" title="Bildeditor öffnen" data-automation-id="pp.program.image-editor">
+                        <BrushIcon className="w-4 h-4" />
+                    </button>
+                )}
+            </div>
+            <div className="ppx-monitor__bar">
+                <span className="ppx-monitor__tc" data-automation-id="pp.program.timecode">{formatTimecode(props.playheadPosition)}</span>
+                <select
+                    className="ppx-select"
+                    value={String(pro.monitorZoom)}
+                    onChange={(event) => dispatchPro({ type: 'setMonitorZoom', zoom: (event.target.value === 'fit' ? 'fit' : Number(event.target.value)) as MonitorZoom })}
+                    title="Zoomstufe"
+                    data-automation-id="pp.program.zoom"
+                >
+                    {MONITOR_ZOOM_OPTIONS.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
+                </select>
+                <button
+                    type="button"
+                    className={`ppx-icon ${pro.safeMargins ? 'ppx-icon--on' : ''}`}
+                    onClick={() => dispatchPro({ type: 'setSafeMargins', value: !pro.safeMargins })}
+                    aria-pressed={pro.safeMargins}
+                    title="Sicherheitsränder ein/aus"
+                    data-automation-id="pp.program.safe-margins"
+                >
+                    <Frame size={13} />
+                </button>
+                <select value={guides} onChange={(e) => setGuides(e.target.value as typeof guides)} className="ppx-select" title="Hilfslinien" data-automation-id="pp.program.guides">
+                    <option value="off">Keine Hilfslinien</option>
+                    <option value="thirds">Drittel</option>
+                    <option value="safe">Sicherheitsbereiche</option>
+                    <option value="both">Drittel + Sicherheit</option>
+                </select>
+                <select value={mask} onChange={(e) => setMask(e.target.value)} className="ppx-select" title="Seitenverhältnis-Maske" data-automation-id="pp.program.mask">
+                    {MASK_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.id === 'none' ? 'Keine Maske' : preset.label}</option>)}
+                </select>
+                <span className="ppx-monitor__spacer" />
+                <span className="ppx-monitor__name">{props.projectName || 'Unbenannte Sequenz'}</span>
+                <button type="button" className="ppx-icon" onClick={() => setIsFullscreen(true)} title="Vollbild (F11)" data-automation-id="pp.program.fullscreen">
+                    <Maximize size={13} />
+                </button>
+                <span className="ppx-monitor__dur" title="Sequenzdauer">{formatTimecode(sequenceDuration)}</span>
+            </div>
+            <EditTransportBar
+                automationId="pp.program"
+                isPlaying={props.isPlaying}
+                position={props.playheadPosition}
+                duration={sequenceDuration}
+                disabled={timelineClips.length === 0}
+                inPoint={pgmIn}
+                outPoint={pgmOut}
+                onTogglePlayback={props.onTogglePlayback}
+                onSeek={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
+                onStepFrame={stepProgramFrame}
+                onMarkIn={markPgmIn}
+                onMarkOut={markPgmOut}
+                onClearMarks={() => { setPgmIn(null); setPgmOut(null); }}
+                trailing={srcSource ? (
+                    <div className="edit-transport__actions">
+                        <button onClick={() => do3PE('insert')} className="edit-text-btn edit-text-btn--primary" title="Quellbereich an der Abspielposition einfügen" data-automation-id="pp.program.insert">Insert</button>
+                        <button onClick={() => do3PE('overwrite')} className="edit-text-btn edit-text-btn--outline" title="Quellbereich an der Abspielposition überschreiben" data-automation-id="pp.program.overwrite">Overwrite</button>
+                    </div>
+                ) : null}
+            />
+        </div>
+    );
+
+    const renderProPanel = (panel: ProPanelId): React.ReactNode => {
+        switch (panel) {
+            case 'source':
+                return <div className="ppx-panel-fill" style={{ overflow: 'hidden' }} data-automation-id="pp.source">{sourcePanel}</div>;
+            case 'program':
+                return proProgramPanel;
+            case 'timeline':
+                return (
+                    <div className="ppx-panel-fill" style={{ overflow: 'hidden' }}>
+                        <Timeline
+                            variant="pro"
+                            tool={pro.tool}
+                            hiddenTrackIds={pro.hiddenTrackIds}
+                            onToggleTrackVisibility={(trackId) => dispatchPro({ type: 'toggleTrackHidden', trackId })}
+                            onDropFx={(clipId, fxId) => appendFxToClip(clipId, fxId, true)}
+                            tracks={timelineTracks} clips={timelineClips} mediaItems={mediaItems} selectedClipId={selectedClipId}
+                            onSelectClip={props.onSelectClip} onUpdateClip={onUpdateClip} onBatchUpdateClips={props.onBatchUpdateClips}
+                            playheadPosition={props.playheadPosition} isSnappingEnabled={props.isSnappingEnabled} trimMode={props.trimMode}
+                            onTrimModeChange={props.onTrimModeChange}
+                            onPlayheadUpdate={props.onPlayheadUpdate} onSnappingToggle={props.onSnappingToggle} onSplitClip={props.onSplitClip}
+                            onAddTrack={props.onAddTrack} onUpdateTrack={props.onUpdateTrack} activeTrackId={props.activeTrackId}
+                            onSetActiveTrack={props.onSetActiveTrack} onDropMedia={props.onDropMedia}
+                            onDropLibraryAsset={props.onDropLibraryAsset}
+                            onDropEffect={props.onDropEffectOnClip} onDropEffectStack={props.onDropEffectStackOnClip}
+                            waveformCache={waveformCache}
+                            onMatchGap={handleMatchTimelineGap}
+                            rangeIn={pgmIn}
+                            rangeOut={pgmOut}
+                            onDeleteClip={props.onDeleteClip}
+                            onRippleDeleteClip={props.onRippleDeleteClip}
+                        />
+                    </div>
+                );
+            case 'tools':
+                return <ToolsPanel tool={pro.tool} onSelect={selectTool} />;
+            case 'meters':
+                return <AudioMetersPanel levels={trackLevels} />;
+            case 'project':
+                return (
+                    <div className="ppx-project" data-automation-id="pp.project">
+                        <MediaBin
+                            mediaItems={mediaItems}
+                            timelineClips={timelineClips}
+                            timelineTracks={timelineTracks}
+                            activeTrackId={props.activeTrackId}
+                            playheadPosition={props.playheadPosition}
+                            onAddMedia={onAddMedia}
+                            onAddToTimeline={props.onAddToTimeline}
+                            onLoadMediaToSource={loadMediaToSource}
+                            onSelectMedia={loadMediaToSource}
+                            selectedMediaId={srcSource?.kind === 'project' ? srcSource.id : null}
+                            onLoadLibraryAssetToSource={loadLibraryAssetToSource}
+                            currentProjectName={props.projectName}
+                            currentProjectPath={props.currentProjectPath}
+                            references={props.references}
+                            shotPrompts={props.shotPrompts}
+                            recentProjects={props.recentProjects}
+                            onImportLibraryAsset={props.onImportLibraryAsset}
+                            viewMode={pro.projectView}
+                            density="compact"
+                        />
+                    </div>
+                );
+            case 'effects':
+                return (
+                    <EffectsBrowserPanel
+                        selectedClip={props.selectedClip}
+                        onAppendFx={(fxId) => props.selectedClip && appendFxToClip(props.selectedClip.id, fxId, true)}
+                        onApplyCssEffect={props.onApplyCSSEffect}
+                        onApplyEffectStack={props.onApplyEffectStack}
+                        onApplyAIEffect={props.onApplyAIEffect}
+                        onApplyNativeEffect={props.onApplyNativeEffect}
+                        onApplyTransition={(type) => selectedClipId && props.onApplyTransition(selectedClipId, type)}
+                        onCreateTitle={createTitleClipFromPreset}
+                    />
+                );
+            case 'markers':
+                return (
+                    <MarkersPanel
+                        clips={timelineClips} mediaItems={mediaItems} tracks={timelineTracks}
+                        programIn={pgmIn} programOut={pgmOut} sourceIn={srcIn} sourceOut={srcOut}
+                        playhead={props.playheadPosition}
+                        onSeek={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
+                        onClearProgramMarks={() => { setPgmIn(null); setPgmOut(null); }}
+                    />
+                );
+            case 'history':
+                return <HistoryPanel entries={sessionHistory.entries} onClear={sessionHistory.clear} />;
+            case 'info':
+                return (
+                    <InfoPanel
+                        clip={props.selectedClip} media={selectedClipMedia}
+                        sourceMedia={srcSource ? { name: srcSource.name, type: srcSource.type, duration: srcSource.duration } : null}
+                        tracks={timelineTracks} clips={timelineClips} playhead={props.playheadPosition}
+                        sequenceSize={{ width: preview.width, height: preview.height }}
+                    />
+                );
+            case 'effectControls':
+                return (
+                    <EffectControlsPanel
+                        clip={props.selectedClip}
+                        media={selectedClipMedia}
+                        trackLabel={props.selectedClip ? trackLabelById[props.selectedClip.trackId] : undefined}
+                        onUpdateClip={onUpdateClip}
+                    />
+                );
+            case 'audioMixer':
+                return (
+                    <AudioMixerPanel
+                        tracks={timelineTracks} clips={timelineClips} mediaItems={mediaItems} levels={trackLevels}
+                        onUpdateClip={onUpdateClip} onUpdateTrack={props.onUpdateTrack}
+                    />
+                );
+            case 'inspector':
+                return <div className="ppx-panel-fill"><InspectorPanel {...props} /></div>;
+            case 'transitions':
+                return <TransitionsPanel onApplyTransition={(type: TransitionType) => selectedClipId && props.onApplyTransition(selectedClipId, type)} disabled={!selectedClipId} />;
+            case 'titles':
+            case 'lookbook':
+            case 'music':
+            case 'autocut':
+            case 'agent':
+                return <div className="ppx-panel-fill">{renderLibraryContent(panel, libraryProps)}</div>;
+            default:
+                return null;
+        }
+    };
+
+    const proBarTrailing = (
+        <>
+            <select value={preview.presetId} onChange={handlePresetChange} className="edit-select" title="Seitenverhältnis der Sequenz" data-automation-id="pp.sequence.aspect">
+                {PREVIEW_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label === 'Custom' ? 'Eigenes…' : p.label}</option>)}
+            </select>
+            {preview.presetId === 'custom' && (
+                <>
+                    <input type="number" min="1" value={preview.width} onChange={e => handleDimChange('width', Number(e.target.value))} className="edit-input w-[4.4rem]" title="Breite" data-automation-id="pp.sequence.width" />
+                    <span className="edit-toolbar__hint">×</span>
+                    <input type="number" min="1" value={preview.height} onChange={e => handleDimChange('height', Number(e.target.value))} className="edit-input w-[4.4rem]" title="Höhe" data-automation-id="pp.sequence.height" />
+                </>
+            )}
+            <button onClick={() => setShowShortcuts(true)} className="ppx-icon" title="Tastaturkürzel (?)" data-automation-id="pp.shortcuts">
+                <KeyboardIcon className="w-4 h-4" />
+            </button>
+        </>
+    );
+
     /* ─── Render ─── */
     return (
-        <div ref={containerRef} className="studio-workspace edit-workspace h-full flex relative" style={{ padding: 8 }}>
+        <div className={`studio-workspace edit-workspace ppx-root ${isPro ? 'ppx-dark' : ''}`} style={{ gap: 0 }} data-automation-id="pp.editor" data-workspace={pro.workspace} data-tool={pro.tool}>
+            <WorkspaceBar state={pro} dispatch={dispatchPro} trailing={isPro ? proBarTrailing : null} />
+            {isPro ? (
+                <div className="ppx-body">
+                    <ProDock
+                        layout={pro.layouts[pro.workspace as Exclude<typeof pro.workspace, 'classic'>]}
+                        state={pro}
+                        dispatch={dispatchPro}
+                        renderPanel={renderProPanel}
+                        renderHeaderExtras={(panel) => (panel === 'project'
+                            ? <ProjectViewToggle view={pro.projectView} onChange={(view) => dispatchPro({ type: 'setProjectView', view })} />
+                            : null)}
+                    />
+                </div>
+            ) : (
+        <div ref={containerRef} className="flex relative flex-1 min-h-0" style={{ padding: 8, gap: '0.5rem' }}>
             {/* Left panel */}
             {!collapsed.left && (
                 <div style={{ flexBasis: `${panelWidths[0]}%`, minWidth: 0 }} className="edit-side-panel h-full">
-                    <LibraryPanel
-                        {...props}
-                        onCreateTitleClip={createTitleClipFromPreset}
-                        onApplyTitlePresetToSelected={applyTitlePresetToSelected}
-                        onApplyTitleTreatmentToSelected={applyTitleTreatmentToSelected}
-                        onApplyTitleMotionToSelected={applyTitleMotionToSelected}
-                        onToggleTitleAutoContrastForSelected={toggleTitleAutoContrastForSelected}
-                        onGenerateSubtitlesFromSelected={generateSubtitlesFromSelected}
-                        onUpdateSubtitleClipContent={props.onUpdateSubtitleClipContent}
-                        onSplitSubtitleClip={props.onSplitSubtitleClip}
-                        onMergeSubtitleClip={props.onMergeSubtitleClip}
-                        onLoadMediaToSource={loadMediaToSource}
-                        onLoadLibraryAssetToSource={loadLibraryAssetToSource}
-                        sourcePreviewFrame={sourcePreviewFrame}
-                        sourcePreviewLabel={srcSource ? `${srcSource.name} @ ${formatTimecode(srcPlay)}` : 'Source monitor'}
-                    />
+                    <LibraryPanel {...libraryProps} />
                 </div>
             )}
 
@@ -1577,6 +2073,8 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
             {/* Right panel */}
             {!collapsed.right && <div style={{ flexBasis: `${panelWidths[2]}%`, minWidth: 0 }} className="edit-side-panel h-full"><InspectorPanel {...props} /></div>}
+        </div>
+            )}
 
             <ImageEditorModal isOpen={imageEditorOpen} mediaItem={props.selectedMedia} onClose={() => setImageEditorOpen(false)} onSave={handleImageSave} />
 
@@ -1587,7 +2085,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
             {isFullscreen && (
                 <FullscreenMonitor onClose={() => setIsFullscreen(false)}>
                     <PreviewPlayer
-                        timelineClips={timelineClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
+                        timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
                         playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
                         canvasWidth={preview.width} canvasHeight={preview.height} showControls={true}
                     />

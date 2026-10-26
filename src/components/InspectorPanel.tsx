@@ -3,7 +3,8 @@ import { ClipEffectLayer, ClipFilters, LutId, TimelineClip, MediaItem, EffectTyp
 import { FunctionDeclaration } from '@google/genai';
 import AIAssistant from './AIAssistant';
 import { TRANSITIONS } from '../constants';
-import { PropertiesIcon, EffectsIcon, ColorIcon, TransitionsIcon, MagicWandIcon, TextIcon, TransformIcon, KeyingIcon, MotionIcon, KeyframeIcon, XIcon, AddIcon } from './icons';
+import { PropertiesIcon, EffectsIcon, ColorIcon, TransitionsIcon, MagicWandIcon, TextIcon, TransformIcon, KeyingIcon, MotionIcon, KeyframeIcon, XIcon, AddIcon, ApertureIcon } from './icons';
+import FxStackPanel from '../fx/ui/FxStackPanel';
 import { FILM_LUTS, LOOK_PRESETS, normalizeFilters } from '../utils/colorGrading';
 import { parseCubeLut } from '../utils/lut';
 import { getClipEffectLayers, normalizeEffectLayer, syncClipEffectsLegacyField } from '../utils/effects';
@@ -25,7 +26,7 @@ interface InspectorPanelProps {
     playheadPosition: number;
 }
 
-type InspectorTab = 'PROPERTIES' | 'EFFECTS' | 'COLOR' | 'TRANSITIONS' | 'TEXT' | 'AI' | 'TRANSFORM' | 'MOTION' | 'KEYFRAMES';
+type InspectorTab = 'PROPERTIES' | 'EFFECTS' | 'FX' | 'COLOR' | 'TRANSITIONS' | 'TEXT' | 'AI' | 'TRANSFORM' | 'MOTION' | 'KEYFRAMES';
 
 const DEFAULT_TRANSFORM = {
     scale: 1,
@@ -766,6 +767,14 @@ const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
                     </div>
                 );
             }
+            case 'FX':
+                return (
+                    <FxStackPanel
+                        stack={selectedClip.fxStack}
+                        onChange={(fxStack) => onUpdateClip({ ...selectedClip, fxStack })}
+                        emptyHint="GPU-Effekte aus Buckswood Post Plugins (Optics Lab, Film-Emulation …). Läuft in Vorschau und Export identisch."
+                    />
+                );
             case 'AI':
                 return <AIAssistant apiKeyReady={props.apiKeyReady} tools={props.aiTools} toolExecutor={props.aiToolExecutor} context={assistantContext} />;
         }
@@ -780,6 +789,7 @@ const InspectorPanel: React.FC<InspectorPanelProps> = (props) => {
             { id: 'MOTION', icon: MotionIcon, name: 'Motion' },
             { id: 'KEYFRAMES', icon: KeyframeIcon, name: 'Keyframes' },
             { id: 'EFFECTS', icon: EffectsIcon, name: 'Effects' },
+            { id: 'FX', icon: ApertureIcon, name: 'Lens & Film FX' },
             { id: 'COLOR', icon: ColorIcon, name: 'Color' },
             { id: 'TRANSITIONS', icon: TransitionsIcon, name: 'Transition' },
         );

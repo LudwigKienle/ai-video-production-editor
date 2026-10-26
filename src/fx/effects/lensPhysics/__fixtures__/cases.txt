@@ -1,0 +1,14 @@
+defaults
+neutral-trims lensPreset=0
+clean-cinema lensPreset=1 effectStrength=0.8 outputMix=1
+vintage-spherical lensPreset=2 effectStrength=1 outputMix=1 overdrive=1
+petzval-full lensPreset=3 effectStrength=1 outputMix=1 overdrive=1.5
+anamorphic-soft lensPreset=4 effectStrength=0.9 outputMix=0.8 bloomThreshold=0.5
+soviet-glow lensPreset=5 effectStrength=1 outputMix=1 bloom=0.4 bloomThreshold=0.4 coma=0.5
+ai-deplastic lensPreset=6
+helios-full lensPreset=7 effectStrength=1 outputMix=1 overdrive=1
+batis-sharpen lensPreset=9 effectStrength=1 outputMix=1 fStopSharpener=0.8
+atlas-overdrive lensPreset=18 effectStrength=1 outputMix=1 overdrive=3 edgeHaloGuard=1 chromaticAberration=0.4 fringing=0.35
+ultra-vista-unguarded lensPreset=13 effectStrength=1 outputMix=1 overdrive=2.5 edgeHaloGuard=0 swirl=0.5 distortion=-0.6
+imax-portrait-corners lensPreset=17 effectStrength=1 outputMix=1 vignette=0.6 cornerColor=0.8 fStopSharpener=-0.5 frameIndex=12
+zero-strength lensPreset=5 effectStrength=0

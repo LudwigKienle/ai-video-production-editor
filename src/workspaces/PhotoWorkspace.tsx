@@ -5,6 +5,11 @@ import { editImageWithFalNanoBanana2 } from '../services/falAiService';
 import { gradeImageFromPrompt, matchReferenceGrade } from '../services/geminiService';
 import { BrushIcon, TextIcon, LayersIcon, MagicWandIcon } from '../components/icons';
 import { fileToBase64 } from '../utils/helpers';
+import FxStackPanel from '../fx/ui/FxStackPanel';
+import { FxRenderer } from '../fx/renderer';
+import { hasActiveFx, needsNativeHost } from '../fx/registry';
+import { renderStackAsync } from '../fx/ofx';
+import type { FxStack } from '../fx/types';
 
 interface PhotoWorkspaceProps {
   onAddGeneratedMedia?: (item: MediaItem) => void;
@@ -14,7 +19,7 @@ interface PhotoWorkspaceProps {
 
 type ToolMode = 'brush' | 'lasso' | 'stamp' | 'clone' | 'text';
 type PhotoLeftPanel = 'retouch' | 'expand';
-type PhotoRightPanel = 'adjust' | 'neural' | 'crop' | 'layers';
+type PhotoRightPanel = 'adjust' | 'fx' | 'neural' | 'crop' | 'layers';
 
 type TextLayer = {
   id: string;
@@ -101,6 +106,8 @@ const NEURAL_PRESETS: NeuralPreset[] = [
 
 const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, seedImageUrl, onConsumeSeed }) => {
   const rasterCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fxCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fxRendererRef = useRef<FxRenderer | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +129,9 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
   const [expandPrompt, setExpandPrompt] = useState('Extend the scene naturally, matching lighting and style.');
 
   const [adjustments, setAdjustments] = useState(DEFAULT_ADJUSTMENTS);
+  const [fxStack, setFxStack] = useState<FxStack>([]);
+  const [fxError, setFxError] = useState<string | null>(null);
+  const fxActive = hasActiveFx(fxStack);
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [neuralIntensity, setNeuralIntensity] = useState(75);
   const [neuralPrompt, setNeuralPrompt] = useState('Balance skin tones and harmonize palette while preserving detail.');
@@ -165,6 +175,67 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
     ].filter(Boolean);
     return filters.join(' ');
   }, [adjustments]);
+
+  /** Renders the FX stack over the raster canvas at full resolution (GPU, plus native OFX via the host). */
+  const renderFx = useCallback(async (source: HTMLCanvasElement): Promise<HTMLCanvasElement | null> => {
+    if (!hasActiveFx(fxStack) || !source.width || !source.height) return null;
+    try {
+      if (needsNativeHost(fxStack)) {
+        const result = await renderStackAsync(source, fxStack, { width: source.width, height: source.height, frameIndex: 0 });
+        setFxError(null);
+        return result;
+      }
+      fxRendererRef.current ??= new FxRenderer();
+      const result = fxRendererRef.current.render(source, fxStack, { frameIndex: 0, quality: 'full' }) as HTMLCanvasElement;
+      setFxError(null);
+      return result;
+    } catch (error) {
+      setFxError(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }, [fxStack]);
+
+  const fxBusyRef = useRef(false);
+  const refreshFxPreview = useCallback(async () => {
+    const raster = rasterCanvasRef.current;
+    const target = fxCanvasRef.current;
+    if (!raster || !target || fxBusyRef.current) return;
+    fxBusyRef.current = true;
+    const result = await renderFx(raster).finally(() => { fxBusyRef.current = false; });
+    if (!result) return;
+    if (target.width !== result.width) target.width = result.width;
+    if (target.height !== result.height) target.height = result.height;
+    const ctx = target.getContext('2d');
+    ctx?.clearRect(0, 0, target.width, target.height);
+    ctx?.drawImage(result, 0, 0);
+  }, [renderFx]);
+
+  // Live FX preview: re-render on stack changes and while painting.
+  useEffect(() => {
+    if (!fxActive) return;
+    void refreshFxPreview();
+    const timer = window.setInterval(() => void refreshFxPreview(), needsNativeHost(fxStack) ? 1500 : 400);
+    return () => window.clearInterval(timer);
+  }, [fxActive, fxStack, refreshFxPreview, canvasSize.width, canvasSize.height]);
+
+  useEffect(() => () => {
+    fxRendererRef.current?.dispose();
+    fxRendererRef.current = null;
+  }, []);
+
+  /** Bakes the FX stack into the raster layer (like "Apply" for adjustments). */
+  const applyFx = async () => {
+    const canvas = rasterCanvasRef.current;
+    if (!canvas) return;
+    const result = await renderFx(canvas);
+    if (!result) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(result, 0, 0, canvas.width, canvas.height);
+    setFxStack([]);
+    setStatus('Effekte ins Bild übernommen.');
+  };
 
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -674,7 +745,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
     clearMask();
   };
 
-  const exportToMedia = () => {
+  const exportToMedia = async () => {
     if (!rasterCanvasRef.current) return;
     const baseCanvas = rasterCanvasRef.current;
 
@@ -685,7 +756,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
     if (!ctx) return;
 
     ctx.filter = filterStyle;
-    ctx.drawImage(baseCanvas, 0, 0);
+    ctx.drawImage((await renderFx(baseCanvas)) ?? baseCanvas, 0, 0, output.width, output.height);
     ctx.filter = 'none';
 
     textLayers.forEach((layer) => {
@@ -936,7 +1007,13 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
             <canvas
               ref={rasterCanvasRef}
               className="absolute inset-0 w-full h-full"
-              style={{ filter: filterStyle }}
+              style={{ filter: filterStyle, opacity: fxActive ? 0 : 1 }}
+            />
+            <canvas
+              ref={fxCanvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              style={{ filter: filterStyle, display: fxActive ? 'block' : 'none' }}
+              data-automation-id="photo.fx-preview"
             />
             <canvas
               ref={maskCanvasRef}
@@ -974,7 +1051,7 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
 
         <div className="w-72 border-l border-gray-800 p-4 space-y-4 overflow-y-auto">
           <div className="toolbar-segmented photo-panels" role="tablist" aria-label="Inspector">
-            {([['adjust', 'Adjust'], ['neural', 'Neural'], ['crop', 'Crop'], ['layers', 'Layers']] as Array<[PhotoRightPanel, string]>).map(([id, label]) => (
+            {([['adjust', 'Adjust'], ['fx', 'Lens FX'], ['neural', 'Neural'], ['crop', 'Crop'], ['layers', 'Layers']] as Array<[PhotoRightPanel, string]>).map(([id, label]) => (
               <button key={id} type="button" role="tab" aria-selected={rightPanel === id} className={`toolbar-segmented__item ${rightPanel === id ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setRightPanel(id)}>{label}</button>
             ))}
           </div>
@@ -1049,6 +1126,23 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
                 </button>
               </div>
             </div>
+          )}
+
+          {rightPanel === 'fx' && (
+          <div data-automation-id="photo.fx-panel">
+            <h3 className="text-xs uppercase text-gray-400 font-semibold mb-2">Lens &amp; Film FX</h3>
+            <FxStackPanel
+              stack={fxStack}
+              onChange={setFxStack}
+              emptyHint="Objektiv- und Film-Charakter (Buckswood Post Plugins Optics Lab u. a.). Wird beim Speichern in die Media Bin mitgerendert."
+            />
+            {fxError && <p className="text-xs text-red-400 mt-2">FX-Fehler: {fxError}</p>}
+            {fxActive && (
+              <button type="button" onClick={() => void applyFx()} className="mt-3 w-full bg-gray-800 hover:bg-gray-700 text-xs py-2 rounded-lg" data-automation-id="photo.fx-apply">
+                Effekte ins Bild übernehmen
+              </button>
+            )}
+          </div>
           )}
 
           {rightPanel === 'adjust' && (

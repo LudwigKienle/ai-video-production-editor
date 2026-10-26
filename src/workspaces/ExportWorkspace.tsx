@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { bakeFxForExport, clipsNeedingBake } from '../fx/bake';
 import { startTask, type TaskHandle } from '../services/taskCenter';
 import { MediaItem, TimelineClip, TimelineTrack } from '../types';
 import { ExportIcon } from '../components/icons';
@@ -378,10 +379,26 @@ const ExportWorkspace: React.FC<ExportWorkspaceProps> = ({ mediaItems, timelineC
                     (window as any).electron.project.removeExportProgressListener();
                     (window as any).electron.project.onExportProgress(handleProgress);
 
+                    // GPU effect stacks (Buckswood Post Plugins FX) are baked through the same
+                    // renderer as the preview so the export matches what you saw.
+                    let exportProject = { timelineClips, timelineTracks, mediaItems };
+                    if (clipsNeedingBake(exportProject).length > 0) {
+                        setRenderDetail('Rendering Lens & Film FX …');
+                        exportProject = await bakeFxForExport(exportProject, {
+                            folderPath: projectPath,
+                            fps: Math.max(1, normalizedSettings.fps || 24),
+                            onProgress: ({ clipIndex, clipCount, frame, frameCount, note }) => {
+                                setProgress(Math.round(((clipIndex + frame / Math.max(1, frameCount)) / clipCount) * 100));
+                                setRenderDetail(`${note} · Clip ${clipIndex + 1}/${clipCount} · Frame ${frame}/${frameCount}`);
+                            },
+                        });
+                        setProgress(0);
+                    }
+
                     // Invoke Export
                     const result = await (window as any).electron.project.exportVideo({
                         folderPath: projectPath,
-                        project: { timelineClips, timelineTracks, mediaItems },
+                        project: exportProject,
                         settings: normalizedSettings
                     });
 

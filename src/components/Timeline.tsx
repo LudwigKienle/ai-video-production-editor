@@ -5,6 +5,11 @@ import { formatTimecode, formatRulerLabel, pickRulerStep } from '../utils/timeco
 import Waveform from './Waveform';
 import { getClipEffectLayers } from '../utils/effects';
 import type { LibraryAsset } from '../hooks/useLibraryAssets';
+import { Eye, EyeOff } from 'lucide-react';
+
+/** Editing tools of the pro layout's tool strip (see workspaces/edit-pro). */
+export type TimelineTool = 'selection' | 'trackForward' | 'ripple' | 'razor' | 'slip' | 'pen' | 'hand' | 'type';
+const FX_DRAG_TYPE = 'application/x-fx-id';
 
 interface TimelineProps {
   tracks: TimelineTrack[];
@@ -46,6 +51,15 @@ interface TimelineProps {
     nextClipId?: string | null;
     suggestedCoverage: 'insert' | 'alt-angle' | 'b-roll';
   }) => void | Promise<void>;
+  /** 'pro': NLE-style header (timecode top-left, no trim strip) and video tracks stacked above audio. */
+  variant?: 'classic' | 'pro';
+  /** Active editing tool (pro layout). Defaults to plain selection behaviour. */
+  tool?: TimelineTool;
+  /** Video tracks hidden in the program monitor (eye toggle). */
+  hiddenTrackIds?: string[];
+  onToggleTrackVisibility?: (trackId: string) => void;
+  /** Drop of a GPU effect (Buckswood Post Plugins FX definition id) onto a clip. */
+  onDropFx?: (clipId: string, fxId: string) => void;
 }
 
 const DEFAULT_PIXELS_PER_SECOND = 25;
@@ -109,7 +123,31 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     rangeOut = null,
     onDeleteClip,
     onRippleDeleteClip,
+    variant = 'classic',
+    tool = 'selection',
+    hiddenTrackIds,
+    onToggleTrackVisibility,
+    onDropFx,
   } = props;
+  const isPro = variant === 'pro';
+
+  /** Display order: pro stacks V(n)..V1 above A1..A(n); classic keeps the array order. */
+  const displayTracks = useMemo(() => {
+    if (!isPro) return tracks;
+    const video = tracks.filter((track) => track.type === 'video').reverse();
+    const audio = tracks.filter((track) => track.type === 'audio');
+    return [...video, ...audio];
+  }, [isPro, tracks]);
+  const trackLabels = useMemo(() => {
+    const labels: Record<string, { label: string; number: number }> = {};
+    let v = 0;
+    let a = 0;
+    tracks.forEach((track) => {
+      const number = track.type === 'video' ? ++v : ++a;
+      labels[track.id] = { label: `${track.type === 'video' ? 'V' : 'A'}${number}`, number };
+    });
+    return labels;
+  }, [tracks]);
 
   const timelineContainerRef = useRef<HTMLDivElement>(null);
   const tracksAreaRef = useRef<HTMLDivElement>(null);
@@ -222,7 +260,147 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     };
   };
 
+  /** Timeline time under a viewport x coordinate. */
+  const timeAtClientX = (clientX: number) => {
+    const container = timelineContainerRef.current;
+    if (!container) return 0;
+    const rect = container.getBoundingClientRect();
+    return Math.max(0, (clientX - rect.left + container.scrollLeft - TRACK_HEADER_WIDTH) / pxPerSec);
+  };
+
+  /* ─── Tool behaviours (pro layout) ─── */
+
+  const [groupDragState, setGroupDragState] = useState<{
+    trackId: string;
+    initialX: number;
+    initialClips: TimelineClip[];
+    groupIds: string[];
+    groupStart: number;
+    minStart: number;
+  } | null>(null);
+  const [razorX, setRazorX] = useState<number | null>(null);
+  const [slipDragState, setSlipDragState] = useState<{ clipId: string; initialX: number; initialClip: TimelineClip } | null>(null);
+  const panRef = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
+
+  const razorTimeAt = (clientX: number) => {
+    let time = timeAtClientX(clientX);
+    if (isSnappingEnabled && Math.abs((time - playheadPosition) * pxPerSec) < SNAP_THRESHOLD) time = playheadPosition;
+    return time;
+  };
+
+  const razorSplit = (e: React.MouseEvent, clip: TimelineClip) => {
+    const owner = tracks.find((entry) => entry.id === clip.trackId);
+    onSelectClip(clip.id);
+    onSetActiveTrack(clip.trackId);
+    if (owner?.isLocked) return;
+    const time = razorTimeAt(e.clientX);
+    if (time > clip.start + EPSILON && time < clip.end - EPSILON) onSplitClip(clip.id, time);
+  };
+
+  /** Track-select-forward: grab every clip on the track at/after the click and slide them together. */
+  const startGroupDrag = (e: React.MouseEvent, trackId: string, fromTime: number, clickedClipId?: string) => {
+    const owner = tracks.find((entry) => entry.id === trackId);
+    if (!owner || owner.isLocked) return;
+    const trackClips = getTrackClips(clips, trackId);
+    const group = trackClips.filter((clip) => clip.start >= fromTime - EPSILON);
+    if (group.length === 0) return;
+    const groupStart = group[0].start;
+    const minStart = trackClips.filter((clip) => clip.end <= groupStart + EPSILON && !group.includes(clip)).reduce((max, clip) => Math.max(max, clip.end), 0);
+    onSelectClip(clickedClipId ?? group[0].id);
+    onSetActiveTrack(trackId);
+    document.body.style.cursor = 'grabbing';
+    setGroupDragState({
+      trackId,
+      initialX: e.clientX,
+      initialClips: clips.map((clip) => ({ ...clip })),
+      groupIds: group.map((clip) => clip.id),
+      groupStart,
+      minStart,
+    });
+  };
+
+  const handleLaneMouseDown = (e: React.MouseEvent, track: TimelineTrack) => {
+    if (e.button !== 0) return;
+    if (tool === 'trackForward') {
+      e.stopPropagation();
+      startGroupDrag(e, track.id, timeAtClientX(e.clientX));
+    }
+  };
+
+  const handleScrollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (tool !== 'hand' || e.button !== 0) return;
+    const container = timelineContainerRef.current;
+    if (!container) return;
+    if ((e.target as HTMLElement).closest('.track-header, .tl-ruler')) return;
+    e.preventDefault();
+    panRef.current = { x: e.clientX, y: e.clientY, left: container.scrollLeft, top: container.scrollTop, moved: false };
+    document.body.style.cursor = 'grabbing';
+    const move = (ev: MouseEvent) => {
+      const pan = panRef.current;
+      if (!pan || !timelineContainerRef.current) return;
+      if (Math.abs(ev.clientX - pan.x) + Math.abs(ev.clientY - pan.y) > 2) pan.moved = true;
+      timelineContainerRef.current.scrollLeft = pan.left - (ev.clientX - pan.x);
+      timelineContainerRef.current.scrollTop = pan.top - (ev.clientY - pan.y);
+    };
+    const up = () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      window.setTimeout(() => { panRef.current = null; }, 0);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  useEffect(() => {
+    if (!groupDragState) return;
+    const move = (e: MouseEvent) => {
+      const { initialX, initialClips, groupIds, groupStart, minStart } = groupDragState;
+      const delta = Math.max(minStart - groupStart, (e.clientX - initialX) / pxPerSec);
+      const ids = new Set(groupIds);
+      applyClipSet(initialClips.map((clip) => (ids.has(clip.id) ? { ...clip, start: clip.start + delta, end: clip.end + delta } : clip)));
+    };
+    const up = () => {
+      document.body.style.cursor = 'default';
+      setGroupDragState(null);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [groupDragState, pxPerSec]);
+
+  /** Slip: dragging the clip body shifts its source window; position and length stay. */
+  useEffect(() => {
+    if (!slipDragState) return;
+    const move = (e: MouseEvent) => {
+      const { initialClip, initialX } = slipDragState;
+      const speed = Math.max(0.05, initialClip.speed || 1);
+      const mediaDuration = getMediaDuration(initialClip.mediaId, initialClip.duration || 5);
+      const sourceIn = initialClip.sourceIn ?? 0;
+      const sourceOut = initialClip.sourceOut ?? (sourceIn + (initialClip.end - initialClip.start) * speed);
+      const span = sourceOut - sourceIn;
+      const shift = clamp(-((e.clientX - initialX) / pxPerSec) * speed, -sourceIn, Math.max(0, mediaDuration - sourceOut));
+      onUpdateClip({ ...initialClip, sourceIn: sourceIn + shift, sourceOut: sourceIn + shift + span });
+    };
+    const up = () => {
+      document.body.style.cursor = 'default';
+      setSlipDragState(null);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [slipDragState, pxPerSec, onUpdateClip]);
+
+  useEffect(() => { if (tool !== 'razor') setRazorX(null); }, [tool]);
+
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (tool === 'hand') return;
     const target = e.target as HTMLElement;
     if (target.closest('.clip-item') || target.closest('.track-header')) return;
     if (!timelineContainerRef.current) return;
@@ -256,6 +434,18 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
   const handleClipMouseDown = (e: React.MouseEvent, clip: TimelineClip) => {
     if (trimmingState) return;
+    if (tool === 'hand') return; // let the scroll area pan
+    if (tool === 'razor') { e.stopPropagation(); razorSplit(e, clip); return; }
+    if (tool === 'trackForward') { e.stopPropagation(); startGroupDrag(e, clip.trackId, clip.start, clip.id); return; }
+    if (tool === 'slip') {
+      e.stopPropagation();
+      onSelectClip(clip.id);
+      onSetActiveTrack(clip.trackId);
+      if (tracks.find((entry) => entry.id === clip.trackId)?.isLocked) return;
+      document.body.style.cursor = 'ew-resize';
+      setSlipDragState({ clipId: clip.id, initialX: e.clientX, initialClip: { ...clip } });
+      return;
+    }
     e.stopPropagation();
     onSelectClip(clip.id);
     onSetActiveTrack(clip.trackId);
@@ -293,18 +483,18 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const time = Math.max(0, x / pxPerSec);
 
     const trackIndex = Math.floor(y / rowHeight);
-    if (trackIndex >= 0 && trackIndex < tracks.length) {
+    if (trackIndex >= 0 && trackIndex < displayTracks.length) {
       if (mediaId && onDropMedia) {
-        onDropMedia(mediaId, tracks[trackIndex].id, time);
+        onDropMedia(mediaId, displayTracks[trackIndex].id, time);
       } else if (libraryAssetRaw && onDropLibraryAsset) {
         try {
           const asset = JSON.parse(libraryAssetRaw) as LibraryAsset;
-          void onDropLibraryAsset(asset, tracks[trackIndex].id, time);
+          void onDropLibraryAsset(asset, displayTracks[trackIndex].id, time);
         } catch (error) {
           console.error('Failed to parse dropped library asset', error);
         }
       }
-      onSetActiveTrack(tracks[trackIndex].id);
+      onSetActiveTrack(displayTracks[trackIndex].id);
     }
   };
 
@@ -623,7 +813,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         if (tracksRect) {
           const yPosInTimeline = e.clientY - tracksRect.top;
           const trackIndex = Math.floor(yPosInTimeline / rowHeight);
-          const targetTrack = tracks[trackIndex];
+          const targetTrack = displayTracks[trackIndex];
           const media = getMediaForItem(initialClip.mediaId);
           if (
             targetTrack &&
@@ -674,6 +864,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     isDraggingPlayhead,
     clips,
     tracks,
+    displayTracks,
     isSnappingEnabled,
     playheadPosition,
     pxPerSec,
@@ -955,12 +1146,19 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   const hasClips = clips.length > 0;
   const tracksHeight = tracks.length * rowHeight;
 
+  const trimToolActive = tool === 'selection' || tool === 'ripple' || tool === 'slip' || tool === 'pen' || tool === 'type';
+
   return (
-    <div className="tl-root select-none">
+    <div className={`tl-root select-none tl-root--${variant} tl-root--tool-${tool}`} data-automation-id="pp.timeline">
       {/* Header: trim modes · timecode · tools */}
       <div className="tl-header">
+        {isPro && (
+          <div className="tl-header__group tl-header__tc-pro" data-automation-id="pp.timeline.timecode" title="Abspielposition">
+            {formatTimecode(playheadPosition)}
+          </div>
+        )}
         <div className="tl-header__group">
-          {onTrimModeChange ? (
+          {isPro ? null : onTrimModeChange ? (
             <div className="edit-seg" role="tablist" aria-label="Trim mode">
               {trimModes.map((entry) => (
                 <button
@@ -982,7 +1180,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           )}
         </div>
 
-        <div className="edit-timecode tl-header__timecode" title="Playhead position / sequence duration">
+        <div className={`edit-timecode tl-header__timecode ${isPro ? 'tl-header__timecode--pro' : ''}`} title="Playhead position / sequence duration">
           <span className="edit-timecode__now">{formatTimecode(playheadPosition)}</span>
           <span className="edit-timecode__sep">/</span>
           <span className="edit-timecode__total">{formatTimecode(contentDuration)}</span>
@@ -992,7 +1190,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           <button
             type="button"
             className="edit-icon-btn"
-            title="Split clip at playhead (C)"
+            title={isPro ? 'Clip an der Abspielposition teilen (Cmd/Ctrl+K)' : 'Split clip at playhead (C)'}
+            data-automation-id="pp.timeline.split"
             onClick={() => clipAtPlayhead && onSplitClip(clipAtPlayhead.id, playheadPosition)}
             disabled={!clipAtPlayhead}
           >
@@ -1002,6 +1201,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
             type="button"
             className={`edit-icon-btn ${isSnappingEnabled ? 'edit-icon-btn--accent' : ''}`}
             title={`Snapping ${isSnappingEnabled ? 'on' : 'off'} (N)`}
+            aria-pressed={isSnappingEnabled}
+            data-automation-id="pp.timeline.snap"
             onClick={onSnappingToggle}
           >
             <MagnetIcon className="w-4 h-4" />
@@ -1012,20 +1213,20 @@ const Timeline: React.FC<TimelineProps> = (props) => {
             </button>
           )}
           <span className="edit-divider" />
-          <button type="button" className="edit-text-btn" title="Add video track (Alt+V)" onClick={() => onAddTrack('video')}>
+          <button type="button" className="edit-text-btn" title="Add video track (Alt+V)" data-automation-id="pp.timeline.add-video" onClick={() => onAddTrack('video')}>
             <VideoIcon className="w-3.5 h-3.5" />
             <span>Video</span>
           </button>
-          <button type="button" className="edit-text-btn" title="Add audio track (Alt+A)" onClick={() => onAddTrack('audio')}>
+          <button type="button" className="edit-text-btn" title="Add audio track (Alt+A)" data-automation-id="pp.timeline.add-audio" onClick={() => onAddTrack('audio')}>
             <AudioIcon className="w-3.5 h-3.5" />
             <span>Audio</span>
           </button>
-          <button type="button" className="edit-icon-btn" title={`Track height: ${trackHeight <= TRACK_HEIGHTS[0] ? 'small' : trackHeight >= TRACK_HEIGHTS[2] ? 'large' : 'medium'} (click to change)`} onClick={cycleTrackHeight}>
+          <button type="button" className="edit-icon-btn" title={`Track height: ${trackHeight <= TRACK_HEIGHTS[0] ? 'small' : trackHeight >= TRACK_HEIGHTS[2] ? 'large' : 'medium'} (click to change)`} data-automation-id="pp.timeline.track-height" onClick={cycleTrackHeight}>
             <LayersIcon className="w-4 h-4" />
           </button>
           <span className="edit-divider" />
           <div className="tl-zoom" title="Zoom (Ctrl/Cmd + scroll wheel)">
-            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(-1)} disabled={pxPerSec <= MIN_PIXELS_PER_SECOND} title="Zoom out">
+            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(-1)} disabled={pxPerSec <= MIN_PIXELS_PER_SECOND} title="Zoom out" data-automation-id="pp.timeline.zoom-out">
               <ZoomOutIcon className="w-4 h-4" />
             </button>
             <input
@@ -1037,11 +1238,12 @@ const Timeline: React.FC<TimelineProps> = (props) => {
               value={Math.log(pxPerSec)}
               onChange={(event) => applyZoom(Math.exp(Number(event.target.value)))}
               aria-label="Timeline zoom"
+              data-automation-id="pp.timeline.zoom"
             />
-            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(1)} disabled={pxPerSec >= MAX_PIXELS_PER_SECOND} title="Zoom in">
+            <button type="button" className="edit-icon-btn" onClick={() => zoomStep(1)} disabled={pxPerSec >= MAX_PIXELS_PER_SECOND} title="Zoom in" data-automation-id="pp.timeline.zoom-in">
               <ZoomInIcon className="w-4 h-4" />
             </button>
-            <button type="button" className="edit-icon-btn" onClick={zoomToFit} title="Fit sequence to view">
+            <button type="button" className="edit-icon-btn" onClick={zoomToFit} title="Fit sequence to view" data-automation-id="pp.timeline.zoom-fit">
               <FitViewIcon className="w-4 h-4" />
             </button>
             <span className="tl-zoom__value">{zoomPercent}%</span>
@@ -1054,6 +1256,14 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         className="tl-scroll"
         ref={timelineContainerRef}
         onClick={handleTimelineClick}
+        onMouseDown={handleScrollMouseDown}
+        onMouseMove={tool === 'razor' ? (event) => {
+          const container = timelineContainerRef.current;
+          if (!container) return;
+          const overLane = (event.target as HTMLElement).closest('.tl-track__lane');
+          setRazorX(overLane ? razorTimeAt(event.clientX) * pxPerSec + TRACK_HEADER_WIDTH : null);
+        } : undefined}
+        onMouseLeave={tool === 'razor' ? () => setRazorX(null) : undefined}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -1116,17 +1326,19 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
           {/* Tracks */}
           <div className="tl-tracks" ref={tracksAreaRef} style={{ height: `${tracksHeight}px` }}>
-            {tracks.map((track, index) => {
+            {displayTracks.map((track) => {
               const trackClips = clips.filter((clip) => clip.trackId === track.id);
               const trackGaps = videoGapsByTrack[track.id] || [];
-              const trackNumber = tracks.filter((entry, entryIndex) => entry.type === track.type && entryIndex <= index).length;
-              const targetLabel = `${track.type === 'video' ? 'V' : 'A'}${trackNumber}`;
+              const trackNumber = trackLabels[track.id]?.number ?? 1;
+              const targetLabel = trackLabels[track.id]?.label ?? `${track.type === 'video' ? 'V' : 'A'}${trackNumber}`;
               const isActiveTrack = activeTrackId === track.id;
               const isVideo = track.type === 'video';
+              const isHiddenTrack = Boolean(hiddenTrackIds?.includes(track.id));
               return (
                 <div
                   key={track.id}
-                  className={`tl-track ${isActiveTrack ? 'tl-track--active' : ''} ${track.isLocked ? 'tl-track--locked' : ''}`}
+                  className={`tl-track ${isActiveTrack ? 'tl-track--active' : ''} ${track.isLocked ? 'tl-track--locked' : ''} ${isHiddenTrack ? 'tl-track--hidden' : ''}`}
+                  data-automation-id={`pp.timeline.track.${targetLabel}`}
                   style={{ height: `${rowHeight}px` }}
                 >
                   <div
@@ -1144,12 +1356,28 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                         }}
                         className={`tl-track__badge ${isVideo ? 'tl-track__badge--video' : 'tl-track__badge--audio'} ${track.isTargeted ? 'tl-track__badge--targeted' : ''}`}
                         title={track.isTargeted ? `${targetLabel} is a target track. Click to release.` : `Target ${targetLabel} for inserts and overwrites`}
+                        data-automation-id={`pp.timeline.track.${targetLabel}.target`}
                       >
                         {targetLabel}
                       </button>
-                      <span className="tl-track__name">{isVideo ? 'Video' : 'Audio'} {trackNumber}</span>
+                      <span className="tl-track__name">{track.name || `${isVideo ? 'Video' : 'Audio'} ${trackNumber}`}</span>
                     </div>
                     <div className="tl-track__controls">
+                      {isVideo && onToggleTrackVisibility && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleTrackVisibility(track.id);
+                          }}
+                          className={`tl-toggle ${isHiddenTrack ? 'tl-toggle--hidden' : ''}`}
+                          title={isHiddenTrack ? 'Spur im Programmmonitor einblenden' : 'Spur im Programmmonitor ausblenden (nur Vorschau, nicht Export)'}
+                          aria-pressed={!isHiddenTrack}
+                          data-automation-id={`pp.timeline.track.${targetLabel}.eye`}
+                        >
+                          {isHiddenTrack ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(event) => {
@@ -1159,6 +1387,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                         }}
                         className={`tl-toggle ${track.isSolo ? 'tl-toggle--solo' : ''}`}
                         title={track.isSolo ? 'Solo on (Alt+S)' : 'Solo track (Alt+S)'}
+                        aria-pressed={Boolean(track.isSolo)}
+                        data-automation-id={`pp.timeline.track.${targetLabel}.solo`}
                       >
                         <SoloIcon className="w-3.5 h-3.5" />
                       </button>
@@ -1171,6 +1401,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                         }}
                         className={`tl-toggle ${track.isMuted ? 'tl-toggle--muted' : ''}`}
                         title={track.isMuted ? 'Unmute track (Alt+M)' : 'Mute track (Alt+M)'}
+                        aria-pressed={track.isMuted}
+                        data-automation-id={`pp.timeline.track.${targetLabel}.mute`}
                       >
                         {track.isMuted ? <MuteIcon className="w-3.5 h-3.5" /> : <AudioIcon className="w-3.5 h-3.5" />}
                       </button>
@@ -1183,13 +1415,19 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                         }}
                         className={`tl-toggle ${track.isLocked ? 'tl-toggle--locked' : ''}`}
                         title={track.isLocked ? 'Unlock track (Alt+L)' : 'Lock track (Alt+L)'}
+                        aria-pressed={track.isLocked}
+                        data-automation-id={`pp.timeline.track.${targetLabel}.lock`}
                       >
                         {track.isLocked ? <LockIcon className="w-3.5 h-3.5" /> : <UnlockIcon className="w-3.5 h-3.5" />}
                       </button>
                     </div>
                   </div>
 
-                  <div className={`tl-track__lane ${isVideo ? 'tl-track__lane--video' : 'tl-track__lane--audio'}`} style={{ left: `${TRACK_HEADER_WIDTH}px` }}>
+                  <div
+                    className={`tl-track__lane ${isVideo ? 'tl-track__lane--video' : 'tl-track__lane--audio'}`}
+                    style={{ left: `${TRACK_HEADER_WIDTH}px` }}
+                    onMouseDown={(event) => handleLaneMouseDown(event, track)}
+                  >
                     {trackGaps.map((gap) => {
                       const width = Math.max(16, gap.duration * pxPerSec);
                       const label = gap.suggestedCoverage === 'b-roll'
@@ -1245,14 +1483,23 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                           onMouseEnter={() => setHoveredClipId(clip.id)}
                           onMouseLeave={() => setHoveredClipId((current) => (current === clip.id ? null : current))}
                           onDragOver={(event) => {
-                            const effectId = event.dataTransfer.getData('application/x-effect-id');
-                            const stackId = event.dataTransfer.getData('application/x-effect-stack-id');
-                            if (effectId || stackId) {
+                            // getData() is empty during dragover in Chromium; check the advertised types instead.
+                            const types = Array.from(event.dataTransfer.types);
+                            if (types.includes('application/x-effect-id') || types.includes('application/x-effect-stack-id') || (onDropFx && types.includes(FX_DRAG_TYPE))) {
                               event.preventDefault();
                               event.dataTransfer.dropEffect = 'copy';
                             }
                           }}
                           onDrop={(event) => {
+                            const droppedFxId = event.dataTransfer.getData(FX_DRAG_TYPE);
+                            if (droppedFxId && onDropFx) {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onDropFx(clip.id, droppedFxId);
+                              onSelectClip(clip.id);
+                              onSetActiveTrack(clip.trackId);
+                              return;
+                            }
                             const droppedEffectId = event.dataTransfer.getData('application/x-effect-id');
                             const droppedStackId = event.dataTransfer.getData('application/x-effect-stack-id');
                             if (!droppedEffectId && !droppedStackId) return;
@@ -1272,6 +1519,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                           }}
                           style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${trackHeight}px` }}
                           className={`clip-item tl-clip tl-clip--${kind} ${isSelected ? 'tl-clip--selected' : ''} ${track.isLocked ? 'tl-clip--locked' : ''}`}
+                          data-automation-id={`pp.timeline.clip.${clip.id}`}
                           title={`${media.name} · ${formatTimecode(clip.start)} → ${formatTimecode(clip.end)}`}
                         >
                           <div className="tl-clip__media">
@@ -1290,6 +1538,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                               <span className="tl-clip__meta">
                                 {speedLabel && <span>{speedLabel}</span>}
                                 {effectCount > 0 && <span>FX {effectCount}</span>}
+                                {(clip.fxStack?.length ?? 0) > 0 && <span className="tl-clip__gpu" title="GPU-Effekte">GPU {clip.fxStack?.length}</span>}
                                 {clip.transitionOut && <span>{clip.transitionOut.type} {clip.transitionOut.duration.toFixed(1)}s</span>}
                               </span>
                             </div>
@@ -1297,7 +1546,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                           {keyframeMarkers.map((marker) => (
                             <div key={marker.id} className="tl-clip__keyframe" style={{ left: `${marker.leftPct}%`, background: marker.color }} />
                           ))}
-                          {!track.isLocked && (isSelected || isHovered) && (
+                          {!track.isLocked && trimToolActive && (isSelected || isHovered) && (
                             <>
                               <div className="tl-clip__handle tl-clip__handle--start" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'start')} />
                               <div className="tl-clip__handle tl-clip__handle--end" onMouseDown={(e) => handleTrimMouseDown(e, clip, 'end')} />
@@ -1328,6 +1577,9 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           </div>
           {snapLinePosition !== null && (
             <div className="tl-snapline" style={{ left: `${snapLinePosition}px` }} />
+          )}
+          {tool === 'razor' && razorX !== null && (
+            <div className="tl-razorline" style={{ left: `${razorX}px`, top: `${RULER_HEIGHT}px` }} aria-hidden />
           )}
         </div>
       </div>

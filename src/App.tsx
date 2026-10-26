@@ -3975,7 +3975,7 @@ function App() {
                     duration = await getVideoDuration(url);
                 } catch (e) { console.error(e); }
                 generateWaveformData(url).then(data => {
-                    setWaveformCache(prev => ({ ...prev, [`upload-${file.name}-${i}`]: data }));
+                    setWaveformCache(prev => ({ ...prev, [mediaId]: data }));
                 });
             } else {
                 url = URL.createObjectURL(file);

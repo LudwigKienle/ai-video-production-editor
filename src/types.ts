@@ -355,6 +355,8 @@ export type TimelineClip = {
   effect: EffectType | null;
   effects?: ClipEffectLayer[];
   filters?: ClipFilters;
+  /** GPU effect stack (Buckswood Post Plugins FX / OFX), rendered before transform and CSS looks. */
+  fxStack?: import('./fx/types').FxStack;
   transitionOut?: {
     type: TransitionType;
     duration: number;

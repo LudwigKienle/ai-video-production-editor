@@ -53,6 +53,11 @@ const forbiddenPatterns = [
 const allowedPhrases = [
   new RegExp('bucks' + 'wood-post-plugins', 'giu'),
   new RegExp('Bucks' + 'wood Post Plugins', 'gu'),
+  // Technical identifiers of those plugins, needed by the OFX host and the FX ports:
+  // OFX plugin ids, bundle/source file and folder names, C++ namespaces.
+  new RegExp('com\\.' + 'bucks' + 'wood\\.[a-z.]*', 'gu'),
+  new RegExp('\\b' + 'Bucks' + 'wood(?:_[A-Za-z]\\w*|[A-Z]\\w*)', 'gu'),
+  new RegExp('\\b' + 'bucks' + 'wood(?:_\\w+|(?=::|;))', 'gu'),
 ];
 const withoutAllowed = (line) => allowedPhrases.reduce((text, pattern) => text.replace(pattern, ''), line);
 

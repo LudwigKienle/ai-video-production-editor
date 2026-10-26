@@ -18,6 +18,8 @@ export interface EditTransportBarProps {
     onClearMarks?: () => void;
     showScrubber?: boolean;
     trailing?: React.ReactNode;
+    /** Prefix for data-automation-id attributes (e.g. "pp.program"). */
+    automationId?: string;
 }
 
 /**
@@ -41,7 +43,9 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
     onClearMarks,
     showScrubber = true,
     trailing,
+    automationId,
 }) => {
+    const aid = (part: string) => (automationId ? `${automationId}.${part}` : undefined);
     const safeDuration = Math.max(0.01, Number.isFinite(duration) ? duration : 0);
     const clampedPosition = Math.max(0, Math.min(safeDuration, Number.isFinite(position) ? position : 0));
     const hasMarks = inPoint !== null || outPoint !== null;
@@ -85,15 +89,16 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                         disabled={disabled}
                         onChange={(event) => onSeek(Number(event.target.value))}
                         aria-label="Scrub"
+                        data-automation-id={aid('scrub')}
                     />
                 </div>
             )}
             <div className="edit-transport__row">
                 <div className="edit-transport__group">
-                    <button type="button" className="edit-icon-btn" onClick={() => onSeek(0)} disabled={disabled} title="Go to start (Home)">
+                    <button type="button" className="edit-icon-btn" onClick={() => onSeek(0)} disabled={disabled} title="Go to start (Home)" data-automation-id={aid('start')}>
                         <SkipBackIcon className="w-4 h-4" />
                     </button>
-                    <button type="button" className="edit-icon-btn" onClick={() => step(-1)} disabled={disabled} title="Step back one frame (Left)">
+                    <button type="button" className="edit-icon-btn" onClick={() => step(-1)} disabled={disabled} title="Step back one frame (Left)" data-automation-id={aid('step-back')}>
                         <StepBackIcon className="w-4 h-4" />
                     </button>
                     <button
@@ -102,13 +107,14 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                         onClick={onTogglePlayback}
                         disabled={disabled}
                         title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                        data-automation-id={aid('play')}
                     >
                         {isPlaying ? <PauseIcon className="w-4 h-4" /> : <PlayIcon className="w-4 h-4 translate-x-px" />}
                     </button>
-                    <button type="button" className="edit-icon-btn" onClick={() => step(1)} disabled={disabled} title="Step forward one frame (Right)">
+                    <button type="button" className="edit-icon-btn" onClick={() => step(1)} disabled={disabled} title="Step forward one frame (Right)" data-automation-id={aid('step-forward')}>
                         <StepForwardIcon className="w-4 h-4" />
                     </button>
-                    <button type="button" className="edit-icon-btn" onClick={() => onSeek(safeDuration)} disabled={disabled} title="Go to end (End)">
+                    <button type="button" className="edit-icon-btn" onClick={() => onSeek(safeDuration)} disabled={disabled} title="Go to end (End)" data-automation-id={aid('end')}>
                         <SkipForwardIcon className="w-4 h-4" />
                     </button>
                 </div>
@@ -125,7 +131,7 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                             aria-label="Go to timecode"
                         />
                     ) : (
-                        <button type="button" className="edit-timecode__now edit-timecode__now--button" onClick={beginEdit} disabled={disabled}>{formatTimecode(clampedPosition, fps)}</button>
+                        <button type="button" className="edit-timecode__now edit-timecode__now--button" onClick={beginEdit} disabled={disabled} data-automation-id={aid('timecode')}>{formatTimecode(clampedPosition, fps)}</button>
                     )}
                     <span className="edit-timecode__sep">/</span>
                     <span className="edit-timecode__total">{formatTimecode(duration > 0 ? duration : 0, fps)}</span>
@@ -135,12 +141,12 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                     {(onMarkIn || onMarkOut) && (
                         <div className="edit-transport__marks">
                             {onMarkIn && (
-                                <button type="button" className={`edit-icon-btn ${inPoint !== null ? 'edit-icon-btn--accent' : ''}`} onClick={onMarkIn} disabled={disabled} title="Mark in (I)">
+                                <button type="button" className={`edit-icon-btn ${inPoint !== null ? 'edit-icon-btn--accent' : ''}`} onClick={onMarkIn} disabled={disabled} title="Mark in (I)" data-automation-id={aid('mark-in')}>
                                     <MarkInIcon className="w-4 h-4" />
                                 </button>
                             )}
                             {onMarkOut && (
-                                <button type="button" className={`edit-icon-btn ${outPoint !== null ? 'edit-icon-btn--accent' : ''}`} onClick={onMarkOut} disabled={disabled} title="Mark out (O)">
+                                <button type="button" className={`edit-icon-btn ${outPoint !== null ? 'edit-icon-btn--accent' : ''}`} onClick={onMarkOut} disabled={disabled} title="Mark out (O)" data-automation-id={aid('mark-out')}>
                                     <MarkOutIcon className="w-4 h-4" />
                                 </button>
                             )}
@@ -150,7 +156,7 @@ const EditTransportBar: React.FC<EditTransportBarProps> = ({
                                 </span>
                             )}
                             {hasMarks && onClearMarks && (
-                                <button type="button" className="edit-text-btn" onClick={onClearMarks} title="Clear in and out marks">
+                                <button type="button" className="edit-text-btn" onClick={onClearMarks} title="Clear in and out marks" data-automation-id={aid('clear-marks')}>
                                     Clear
                                 </button>
                             )}

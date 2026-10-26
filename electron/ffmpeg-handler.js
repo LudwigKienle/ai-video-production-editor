@@ -1321,4 +1321,4 @@ const renderTimeline = async (folderPath, project, settings, onProgress) => {
     return outputPath;
 };
 
-module.exports = { renderTimeline, prepareVideoProxy };
+module.exports = { renderTimeline, prepareVideoProxy, resolveSourcePath, ffmpegBinaryPath };

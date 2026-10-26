@@ -1,0 +1,12 @@
+balanced preset=0
+subtle-10bit preset=1
+sky-8bit preset=2
+ai-footage preset=3
+heavy-compression preset=4
+manual-strong preset=5 strength=1 detection=0.9 radius=12 edgeProtection=0.4 textureProtection=0.3 chromaRepair=0.8 dither=0.6
+banding-map preset=2 viewMode=1
+protected-detail preset=0 viewMode=2
+difference preset=4 viewMode=3
+scene-linear preset=5 workingSpace=3 sourcePrecision=3 radius=20 detection=1
+frame-dither preset=5 sourcePrecision=1 ditherMotion=1 seed=37 dither=1 outputMix=0.6 frameIndex=5
+zero-strength preset=5 strength=0

@@ -4,6 +4,7 @@ import { PlayIcon } from './icons';
 import { buildFilterString, getBloomStrength, getGrainStrength, getHalationStrength, getVignetteStrength, normalizeFilters } from '../utils/colorGrading';
 import { applyCubeLutToImageData } from '../utils/lut';
 import { buildStyleFilterForEffect, getClipEffectLayers, hasOverlayRenderer, mergeFilterChunk } from '../utils/effects';
+import { applyFxStack, FX_PREVIEW_UPDATED_EVENT } from '../fx/preview';
 
 export interface PreviewPlayerHandle {
     getCanvas: () => HTMLCanvasElement | null;
@@ -803,10 +804,11 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                 if (videoEl.readyState >= 2) {
                     drawW = canvas.width;
                     drawH = drawW / (videoEl.videoWidth / videoEl.videoHeight);
+                    const fxVideo = applyFxStack(videoEl, clip.fxStack, clipTime);
                     if (hasCustomLut) {
-                        drawWithCustomLut(videoEl);
+                        drawWithCustomLut(fxVideo);
                     } else {
-                        drawBase(videoEl);
+                        drawBase(fxVideo);
                     }
                 }
             } else if (media.type === 'image') {
@@ -822,10 +824,11 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                         drawH = canvas.height;
                         drawW = canvas.height * ratio;
                     }
+                    const fxImage = applyFxStack(imgEl, clip.fxStack, keyframeTime);
                     if (hasCustomLut) {
-                        drawWithCustomLut(imgEl);
+                        drawWithCustomLut(fxImage);
                     } else {
-                        drawBase(imgEl);
+                        drawBase(fxImage);
                     }
                 }
             }
@@ -1076,7 +1079,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                             }
                             nextDrawW = canvas.width;
                             nextDrawH = nextDrawW / (nextVideo.videoWidth / nextVideo.videoHeight);
-                            drawableSource = nextVideo;
+                            drawableSource = applyFxStack(nextVideo, nextTransitionClip.fxStack, nextClipTime);
                         }
                     } else if (nextMedia.type === 'image') {
                         const nextImage = nextElement as HTMLImageElement;
@@ -1090,7 +1093,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                                 nextDrawH = canvas.height;
                                 nextDrawW = canvas.height * ratio;
                             }
-                            drawableSource = nextImage;
+                            drawableSource = applyFxStack(nextImage, nextTransitionClip.fxStack, nextLocalTime);
                         }
                     }
 
@@ -1146,6 +1149,14 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
             }
         });
     };
+
+    // Redraw when an asynchronous (native OFX) effect frame arrives while paused.
+    useEffect(() => {
+        if (isPlaying) return;
+        const handleFxFrame = () => draw();
+        window.addEventListener(FX_PREVIEW_UPDATED_EVENT, handleFxFrame);
+        return () => window.removeEventListener(FX_PREVIEW_UPDATED_EVENT, handleFxFrame);
+    }, [isPlaying, draw]);
 
     // Animation Loop (only while playing)
     useEffect(() => {

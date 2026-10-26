@@ -35,6 +35,10 @@ interface MediaBinProps {
       mode?: 'insert' | 'overwrite';
     }
   ) => Promise<void> | void;
+  /** 'list' renders compact rows (pro editing layout); default is the icon grid. */
+  viewMode?: 'icon' | 'list';
+  /** Compact chrome for docked panels (smaller header, single-row smart bins). */
+  density?: 'comfortable' | 'compact';
 }
 
 type ProjectSmartBinId = 'all' | 'broll' | 'unused' | 'generated' | 'voiceover' | 'music' | 'coverage' | 'angles' | 'gap-match';
@@ -151,6 +155,8 @@ const MediaBin: React.FC<MediaBinProps> = ({
   shotPrompts = EMPTY_SHOT_PROMPTS,
   recentProjects = EMPTY_RECENT_PROJECTS,
   onImportLibraryAsset,
+  viewMode = 'icon',
+  density = 'comfortable',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeView, setActiveView] = useState<'project' | 'library'>('project');
@@ -568,9 +574,9 @@ const MediaBin: React.FC<MediaBinProps> = ({
   }, [libraryAssets, libraryFilter, librarySearch]);
 
   return (
-    <div className="bg-gray-800/50 p-4 flex flex-col h-full">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <h3 className="text-lg font-semibold text-white">Media Bin</h3>
+    <div className={`bg-gray-800/50 p-4 flex flex-col h-full media-bin ${density === 'compact' ? 'media-bin--compact' : ''}`}>
+      <div className="flex items-center justify-between gap-3 mb-4 media-bin__titlebar">
+        <h3 className="text-lg font-semibold text-white media-bin__title">Media Bin</h3>
         {hasLibrarySupport && (
           <div className="inline-flex rounded-lg border border-gray-700 bg-gray-900/60 p-1 text-[11px]">
             <button
@@ -591,8 +597,8 @@ const MediaBin: React.FC<MediaBinProps> = ({
       <div className="flex-grow overflow-y-auto pr-2 -mr-2">
         {activeView === 'project' ? (
           <div className="space-y-3">
-            <div className="rounded-lg border border-gray-700/70 bg-gray-900/40 p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3 text-[11px] text-gray-400">
+            <div className="rounded-lg border border-gray-700/70 bg-gray-900/40 p-3 space-y-3 media-bin__filters">
+              <div className="flex items-center justify-between gap-3 text-[11px] text-gray-400 media-bin__meta">
                 <div>Smart bins are ranked against the current cut.</div>
                 <div>
                   {timelineClips.length} clips in timeline
@@ -608,7 +614,7 @@ const MediaBin: React.FC<MediaBinProps> = ({
                   className="w-full bg-gray-950/80 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-200"
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 media-bin__bins">
                 {projectBinMeta.map((bin) => (
                   <button
                     key={bin.id}
@@ -639,6 +645,47 @@ const MediaBin: React.FC<MediaBinProps> = ({
                   <p>No media matches this smart bin.</p>
                 </div>
               )
+            ) : viewMode === 'list' ? (
+              <div className="media-bin-list" role="list" data-automation-id="pp.project.list">
+                <div className="media-bin-list__head" aria-hidden>
+                  <span>Name</span><span>Typ</span><span>Dauer</span><span>Status</span>
+                </div>
+                {filteredProjectMedia.map((item) => {
+                  const isArchive = isArchiveMedia(item);
+                  const selected = selectedMediaId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      role="listitem"
+                      draggable={!isArchive}
+                      onDragStart={(e) => handleProjectDragStart(e, item.id)}
+                      className={`media-bin-list__row ${selected ? 'media-bin-list__row--selected' : ''}`}
+                      onClick={() => {
+                        if (isArchive) return;
+                        if (onSelectMedia) onSelectMedia(item.id);
+                        else onAddToTimeline(item.id);
+                      }}
+                      onDoubleClick={() => {
+                        if (!isArchive && onSelectMedia) onAddToTimeline(item.id);
+                      }}
+                      title={onSelectMedia ? 'Klick: im Quellmonitor ansehen · Doppelklick: zur Timeline' : item.name}
+                      data-automation-id={`pp.project.item.${item.id}`}
+                    >
+                      <span className="media-bin-list__name">
+                        <span className="media-bin-list__thumb">
+                          {item.type === 'image' && isLikelyImageUrl(item.url) ? <img src={item.url} alt="" /> :
+                           item.type === 'video' && !isArchive ? <VideoIcon className="w-3.5 h-3.5" /> :
+                           item.type === 'audio' ? <AudioIcon className="w-3.5 h-3.5" /> : <BoxIcon className="w-3.5 h-3.5" />}
+                        </span>
+                        <span className="truncate">{item.name}</span>
+                      </span>
+                      <span>{isArchive ? 'EXR' : item.type === 'image' ? 'Bild' : item.type === 'video' ? 'Video' : 'Audio'}</span>
+                      <span>{formatDuration(item.duration) || '–'}</span>
+                      <span>{usedMediaIds.has(item.id) ? 'im Schnitt' : 'unbenutzt'}</span>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {filteredProjectMedia.map((item) => {

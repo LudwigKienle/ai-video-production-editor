@@ -1,0 +1,11 @@
+defaults
+bypass outputMix=0
+deplastic-subtle plasticReduction=0.45 skinRealism=0.35 highlightRealism=0.5 colorNaturalize=0.35 textureAmount=0.18 microContrast=0.2 gamutGuard=0.6 shadowDepth=0.2 smoothnessBreakup=0.3 outputMix=0.7
+skin-texture plasticReduction=0.8 skinRealism=0.9 highlightRealism=0.65 colorNaturalize=0.45 textureAmount=0.55 microContrast=0.3 gamutGuard=0.7 shadowDepth=0.3 smoothnessBreakup=0.75 outputMix=1
+strong plasticReduction=1 skinRealism=0.8 highlightRealism=1 colorNaturalize=0.85 textureAmount=0.8 microContrast=0.7 gamutGuard=1 shadowDepth=0.7 smoothnessBreakup=0.9 outputMix=1
+texture-seed-frame textureAmount=1 seed=42.5 frameIndex=13
+texture-large-seed textureAmount=1 plasticReduction=1 smoothnessBreakup=1 seed=1000 frameIndex=240
+highlight-only plasticReduction=0 skinRealism=0 highlightRealism=1 colorNaturalize=0 textureAmount=0 microContrast=0 gamutGuard=0 shadowDepth=0 smoothnessBreakup=0
+gamut-naturalize plasticReduction=0 skinRealism=0 highlightRealism=0 colorNaturalize=1 textureAmount=0 microContrast=0 gamutGuard=1 shadowDepth=0 smoothnessBreakup=0
+shadow-contrast shadowDepth=1 microContrast=1 textureAmount=0
+half-mix outputMix=0.5 plasticReduction=1 skinRealism=1 textureAmount=1 frameIndex=3

@@ -1,0 +1,14 @@
+neutral preset=0
+ai-deplastic preset=6
+modern-cinema preset=1
+fast-vintage preset=3 effectStrength=1
+anamorphic preset=4 effectStrength=0.9 anamorphicSqueeze=1.8 anamorphicAngle=10
+petzval preset=5 effectStrength=1 outputMix=1
+clean-modern-iris preset=9 defocus=0.6 fStop=1.4 focusOffset=0.8
+vintage-flare preset=15 effectStrength=1 fStop=16 starburst=0.6 bloomThreshold=0.5
+anamorphic-blue preset=14 effectStrength=1 flareStreak=0.5
+ai-natural-grain preset=20 grain=0.8 sensorISO=3200 grainSize=2 frameIndex=7
+alpha-depth preset=10 depthSource=1 defocus=0.8 focusPlane=0.3 glassAsset=2
+surface preset=7 dirtAsset=2 dirtAmount=0.9 smudgeAsset=1 smudgeAmount=0.8 dirtScale=2 bloomThreshold=0.3
+preview-quality preset=11 quality=0 effectStrength=1 swirl=0.5
+stages-off preset=3 effectStrength=1 lightEnabled=0 sensorEnabled=0

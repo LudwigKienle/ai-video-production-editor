@@ -6,6 +6,15 @@ export { };
 declare global {
     interface Window {
         electron: {
+            fx?: {
+                bakeDir: (payload: { folderPath: string; name: string; extension?: string }) => Promise<{ ok: boolean; dir?: string; path?: string; url?: string; error?: string }>;
+                resolveSource: (payload: { folderPath: string; media: unknown }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+                bakeImage: (payload: { folderPath: string; name: string; bytes: Uint8Array }) => Promise<{ ok: boolean; path?: string; url?: string; error?: string }>;
+                bakeVideoBegin: (payload: { folderPath: string; name: string; width: number; height: number; fps: number; audioMedia?: unknown; audioStart?: number; audioDuration?: number }) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+                bakeVideoFrame: (payload: { sessionId: string; pixels: Uint8Array }) => Promise<{ ok: boolean; error?: string }>;
+                bakeVideoEnd: (payload: { sessionId: string; cancel?: boolean }) => Promise<{ ok: boolean; path?: string; url?: string; canceled?: boolean; error?: string }>;
+            };
+            ofx?: import('./fx/ofx').OfxBridge;
             project: {
                 selectFolder: () => Promise<string | null>;
                 selectFile: () => Promise<string | null>;

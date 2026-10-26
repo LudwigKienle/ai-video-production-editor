@@ -22,6 +22,28 @@ contextBridge.exposeInMainWorld('electron', {
     onExportProgress: (callback) => ipcRenderer.on('export:progress', (_event, value) => callback(value)),
     removeExportProgressListener: () => ipcRenderer.removeAllListeners('export:progress'),
   },
+  fx: {
+    bakeDir: (payload) => ipcRenderer.invoke('fx:bakeDir', payload),
+    resolveSource: (payload) => ipcRenderer.invoke('fx:resolveSource', payload),
+    bakeImage: (payload) => ipcRenderer.invoke('fx:bakeImage', payload),
+    bakeVideoBegin: (payload) => ipcRenderer.invoke('fx:bakeVideoBegin', payload),
+    bakeVideoFrame: (payload) => ipcRenderer.invoke('fx:bakeVideoFrame', payload),
+    bakeVideoEnd: (payload) => ipcRenderer.invoke('fx:bakeVideoEnd', payload),
+  },
+  ofx: {
+    status: () => ipcRenderer.invoke('ofx:status'),
+    scan: (payload) => ipcRenderer.invoke('ofx:scan', payload),
+    render: (payload) => ipcRenderer.invoke('ofx:render', payload),
+    framesNeeded: (payload) => ipcRenderer.invoke('ofx:frames-needed', payload),
+    destroyInstance: (payload) => ipcRenderer.invoke('ofx:destroy-instance', payload),
+    bake: (payload) => ipcRenderer.invoke('ofx:bake', payload),
+    cancelBake: (payload) => ipcRenderer.invoke('ofx:bake-cancel', payload),
+    onBakeProgress: (callback) => {
+      const handler = (_event, value) => callback(value);
+      ipcRenderer.on('ofx:bake-progress', handler);
+      return () => ipcRenderer.removeListener('ofx:bake-progress', handler);
+    },
+  },
   mcp: {
     init: () => ipcRenderer.invoke('mcp:init'),
     listTools: () => ipcRenderer.invoke('mcp:listTools'),

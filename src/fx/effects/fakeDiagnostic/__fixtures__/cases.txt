@@ -1,0 +1,11 @@
+overlay viewMode=0
+problem-matte viewMode=1
+reality-assist viewMode=2
+assist-overlay viewMode=3 correctionStrength=0.8
+category-colors viewMode=4
+temporal-matte viewMode=5
+temporal-diff viewMode=6 overlayStrength=1
+weighted-matte viewMode=1 sensitivity=2.5 plasticWeight=2 edgeWeight=0 temporalWeight=0 textureWeight=1.6
+assist-strong viewMode=2 correctionStrength=1 microContrast=-0.8 edgeSoften=1 highlightRolloff=1 gamutGuard=1 sensorTexture=1 seed=123.5 frameIndex=9
+blank-guard image=1 viewMode=1
+blank-unguarded image=1 viewMode=1 adjustmentLayerGuard=0 sensitivity=3
