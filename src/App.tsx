@@ -226,6 +226,7 @@ import { analyzeImageAsset, resolveLookAgentSource, runLookAgentTool } from './s
 import { findCreativeDNASceneOverride, resolveCreativeDNAProfile } from './services/creativeDnaService';
 import { env } from './config/env';
 import type { LibraryAsset } from './hooks/useLibraryAssets';
+import { SET_DESIGN_TOOL_LIST, useSetDesignAppBridge } from './setdesign/useSetDesignAppBridge';
 
 type ProjectSyncStatus = {
     state: 'idle' | 'checking' | 'up-to-date' | 'incoming' | 'error';
@@ -7452,6 +7453,18 @@ function App() {
             for (const task of running.values()) task.complete();
         };
     }, []);
+    // Set design: scene commands shared by the workspace UI and agents (setdesign_* tools).
+    const setDesignAgentExecutor = useSetDesignAppBridge({
+        scene: setDesignState,
+        setScene: setSetDesignState,
+        projectKey: projectPath,
+        addMedia: (item) => setMediaItems(prev => [...prev, item]),
+        applyToShot: handleApplySetDesignSnapshotToShot,
+        getReferences: () => projectAgentStateRef.current?.references || [],
+        getShots: () => projectAgentStateRef.current?.shotPrompts || [],
+        setReferences: (update) => setReferencesWithHistory(update),
+        setActiveWorkspace,
+    });
     const studioToolSignature = assistantTools.map((tool) => tool.name).join('|');
     useEffect(() => {
         const executor: Record<string, Function> = {};
@@ -7463,10 +7476,10 @@ function App() {
                 return (aiToolExecutorRef.current as Record<string, Function>)[name]?.(args);
             };
         }
-        Object.assign(executor, projectAgentExecutor);
-        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS], executor);
+        Object.assign(executor, projectAgentExecutor, setDesignAgentExecutor);
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...SET_DESIGN_TOOL_LIST], executor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [studioToolSignature, projectAgentExecutor]);
+    }, [studioToolSignature, projectAgentExecutor, setDesignAgentExecutor]);
 
     const [apiKeysRevision, setApiKeysRevision] = useState(0);
     const hasAnyApiKeyConfigured = useMemo(() => hasAnyLocalApiKey(), [
