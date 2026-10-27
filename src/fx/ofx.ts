@@ -6,7 +6,7 @@
  * that contain them render asynchronously: WebGL effects on the GPU, OFX
  * effects through the host, in stack order.
  */
-import { getFxDefinition, hasActiveFx, needsNativeHost, registerFx, resolveParams } from './registry.ts';
+import { getFxDefinition, hasActiveFx, needsNativeHost, registerFx, resolveParams, resolveStackAtTime } from './registry.ts';
 import { FxRenderer } from './renderer.ts';
 import type { FxCategory, FxDefinition, FxGroup, FxParamDef, FxParamValues, FxStack } from './types.ts';
 
@@ -199,14 +199,17 @@ let asyncRenderer: FxRenderer | null = null;
 /**
  * Renders a stack that may contain native OFX effects. Consecutive WebGL
  * effects run as one GPU segment; OFX effects go through the host (RGBA8,
- * top-down). Resolves to a canvas of `width`×`height`.
+ * top-down). Resolves to a canvas of `width`×`height`. FX keyframes are
+ * evaluated at `keyframeTime` (clip-local seconds; photo editor = 0) and sent
+ * to the host as constant params for this frame.
  */
 export async function renderStackAsync(
   source: CanvasImageSource,
-  stack: FxStack,
-  options: { width: number; height: number; frameIndex: number },
+  fullStack: FxStack,
+  options: { width: number; height: number; frameIndex: number; keyframeTime?: number },
 ): Promise<HTMLCanvasElement> {
   const { width, height, frameIndex } = options;
+  const stack = resolveStackAtTime(fullStack, options.keyframeTime ?? 0);
   const { canvas, ctx } = toCanvas(source, width, height);
   if (!hasActiveFx(stack)) return canvas;
   const bridge = ofxBridge();
@@ -263,7 +266,12 @@ export class OfxPreviewCache {
   private busy = false;
   private result: HTMLCanvasElement | null = null;
   private resultKey = '';
-  constructor(private readonly onUpdate: () => void, private readonly maxDimension = 960) {}
+  private readonly onUpdate: () => void;
+  private readonly maxDimension: number;
+  constructor(onUpdate: () => void, maxDimension = 960) {
+    this.onUpdate = onUpdate;
+    this.maxDimension = maxDimension;
+  }
 
   get(source: CanvasImageSource, stack: FxStack, frameIndex: number, naturalWidth: number, naturalHeight: number): CanvasImageSource | null {
     if (!needsNativeHost(stack) || !naturalWidth || !naturalHeight) return null;

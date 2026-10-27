@@ -193,12 +193,22 @@ export type SetDesignTransform = {
   z: number;
 };
 
+export type SetDesignPrimitive = 'box' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'wall' | 'person';
+
 export type SetDesignAsset = {
   id: string;
   name: string;
   kind: 'model' | 'primitive';
   format?: 'glb' | 'gltf' | 'obj' | 'fbx';
-  primitive?: 'box' | 'sphere' | 'plane';
+  primitive?: SetDesignPrimitive;
+  /** Hidden in viewport and renders (outliner eye). */
+  hidden?: boolean;
+  /** Not selectable in the viewport (outliner lock). */
+  locked?: boolean;
+  /** 2D blocking (Scene Map): set element category and footprint. Shape owned by src/shotdesigner/planModel.ts. */
+  plan?: Record<string, unknown>;
+  /** 2D blocking: cast link, height, pose of a 'person' stand-in. Shape owned by src/shotdesigner/planModel.ts. */
+  character?: Record<string, unknown>;
   url?: string;
   mediaId?: string;
   position: SetDesignTransform;
@@ -220,11 +230,54 @@ export type SetDesignAsset = {
 
 export type SetDesignLight = {
   id: string;
-  type: 'ambient' | 'directional' | 'point';
+  /** 'directional' is the legacy name of 'sun'. */
+  type: 'ambient' | 'directional' | 'point' | 'sun' | 'spot' | 'area';
   color: string;
   intensity: number;
   position?: SetDesignTransform;
+  name?: string;
+  /** Degrees, three.js XYZ Euler (Y up); the light shines along its local -Z. */
+  rotation?: SetDesignTransform;
+  /** Blender-style power in watts (point/spot/area) or irradiance in W/m² (sun). Overrides intensity when set. */
+  power?: number;
+  /** Colour temperature in kelvin, used instead of color when useTemperature is true. */
+  temperature?: number;
+  useTemperature?: boolean;
+  /** Spot cone angle in degrees and edge softness 0..1. */
+  spotSize?: number;
+  spotBlend?: number;
+  /** Area light width/height in metres. */
+  size?: number;
+  sizeY?: number;
+  castShadow?: boolean;
+  hidden?: boolean;
 };
+
+/** A scene camera object (Blender-style), separate from the viewport camera. */
+export type SetDesignCameraObject = {
+  id: string;
+  name: string;
+  position: SetDesignTransform;
+  /** Degrees, three.js XYZ Euler (Y up); the camera looks along its local -Z. */
+  rotation: SetDesignTransform;
+  /** Focal length in millimetres. */
+  lensMm: number;
+  sensorWidthMm: number;
+  sensorHeightMm?: number;
+  sensorFit?: 'auto' | 'horizontal' | 'vertical';
+  /** Lens shift as a fraction of the larger frame dimension. */
+  shiftX?: number;
+  shiftY?: number;
+  clipStart?: number;
+  clipEnd?: number;
+  /** Depth of field (for metadata and prompts). */
+  focusDistance?: number;
+  fStop?: number;
+  hidden?: boolean;
+  locked?: boolean;
+};
+
+export type SetDesignShading = 'wireframe' | 'solid' | 'material' | 'rendered';
 
 export type SetDesignGrid = {
   enabled: boolean;
@@ -260,8 +313,27 @@ export type SetDesignState = {
   assets: SetDesignAsset[];
   lights: SetDesignLight[];
   grid: SetDesignGrid;
+  /** Viewport ("User Perspective") camera. */
   camera: SetDesignCamera;
   cameraPath?: SetDesignCameraPath;
+  /** Scene cameras; the active one is used for camera view and reference frames. */
+  cameras?: SetDesignCameraObject[];
+  activeCameraId?: string | null;
+  /** Output size of reference frames in pixels. */
+  output?: { width: number; height: number };
+  shading?: SetDesignShading;
+  /** World/ambient colour and strength (Blender's World background). */
+  world?: {
+    color: string;
+    strength: number;
+    /** Environment map (.hdr/.exr) lighting material preview and rendered shading. */
+    hdriUrl?: string;
+    /** Show the environment map as background. */
+    hdriBackground?: boolean;
+    hdriStrength?: number;
+  };
+  /** 2D blocking (Scene Map): animation tracks on asset/camera ids, shots, 180° line. Shape owned by src/scene/stageModel.ts. */
+  stage?: Record<string, unknown>;
 };
 
 export type WorldGenerationProvider = 'worldlabs';
@@ -321,9 +393,11 @@ export type Keyframe = {
   id: string;
   time: number;
   value: number;
-  property: 'scale' | 'x' | 'y' | 'opacity' | 'volume' | 'effectIntensity' | 'textBlur';
+  /** 'rotation' is in degrees (clockwise), like `transform.rotation`. */
+  property: 'scale' | 'x' | 'y' | 'rotation' | 'opacity' | 'volume' | 'effectIntensity' | 'textBlur';
   targetEffectId?: string;
-  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  /** Curve of the segment arriving at this keyframe; 'hold' keeps this keyframe's value until the next one (see src/fx/keyframes.ts). */
+  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'hold';
 };
 
 export type TitleMotionPreset = 'slide-in' | 'soft-fade' | 'blur-settle' | 'clear';
@@ -391,6 +465,8 @@ export type TimelineClip = {
     scale: number;
     opacity: number;
     position: { x: number; y: number };
+    /** Degrees, clockwise, around the clip centre (preview + FX bake; optional for older projects). */
+    rotation?: number;
   };
   keyframes?: Keyframe[];
   chromaKey?: {

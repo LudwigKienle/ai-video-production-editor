@@ -29,6 +29,7 @@ import TransitionsPanel from '../components/TransitionsPanel';
 import ImageEditorModal from '../components/ImageEditorModal';
 import EditorAgentPanel from '../components/EditorAgentPanel';
 import TitlesPanel, { TitlePreset } from '../components/TitlesPanel';
+import { useEditLegacyLiveCommands, type EditLegacyLiveProps } from './edit-pro/useEditLegacyLiveCommands';
 import { ChevronLeftIcon, ChevronRightIcon, BrushIcon, MaximizeIcon, KeyboardIcon, PaletteIcon, FilmIcon, TextIcon, EffectsIcon, TransitionsIcon, MusicNoteIcon, ScissorsIcon, BrainIcon } from '../components/icons';
 import EditTransportBar from '../components/EditTransportBar';
 import { formatTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
@@ -37,7 +38,7 @@ import LookbookPanel from '../components/LookbookPanel';
 import MusicAssistantPanel from '../components/MusicAssistantPanel';
 import { VideoSegment } from '../services/autoCutService';
 import { useLibraryAssets, type LibraryAsset } from '../hooks/useLibraryAssets';
-import { Frame, Maximize } from 'lucide-react';
+import { ArrowDownToLine, ArrowRightToLine, ArrowUpFromLine, FoldHorizontal, Frame, Maximize } from 'lucide-react';
 import { createFxInstance } from '../fx/registry';
 import ProDock from './edit-pro/ProDock';
 import {
@@ -47,7 +48,6 @@ import {
     EffectsBrowserPanel,
     HistoryPanel,
     InfoPanel,
-    MarkersPanel,
     ProjectViewToggle,
     ToolsPanel,
     WorkspaceBar,
@@ -63,11 +63,40 @@ import {
     textPositionForPoint,
     toolForTrimMode,
     trimModeForTool,
+    PRO_WORKSPACES,
     type EditorToolId,
     type MonitorZoom,
+    type ProWorkspaceId,
     type ProPanelId,
 } from './edit-pro/proLayout';
 import './edit-pro/proEditor.css';
+import ModeBar from './edit-pro/ModeBar';
+import SequenceMarkersPanel from './edit-pro/SequenceMarkersPanel';
+import TimecodeField from './edit-pro/TimecodeField';
+import { PlaybackResolutionContext } from './edit-pro/PlaybackResolutionContext';
+import {
+    fxMaxDimensionFor,
+    isPlaybackResolution,
+    PLAYBACK_RESOLUTIONS,
+    type PlaybackResolution,
+    type PlaybackResolutionValue,
+} from './edit-pro/playbackResolution';
+import {
+    addMarker,
+    markerColorHex,
+    markerLabel,
+    nextMarker,
+    previousMarker,
+    removeMarker,
+    rippleMarkers,
+    updateMarker,
+    type MarkerPatch,
+    type SequenceMarker,
+} from './edit-pro/markers';
+import { extractRange, liftRange, rangeEditTracks } from './edit-pro/editOps';
+import { registerLiveCommands } from '../mcp/liveCommands';
+import { EDIT_LIVE } from '../mcp/modules/timelineTools';
+import { EDIT_SHORTCUT_DOCS, formatShuttleRate, nextShuttleRate, resolveEditShortcut, shuttleStepFrames } from './edit-pro/editShortcuts';
 
 interface EditWorkspaceProps {
     mediaItems: MediaItem[];
@@ -172,6 +201,9 @@ interface EditWorkspaceProps {
     onUpdateSubtitleClipContent: (clipId: string, content: string) => void;
     onSplitSubtitleClip: (clipId: string) => void;
     onMergeSubtitleClip: (clipId: string, direction: 'previous' | 'next') => void;
+    /** Sequence markers saved with the project (optional; without it markers live for the session only). */
+    sequenceMarkers?: SequenceMarker[];
+    onSequenceMarkersChange?: (markers: SequenceMarker[]) => void;
 }
 
 /* ─── Sub-panels ─── */
@@ -437,6 +469,10 @@ const SHORTCUT_SECTIONS: Array<{ title: string; shortcuts: Array<{ keys: string;
         ],
     },
     {
+        title: 'Profi-Layout: Marken, Schnitt, Shuttle',
+        shortcuts: EDIT_SHORTCUT_DOCS,
+    },
+    {
         title: 'Profi-Layout (Schnitt/Farbe/Effekte/Audio)',
         shortcuts: [
             { keys: 'V / A / B / C', desc: 'Auswahl / Spur vorwärts / Ripple / Rasierklinge' },
@@ -643,6 +679,9 @@ const isTypingTarget = (target: EventTarget | null) => {
     const tag = target.tagName;
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 };
+
+const LINKED_SELECTION_KEY = 'edit_pro_linked_selection_v1';
+const PLAYBACK_RES_KEY = 'edit_pro_playback_resolution_v1';
 
 const MONITOR_ZOOM_OPTIONS: Array<{ value: MonitorZoom; label: string }> = [
     { value: 'fit', label: 'Einpassen' },
@@ -858,8 +897,15 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     const markPgmIn = () => { setPgmIn(Math.max(0, props.playheadPosition)); if (pgmOut !== null && pgmOut <= props.playheadPosition) setPgmOut(null); };
     const markPgmOut = () => { setPgmOut(Math.max(0, props.playheadPosition)); if (pgmIn !== null && pgmIn >= props.playheadPosition) setPgmIn(null); };
 
-    const do3PE = (mode: 'insert' | 'overwrite') => {
-        if (!srcSource) { window.alert('Select a source item first.'); return; }
+    /**
+     * Insert / overwrite from the source monitor. Missing marks fall back like
+     * an NLE three-point edit: whole source (or In → end) and the playhead as
+     * program In. `silent` returns the message instead of alerting (MCP).
+     */
+    const do3PE = (mode: 'insert' | 'overwrite', options: { silent?: boolean } = {}): { ok: boolean; message: string } => {
+        // Non-blocking: a toast instead of window.alert (dialogs freeze the tab / automation).
+        const fail = (message: string) => { if (!options.silent) setProNotice(message); return { ok: false, message }; };
+        if (!srcSource) return fail('Erst ein Medium in den Quellmonitor laden.');
         if (srcSource.kind === 'library') {
             void props.onImportLibraryAsset(externalSourceAsset!, {
                 collectToProject: true,
@@ -870,10 +916,14 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 mode,
                 trackId: props.activeTrackId || undefined,
             });
-            return;
+            return { ok: true, message: `${mode === 'insert' ? 'Inserted' : 'Overwrote'} ${srcSource.name}.` };
         }
-        const r = props.onThreePointEdit({ mediaId: srcSource.id, sourceIn: srcIn, sourceOut: srcOut, timelineIn: pgmIn, timelineOut: pgmOut, mode, trackId: props.activeTrackId || undefined });
-        if (!r.ok) window.alert(r.message);
+        const timelineIn = pgmIn ?? (pgmOut === null ? props.playheadPosition : null);
+        const sourceIn = srcIn ?? (srcOut === null ? 0 : null);
+        const pointCount = [sourceIn, srcOut, timelineIn, pgmOut].filter((value) => value !== null).length;
+        const sourceOut = srcOut ?? (pointCount < 3 ? srcDur : null);
+        const r = props.onThreePointEdit({ mediaId: srcSource.id, sourceIn, sourceOut, timelineIn, timelineOut: pgmOut, mode, trackId: props.activeTrackId || undefined });
+        return r.ok ? r : fail(r.message);
     };
 
     const canSplit = collapsed.left && collapsed.right;
@@ -1134,7 +1184,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
         });
 
         if (!best || best.score < 3) {
-            window.alert('No strong automatic gap match found. Open the Media tab and use "Best Match for Current Gap" for manual picks.');
+            setProNotice('Kein passender Clip für die Lücke gefunden – im Projekt-Panel manuell wählen.');
             return;
         }
 
@@ -1150,7 +1200,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 trackId: gap.trackId,
             });
             if (!result.ok) {
-                window.alert(result.message);
+                setProNotice(result.message);
                 return;
             }
             loadMediaToSource(best.media.id);
@@ -1214,12 +1264,12 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 toggleSrcPlay();
                 return;
             }
-            if (key === ',' || key === 'arrowleft') {
+            if ((key === ',' && !isPro) || key === 'arrowleft') {
                 intercept();
                 stepSourceFrame(-1);
                 return;
             }
-            if (key === '.' || key === 'arrowright') {
+            if ((key === '.' && !isPro) || key === 'arrowright') {
                 intercept();
                 stepSourceFrame(1);
                 return;
@@ -1397,15 +1447,302 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
         if (target) props.onSplitClip(target.id, time);
     }, [props.playheadPosition, props.selectedClip, props.activeTrackId, props.onSplitClip, timelineClips, timelineTracks]);
 
-    const proKeyRef = useRef({ focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay });
-    proKeyRef.current = { focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay };
+
+    /* ─── Sequence markers (M), lift/extract, shuttle, playback resolution ─── */
+
+    const [localMarkers, setLocalMarkers] = useState<SequenceMarker[]>([]);
+    const markers = props.sequenceMarkers ?? localMarkers;
+    const markersRef = useRef(markers);
+    markersRef.current = markers;
+    const onMarkersChangeRef = useRef(props.onSequenceMarkersChange);
+    onMarkersChangeRef.current = props.onSequenceMarkersChange;
+    const setMarkers = useCallback((fn: (prev: SequenceMarker[]) => SequenceMarker[]) => {
+        const next = fn(markersRef.current);
+        if (next === markersRef.current) return;
+        markersRef.current = next;
+        if (onMarkersChangeRef.current) onMarkersChangeRef.current(next);
+        else setLocalMarkers(next);
+    }, []);
+    const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+    const [proNotice, setProNotice] = useState<string | null>(null);
+    useEffect(() => {
+        if (!proNotice) return;
+        const id = window.setTimeout(() => setProNotice(null), 2600);
+        return () => window.clearTimeout(id);
+    }, [proNotice]);
+
+    const addMarkerAtPlayhead = useCallback(() => {
+        const result = addMarker(markersRef.current, playheadRef.current.position, { fps: DEFAULT_TIMELINE_FPS });
+        setMarkers(() => result.markers);
+        setSelectedMarkerId(result.marker.id);
+        // Second M on the same frame opens the marker for editing (like an NLE marker dialog).
+        if (!result.created) dispatchPro({ type: 'openPanel', panel: 'markers' });
+        else setProNotice(`Marke gesetzt · ${formatTimecode(result.marker.time)}`);
+    }, [setMarkers]);
+    const updateMarkerById = useCallback((id: string, patch: MarkerPatch) => setMarkers((prev) => updateMarker(prev, id, patch, DEFAULT_TIMELINE_FPS)), [setMarkers]);
+    const removeMarkerById = useCallback((id: string) => setMarkers((prev) => removeMarker(prev, id)), [setMarkers]);
+    const jumpMarker = useCallback((direction: -1 | 1) => {
+        const time = playheadRef.current.position;
+        const target = direction > 0 ? nextMarker(markersRef.current, time, DEFAULT_TIMELINE_FPS) : previousMarker(markersRef.current, time, DEFAULT_TIMELINE_FPS);
+        if (!target) return;
+        setSelectedMarkerId(target.id);
+        playheadRef.current.update(target.time);
+    }, []);
+
+    /** Lift (;) or extract (') of the program In/Out range on the targeted tracks. */
+    const liftOrExtract = useCallback((mode: 'lift' | 'extract') => {
+        const sequenceEnd = timelineClipsRef.current.reduce((max, clip) => Math.max(max, clip.end), 0);
+        if (pgmIn === null && pgmOut === null) {
+            setProNotice('Erst In (I) und Out (O) im Programm setzen');
+            return;
+        }
+        const start = pgmIn ?? 0;
+        const end = pgmOut ?? sequenceEnd;
+        if (!(end - start > 1e-3)) return;
+        const trackIds = rangeEditTracks(timelineTracks);
+        const makeId = () => `clip-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        const op = mode === 'lift' ? liftRange : extractRange;
+        const result = op(timelineClipsRef.current, trackIds, start, end, { makeId, minLength: 1 / DEFAULT_TIMELINE_FPS });
+        if (!result.changed) {
+            setProNotice('Im In/Out-Bereich liegt nichts auf den Zielspuren');
+            return;
+        }
+        props.onBatchUpdateClips(result.clips);
+        if (mode === 'extract') setMarkers((prev) => rippleMarkers(prev, start, end));
+        if (props.selectedClipId && result.removedIds.includes(props.selectedClipId)) props.onSelectClip(null);
+        setPgmIn(null);
+        setPgmOut(null);
+        props.onPlayheadUpdate(start);
+        setProNotice(mode === 'lift' ? 'Herausgehoben (Lücke bleibt)' : 'Extrahiert (Lücke geschlossen)');
+    }, [pgmIn, pgmOut, timelineTracks, props.onBatchUpdateClips, props.onPlayheadUpdate, props.onSelectClip, props.selectedClipId, setMarkers]);
+
+    // J/K/L shuttle: 1× uses the app's normal playback (with audio); 2×/4× and reverse scrub the playhead.
+    const [shuttleRate, setShuttleRate] = useState(0);
+    const shuttleRateRef = useRef(0);
+    shuttleRateRef.current = shuttleRate;
+    const isPlayingRef = useRef(props.isPlaying);
+    isPlayingRef.current = props.isPlaying;
+    const togglePlaybackRef = useRef(props.onTogglePlayback);
+    togglePlaybackRef.current = props.onTogglePlayback;
+    const kHeldRef = useRef(false);
+    const prevShuttleRateRef = useRef(0);
+    useEffect(() => {
+        const previous = prevShuttleRateRef.current;
+        prevShuttleRateRef.current = shuttleRate;
+        if (shuttleRate === 1) {
+            if (!isPlayingRef.current) togglePlaybackRef.current();
+            return;
+        }
+        if (shuttleRate === 0) {
+            if (previous === 1 && isPlayingRef.current) togglePlaybackRef.current();
+            return;
+        }
+        if (isPlayingRef.current) togglePlaybackRef.current();
+        let last = performance.now();
+        let current = playheadRef.current.position;
+        let raf = 0;
+        const tick = () => {
+            const now = performance.now();
+            const dt = Math.min(0.1, (now - last) / 1000);
+            last = now;
+            if (Math.abs(playheadRef.current.position - current) > 0.25) current = playheadRef.current.position;
+            const end = timelineClipsRef.current.reduce((max, clip) => Math.max(max, clip.end), 0);
+            current = Math.max(0, Math.min(end, current + dt * shuttleRate));
+            playheadRef.current.update(current);
+            if ((shuttleRate < 0 && current <= 0) || (shuttleRate > 0 && current >= end)) { setShuttleRate(0); return; }
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [shuttleRate]);
+    // Space / transport buttons take over from the shuttle.
+    useEffect(() => {
+        const rate = shuttleRateRef.current;
+        if (props.isPlaying && rate !== 0 && rate !== 1) setShuttleRate(0);
+        if (!props.isPlaying && rate === 1) setShuttleRate(0);
+    }, [props.isPlaying]);
+    const handleShuttle = useCallback((key: 'j' | 'k' | 'l') => {
+        if (key === 'k') {
+            kHeldRef.current = true;
+            if (shuttleRateRef.current === 0 && isPlayingRef.current) togglePlaybackRef.current();
+            setShuttleRate(0);
+            return;
+        }
+        if (kHeldRef.current) {
+            setShuttleRate(0);
+            if (isPlayingRef.current) togglePlaybackRef.current();
+            const end = timelineClipsRef.current.reduce((max, clip) => Math.max(max, clip.end), 0);
+            const next = Math.max(0, Math.min(end, playheadRef.current.position + shuttleStepFrames(key) / DEFAULT_TIMELINE_FPS));
+            playheadRef.current.position = next; // taps faster than a render still accumulate
+            playheadRef.current.update(next);
+            return;
+        }
+        setShuttleRate((prev) => nextShuttleRate(prev, key));
+    }, []);
+    useEffect(() => {
+        const up = (event: KeyboardEvent) => { if (event.key.toLowerCase() === 'k') kHeldRef.current = false; };
+        const blur = () => { kHeldRef.current = false; };
+        window.addEventListener('keyup', up);
+        window.addEventListener('blur', blur);
+        return () => { window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
+    }, []);
+    useEffect(() => { if (!isPro) setShuttleRate(0); }, [isPro]);
+
+    const [linkedSelection, setLinkedSelection] = useState<boolean>(() => loadJson<boolean>(LINKED_SELECTION_KEY, true) === true);
+    useEffect(() => { try { window.localStorage?.setItem(LINKED_SELECTION_KEY, JSON.stringify(linkedSelection)); } catch { /* ignore */ } }, [linkedSelection]);
+
+    const [playbackRes, setPlaybackRes] = useState<{ program: PlaybackResolution; source: PlaybackResolution }>(() => {
+        const raw = loadJson<{ program?: unknown; source?: unknown }>(PLAYBACK_RES_KEY, {});
+        return {
+            program: isPlaybackResolution(raw?.program) ? raw.program : 'full',
+            source: isPlaybackResolution(raw?.source) ? raw.source : 'full',
+        };
+    });
+    useEffect(() => { try { window.localStorage?.setItem(PLAYBACK_RES_KEY, JSON.stringify(playbackRes)); } catch { /* ignore */ } }, [playbackRes]);
+    const playbackResValue = useMemo<PlaybackResolutionValue>(() => ({
+        program: playbackRes.program,
+        source: playbackRes.source,
+        fxMaxDimension: fxMaxDimensionFor(playbackRes.program, preview.width, preview.height),
+    }), [playbackRes, preview.width, preview.height]);
+    const renderResolutionSelect = (target: 'program' | 'source') => (
+        <select
+            className="ppx-select"
+            value={playbackRes[target]}
+            onChange={(event) => {
+                const value = event.target.value;
+                if (isPlaybackResolution(value)) setPlaybackRes((prev) => ({ ...prev, [target]: value }));
+            }}
+            title={target === 'program'
+                ? 'Wiedergabeauflösung: GPU-Effektvorschau in voller, halber oder Viertel-Auflösung (Export immer voll)'
+                : 'Wiedergabeauflösung der Quelle (für die Effektvorschau; Export immer voll)'}
+            data-automation-id={`pp.${target}.resolution`}
+        >
+            {PLAYBACK_RESOLUTIONS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+        </select>
+    );
+
+    const proKeyRef = useRef({ focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay, addMarkerAtPlayhead, jumpMarker, liftOrExtract, handleShuttle, do3PE, rippleDelete: props.onRippleDeleteClip, hasSource: Boolean(srcSource) });
+    proKeyRef.current = { focusedPanel: pro.focusedPanel, selectTool, splitAtPlayhead, markPgmIn, markPgmOut, toggleSrcPlay, addMarkerAtPlayhead, jumpMarker, liftOrExtract, handleShuttle, do3PE, rippleDelete: props.onRippleDeleteClip, hasSource: Boolean(srcSource) };
+
+    /* ─── MCP live commands (src/mcp/modules/timelineTools.ts) ─── */
+    const liveRef = useRef<Record<string, (args: Record<string, unknown>) => unknown>>({});
+    liveRef.current = {
+        [EDIT_LIVE.state]: () => ({
+            workspace: pro.workspace,
+            tool: pro.tool,
+            focusedPanel: pro.focusedPanel,
+            programIn: pgmIn,
+            programOut: pgmOut,
+            sourceIn: srcIn,
+            sourceOut: srcOut,
+            source: srcSource ? { id: srcSource.id, name: srcSource.name, type: srcSource.type, kind: srcSource.kind } : null,
+            playbackResolution: playbackRes,
+            fxMaxDimension: playbackResValue.fxMaxDimension ?? null,
+            linkedSelection,
+            shuttleRate,
+            markerCount: markers.length,
+            selectedMarkerId,
+        }),
+        [EDIT_LIVE.inOut]: (args) => {
+            const read = (value: unknown, current: number | null) => (value === undefined ? current : value === null ? null : Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : current);
+            const nextIn = read(args.in, pgmIn);
+            const nextOut = read(args.out, pgmOut);
+            if (nextIn !== null && nextOut !== null && nextOut <= nextIn) throw new Error('Out must be after In.');
+            setPgmIn(nextIn);
+            setPgmOut(nextOut);
+            return { programIn: nextIn, programOut: nextOut };
+        },
+        [EDIT_LIVE.resolution]: (args) => {
+            const next = { ...playbackRes };
+            if (args.program !== undefined) { if (!isPlaybackResolution(args.program)) throw new Error('program must be full, half or quarter.'); next.program = args.program; }
+            if (args.source !== undefined) { if (!isPlaybackResolution(args.source)) throw new Error('source must be full, half or quarter.'); next.source = args.source; }
+            setPlaybackRes(next);
+            return { playbackResolution: next, fxMaxDimension: fxMaxDimensionFor(next.program, preview.width, preview.height) ?? null };
+        },
+        [EDIT_LIVE.workspace]: (args) => {
+            const id = args.workspace as ProWorkspaceId;
+            if (!PRO_WORKSPACES.some((entry) => entry.id === id)) throw new Error(`Unknown workspace ${String(args.workspace)}.`);
+            dispatchPro({ type: 'setWorkspace', workspace: id });
+            if (args.reset === true && id !== 'classic') dispatchPro({ type: 'resetWorkspace', workspace: id });
+            return { workspace: id };
+        },
+        [EDIT_LIVE.shuttle]: (args) => {
+            if (args.key === 'j' || args.key === 'k' || args.key === 'l') {
+                handleShuttle(args.key);
+                if (args.key === 'k') kHeldRef.current = false;
+                return { key: args.key };
+            }
+            const rate = Number(args.rate);
+            if (![-4, -2, -1, 0, 1, 2, 4].includes(rate)) throw new Error('rate must be -4, -2, -1, 0, 1, 2 or 4.');
+            if (rate === 0 && shuttleRateRef.current === 0 && isPlayingRef.current) togglePlaybackRef.current();
+            setShuttleRate(rate);
+            return { rate };
+        },
+        [EDIT_LIVE.linked]: (args) => { setLinkedSelection(args.enabled === true); return { linkedSelection: args.enabled === true }; },
+        [EDIT_LIVE.sourceEdit]: async (args) => {
+            if (typeof args.mediaId === 'string' && args.mediaId) {
+                if (!mediaItems.some((item) => item.id === args.mediaId)) throw new Error(`Media ${args.mediaId} not found.`);
+                loadMediaToSource(args.mediaId);
+                await new Promise((resolve) => window.setTimeout(resolve, 60));
+            }
+            const result = do3PERef.current(args.mode === 'overwrite' ? 'overwrite' : 'insert', { silent: true });
+            if (!result.ok) throw new Error(result.message);
+            return result;
+        },
+    };
+    const do3PERef = useRef(do3PE);
+    do3PERef.current = do3PE;
+    useEffect(() => registerLiveCommands(Object.fromEntries(
+        Object.values(EDIT_LIVE).filter((name) => name.startsWith('edit.')).map((name) => [name, (args: Record<string, unknown>) => liveRef.current[name](args ?? {})]),
+    )), []);
+    useEditLegacyLiveCommands({
+        mediaItems: props.mediaItems, timelineClips: props.timelineClips, timelineTracks: props.timelineTracks,
+        selectedClipId: props.selectedClipId, playheadPosition: props.playheadPosition,
+        projectName: props.projectName, storyContext: props.storyContext, analysisResult: props.analysisResult,
+        onSelectClip: props.onSelectClip, onApplyCSSEffect: props.onApplyCSSEffect, onApplyEffectStack: props.onApplyEffectStack,
+        onApplyNativeEffect: props.onApplyNativeEffect, onApplyTransition: props.onApplyTransition,
+        createTitleClipFromPreset, applyTitlePresetToSelected, applyTitleTreatmentToSelected, applyTitleMotionToSelected, toggleTitleAutoContrastForSelected,
+        onGenerateSubtitlesFromClip: props.onGenerateSubtitlesFromClip, onUpdateSubtitleClipContent: props.onUpdateSubtitleClipContent,
+        onSplitSubtitleClip: props.onSplitSubtitleClip, onMergeSubtitleClip: props.onMergeSubtitleClip,
+        allLayouts, savedLayouts, activeLayoutName, applyLayout, deleteLayout,
+        currentLayout: () => ({ panelWidths, collapsed, tlHeight }),
+        storeSavedLayouts: (layouts) => { setSavedLayouts(layouts as typeof savedLayouts); saveSavedLayouts(layouts as typeof savedLayouts); },
+        handleMatchTimelineGap, notice: () => proNotice,
+        canUndoLastAgentApply: props.canUndoLastAgentApply, onPreviewEditPlan: props.onPreviewEditPlan, onApplyEditPlan: props.onApplyEditPlan,
+        onUndoLastAgentApply: props.onUndoLastAgentApply, onRunAgentReviewPass: props.onRunAgentReviewPass,
+        openProPanel: isPro ? (panel: string) => dispatchPro({ type: 'openPanel', panel: panel as never }) : null,
+    } as unknown as EditLegacyLiveProps);
     useEffect(() => {
         if (!isPro) return;
         // Capture phase: runs before the App/Timeline window listeners so pro-only keys
         // (C = razor tool, T = type tool, Cmd/Ctrl+K, I/O) don't also trigger their classic meaning.
         const handler = (event: KeyboardEvent) => {
-            if (event.defaultPrevented || event.repeat || isTypingTarget(event.target)) return;
+            if (event.defaultPrevented || isTypingTarget(event.target)) return;
             const current = proKeyRef.current;
+            const edit = resolveEditShortcut(event, current.focusedPanel);
+            // Zoom and track heights are handled by the Timeline itself.
+            if (edit && edit.kind !== 'zoom' && edit.kind !== 'trackHeight') {
+                if (event.repeat && edit.kind !== 'shuttle') return;
+                if (edit.kind === 'shuttle' && event.repeat) { event.preventDefault(); event.stopPropagation(); return; }
+                if ((edit.kind === 'insert' || edit.kind === 'overwrite') && !current.hasSource) return;
+                if (edit.kind === 'rippleDelete' && !current.rippleDelete) return;
+                event.preventDefault();
+                event.stopPropagation();
+                switch (edit.kind) {
+                    case 'addMarker': current.addMarkerAtPlayhead(); break;
+                    case 'nextMarker': current.jumpMarker(1); break;
+                    case 'previousMarker': current.jumpMarker(-1); break;
+                    case 'lift': current.liftOrExtract('lift'); break;
+                    case 'extract': current.liftOrExtract('extract'); break;
+                    case 'insert': current.do3PE('insert'); break;
+                    case 'overwrite': current.do3PE('overwrite'); break;
+                    case 'shuttle': current.handleShuttle(edit.key); break;
+                    case 'rippleDelete': current.rippleDelete?.(); break;
+                    default: break;
+                }
+                return;
+            }
+            if (event.repeat) return;
             const action = resolveProShortcut(event, current.focusedPanel);
             if (!action) return;
             if (action.kind === 'tool' && EDITOR_TOOLS.find((entry) => entry.id === action.tool)?.status === 'planned') return;
@@ -1483,6 +1820,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                     {srcSource?.kind === 'library' && (
                         <button onClick={() => setExternalSourceAsset(null)} className="edit-text-btn">Clear</button>
                     )}
+                    {isPro && renderResolutionSelect('source')}
                 </div>
             </div>
             <div className="edit-monitor-panel__stage">
@@ -1688,11 +2026,13 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                     onClick={handleTypeToolClick}
                     data-automation-id="pp.program.canvas"
                 >
-                    <PreviewPlayer
-                        timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
-                        playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
-                        canvasWidth={preview.width} canvasHeight={preview.height} aspectStyle={aspect} showControls={false}
-                    />
+                    <PlaybackResolutionContext.Provider value={playbackResValue}>
+                        <PreviewPlayer
+                            timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
+                            playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
+                            canvasWidth={preview.width} canvasHeight={preview.height} aspectStyle={aspect} showControls={false}
+                        />
+                    </PlaybackResolutionContext.Provider>
                     {(guides !== 'off' || maskRatio) && (
                         <div className="edit-guides" style={{ inset: 0 }} aria-hidden>
                             {proMaskBars && (
@@ -1738,7 +2078,13 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 )}
             </div>
             <div className="ppx-monitor__bar">
-                <span className="ppx-monitor__tc" data-automation-id="pp.program.timecode">{formatTimecode(props.playheadPosition)}</span>
+                <TimecodeField
+                    className="ppx-monitor__tc"
+                    value={props.playheadPosition}
+                    max={Math.max(sequenceDuration, 0)}
+                    onCommit={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
+                    automationId="pp.program.timecode"
+                />
                 <select
                     className="ppx-select"
                     value={String(pro.monitorZoom)}
@@ -1748,6 +2094,7 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 >
                     {MONITOR_ZOOM_OPTIONS.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
                 </select>
+                {renderResolutionSelect('program')}
                 <button
                     type="button"
                     className={`ppx-icon ${pro.safeMargins ? 'ppx-icon--on' : ''}`}
@@ -1774,6 +2121,22 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 </button>
                 <span className="ppx-monitor__dur" title="Sequenzdauer">{formatTimecode(sequenceDuration)}</span>
             </div>
+            <div className="ppx-transport-wrap">
+            {markers.length > 0 && sequenceDuration > 0 && (
+                <div className="ppx-scrub-markers" aria-label="Sequenzmarken" data-automation-id="pp.program.markers">
+                    {markers.map((marker, index) => (
+                        <button
+                            key={marker.id}
+                            type="button"
+                            className={`ppx-scrub-marker ${marker.id === selectedMarkerId ? 'ppx-scrub-marker--selected' : ''}`}
+                            style={{ left: `${Math.min(100, (marker.time / sequenceDuration) * 100)}%`, ['--marker-color' as string]: markerColorHex(marker.color) }}
+                            onClick={() => { setSelectedMarkerId(marker.id); props.onPlayheadUpdate(clampPlayhead(marker.time)); }}
+                            title={`${markerLabel(marker, index)} · ${formatTimecode(marker.time)}`}
+                            data-automation-id={`pp.program.marker.${marker.id}`}
+                        />
+                    ))}
+                </div>
+            )}
             <EditTransportBar
                 automationId="pp.program"
                 isPlaying={props.isPlaying}
@@ -1788,13 +2151,16 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 onMarkIn={markPgmIn}
                 onMarkOut={markPgmOut}
                 onClearMarks={() => { setPgmIn(null); setPgmOut(null); }}
-                trailing={srcSource ? (
+                trailing={(
                     <div className="edit-transport__actions">
-                        <button onClick={() => do3PE('insert')} className="edit-text-btn edit-text-btn--primary" title="Quellbereich an der Abspielposition einfügen" data-automation-id="pp.program.insert">Insert</button>
-                        <button onClick={() => do3PE('overwrite')} className="edit-text-btn edit-text-btn--outline" title="Quellbereich an der Abspielposition überschreiben" data-automation-id="pp.program.overwrite">Overwrite</button>
+                        <button onClick={() => liftOrExtract('lift')} className="edit-icon-btn" disabled={pgmIn === null && pgmOut === null} title="Herausheben: In/Out-Bereich der Zielspuren entfernen, Lücke bleibt (;)" data-automation-id="pp.program.lift"><ArrowUpFromLine className="w-4 h-4" /></button>
+                        <button onClick={() => liftOrExtract('extract')} className="edit-icon-btn" disabled={pgmIn === null && pgmOut === null} title="Extrahieren: In/Out-Bereich entfernen und Lücke schließen (')" data-automation-id="pp.program.extract"><FoldHorizontal className="w-4 h-4" /></button>
+                        {srcSource && <button onClick={() => do3PE('insert')} className="edit-icon-btn" title="Einfügen: Quellbereich an der Abspielposition einfügen (,)" data-automation-id="pp.program.insert"><ArrowRightToLine className="w-4 h-4" /></button>}
+                        {srcSource && <button onClick={() => do3PE('overwrite')} className="edit-icon-btn" title="Überschreiben: Quellbereich an der Abspielposition überschreiben (.)" data-automation-id="pp.program.overwrite"><ArrowDownToLine className="w-4 h-4" /></button>}
                     </div>
-                ) : null}
+                )}
             />
+            </div>
         </div>
     );
 
@@ -1828,6 +2194,13 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                             rangeOut={pgmOut}
                             onDeleteClip={props.onDeleteClip}
                             onRippleDeleteClip={props.onRippleDeleteClip}
+                            markers={markers}
+                            selectedMarkerId={selectedMarkerId}
+                            onSelectMarker={setSelectedMarkerId}
+                            onMoveMarker={(id, time) => updateMarkerById(id, { time })}
+                            onAddMarker={addMarkerAtPlayhead}
+                            linkedSelection={linkedSelection}
+                            onToggleLinkedSelection={() => setLinkedSelection((value) => !value)}
                         />
                     </div>
                 );
@@ -1876,12 +2249,19 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                 );
             case 'markers':
                 return (
-                    <MarkersPanel
+                    <SequenceMarkersPanel
+                        markers={markers}
+                        selectedMarkerId={selectedMarkerId}
+                        onSelectMarker={setSelectedMarkerId}
+                        onAddMarker={addMarkerAtPlayhead}
+                        onUpdateMarker={updateMarkerById}
+                        onRemoveMarker={removeMarkerById}
                         clips={timelineClips} mediaItems={mediaItems} tracks={timelineTracks}
                         programIn={pgmIn} programOut={pgmOut} sourceIn={srcIn} sourceOut={srcOut}
                         playhead={props.playheadPosition}
                         onSeek={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
                         onClearProgramMarks={() => { setPgmIn(null); setPgmOut(null); }}
+                        persisted={Boolean(props.onSequenceMarkersChange && props.currentProjectPath)}
                     />
                 );
             case 'history':
@@ -1902,6 +2282,8 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
                         media={selectedClipMedia}
                         trackLabel={props.selectedClip ? trackLabelById[props.selectedClip.trackId] : undefined}
                         onUpdateClip={onUpdateClip}
+                        playhead={props.playheadPosition}
+                        onSeek={(time) => props.onPlayheadUpdate(clampPlayhead(time))}
                     />
                 );
             case 'audioMixer':
@@ -1947,6 +2329,19 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     /* ─── Render ─── */
     return (
         <div className={`studio-workspace edit-workspace ppx-root ${isPro ? 'ppx-dark' : ''}`} style={{ gap: 0 }} data-automation-id="pp.editor" data-workspace={pro.workspace} data-tool={pro.tool}>
+            {isPro && (
+                <ModeBar
+                    active="EDIT"
+                    projectName={props.projectName}
+                    onSwitch={props.onSwitchWorkspace}
+                    canAccess={props.canAccessWorkspace}
+                    trailing={(
+                        <>
+                            {shuttleRate !== 0 && <span className="ppx-modebar__shuttle" data-automation-id="pp.shuttle.rate">{formatShuttleRate(shuttleRate)}</span>}
+                        </>
+                    )}
+                />
+            )}
             <WorkspaceBar state={pro} dispatch={dispatchPro} trailing={isPro ? proBarTrailing : null} />
             {isPro ? (
                 <div className="ppx-body">
@@ -2078,17 +2473,21 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
 
             <ImageEditorModal isOpen={imageEditorOpen} mediaItem={props.selectedMedia} onClose={() => setImageEditorOpen(false)} onSave={handleImageSave} />
 
+            {proNotice && <div className="ppx-toast" role="status" aria-live="polite" data-automation-id="pp.notice">{proNotice}</div>}
+
             {/* Keyboard shortcuts overlay */}
             {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
 
             {/* Fullscreen monitor overlay */}
             {isFullscreen && (
                 <FullscreenMonitor onClose={() => setIsFullscreen(false)}>
-                    <PreviewPlayer
-                        timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
-                        playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
-                        canvasWidth={preview.width} canvasHeight={preview.height} showControls={true}
-                    />
+                    <PlaybackResolutionContext.Provider value={playbackResValue}>
+                        <PreviewPlayer
+                            timelineClips={programClips} timelineTracks={timelineTracks} mediaItems={mediaItems}
+                            playheadPosition={props.playheadPosition} isPlaying={props.isPlaying} onTogglePlayback={props.onTogglePlayback}
+                            canvasWidth={preview.width} canvasHeight={preview.height} showControls={true}
+                        />
+                    </PlaybackResolutionContext.Provider>
                 </FullscreenMonitor>
             )}
         </div>

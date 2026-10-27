@@ -2131,8 +2131,13 @@ const buildUpscalePayloads = (basePayloads: any[], opts?: UpscaleImageOptions | 
     const scaleValue = Number.isFinite(Number(opts?.scale)) ? Number(opts?.scale) : undefined;
     const resolutionValue = typeof opts?.resolution === 'string' ? opts.resolution.trim() : '';
 
+    // Most specific payloads first: the caller stops at the first one the model accepts,
+    // so trying the bare base payload first would silently drop the requested size.
     basePayloads.forEach((base) => {
-        push(base);
+        if (scaleValue !== undefined && resolutionValue) {
+            push({ ...base, scale: scaleValue, resolution: resolutionValue });
+            push({ ...base, upscale: scaleValue, target_resolution: resolutionValue });
+        }
         if (scaleValue !== undefined) {
             push({ ...base, scale: scaleValue });
             push({ ...base, upscale: scaleValue });
@@ -2143,10 +2148,7 @@ const buildUpscalePayloads = (basePayloads: any[], opts?: UpscaleImageOptions | 
             push({ ...base, target_resolution: resolutionValue });
             push({ ...base, output_resolution: resolutionValue });
         }
-        if (scaleValue !== undefined && resolutionValue) {
-            push({ ...base, scale: scaleValue, resolution: resolutionValue });
-            push({ ...base, upscale: scaleValue, target_resolution: resolutionValue });
-        }
+        push(base);
     });
 
     return payloads;

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useRelightLiveCommands, type RelightLiveProps } from '../workspaces/fusion-shared/useRelightLiveCommands';
 import {
   getSurfaceMapStatus,
   runSurfaceMap,
@@ -541,6 +542,16 @@ const ArtRelightPanel: React.FC<ArtRelightPanelProps> = ({
       setStatus(error instanceof Error ? error.message : 'Relight export failed.');
     }
   };
+
+  useRelightLiveCommands({
+    mediaItems, settings, updateSettings, resetSettings, presets: artRelightPresets,
+    sourceMediaId, setSourceMediaId, setSourceMode, sourceImage, surfaceMode, setSurfaceMode,
+    surfaceMediaId, setSurfaceMediaId, setSurfaceSourceMode, generatedSurfaceGuide,
+    surfaceMapRepoPath, setSurfaceMapRepoPath, surfaceMapStatus, surfaceMapEncoder, setSurfaceMapEncoder,
+    surfaceMapInputSize, setSurfaceMapInputSize, surfaceMapNormalStrength, setSurfaceMapNormalStrength,
+    hasDesktopSurfaceMaps, status, result,
+    handlePrepareSurfaceMapRepo, handleGenerateDepthGuide, handleGenerateNormalGuide, handleExport,
+  } as unknown as RelightLiveProps);
 
   const renderSlider = (
     label: string,

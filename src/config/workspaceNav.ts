@@ -76,7 +76,7 @@ export const WORKSPACE_NAV_GROUPS: WorkspaceNavGroup[] = [
       { id: 'VIDEO_GEN', name: 'Video', description: 'Generate motion clips', icon: VideoIcon },
       { id: 'NODES', name: 'Nodes', description: 'Build advanced AI chains', icon: LayersIcon },
       { id: 'SET_DESIGN', name: 'Set Design', description: 'Arrange props and cameras', icon: CameraIcon },
-      { id: 'SCENE_MAP', name: 'Scene Map', description: 'Map beats and locations', icon: GridIcon },
+      { id: 'SCENE_MAP', name: 'Scene Map', description: 'Floor plan, blocking and camera plan', icon: GridIcon },
       { id: 'WORLD_GEN', name: 'World', description: 'Develop worlds and settings', icon: LandscapeIcon },
       { id: 'AVATAR', name: 'Avatar', description: 'Characters and presenters', icon: UserCircleIcon },
       { id: 'SOUND', name: 'Sound', description: 'Voice, music, and effects', icon: MusicNoteIcon },

@@ -3,9 +3,16 @@
  * frame through the same FxRenderer as the preview and written as ProRes /
  * PNG intermediates; the HQ FFmpeg export then reads those instead of the
  * original media. Returns a project copy — the user's project is untouched.
+ *
+ * FX keyframes: every frame renders the stack resolved at its clip-local time
+ * (`resolveStackAtTime`). The native OFX bake (`ofx.bake`) only takes constant
+ * params, so a stack with OFX effects *and* keyframes is rendered frame by
+ * frame through `renderStackAsync` (host per frame) instead. A still image
+ * with animated FX is baked as a video clip.
  */
 import type { MediaItem, TimelineClip, TimelineTrack } from '../types';
-import { hasActiveFx, isGpuRenderable, needsNativeHost, resolveParams } from './registry.ts';
+import { hasActiveFx, hasFxKeyframes, isGpuRenderable, needsNativeHost, resolveParams, resolveStackAtTime } from './registry.ts';
+import type { FxStack } from './types.ts';
 import { nativePluginId, ofxBridge, renderStackAsync } from './ofx.ts';
 import { FxRenderer } from './renderer.ts';
 import { fxFrameIndex } from './preview.ts';
@@ -76,6 +83,15 @@ const rgbaToPng = async (pixels: Uint8ClampedArray, width: number, height: numbe
   return new Uint8Array(await blob.arrayBuffer());
 };
 
+const canvasPixels = (canvas: HTMLCanvasElement): Uint8ClampedArray => {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('2D canvas unavailable');
+  return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+};
+
+/** Clip-level features the HQ FFmpeg export does not reproduce yet (see clipAnimation.ts). */
+export { clipExportWarnings } from './clipAnimation.ts';
+
 export function clipsNeedingBake(project: BakeProject): TimelineClip[] {
   return project.timelineClips.filter((clip) => hasActiveFx(clip.fxStack) && (isGpuRenderable(clip.fxStack) || needsNativeHost(clip.fxStack)));
 }
@@ -123,17 +139,84 @@ export async function bakeFxForExport(
 
       const native = needsNativeHost(stack);
 
+      const animated = hasFxKeyframes(stack);
+
+      /**
+       * Renders `frameCount` frames into a ProRes intermediate. `draw` returns
+       * top-down RGBA for a clip-local time; the stack is resolved per frame.
+       */
+      const bakeFrames = async (setup: {
+        width: number;
+        height: number;
+        frameCount: number;
+        audio?: { media: MediaItem; start: number; duration: number };
+        draw: (localTime: number, frame: number, frameStack: FxStack) => Promise<Uint8ClampedArray>;
+      }): Promise<string> => {
+        const begin = await bridge.bakeVideoBegin({
+          folderPath: options.folderPath,
+          name,
+          width: setup.width,
+          height: setup.height,
+          fps,
+          audioMedia: setup.audio?.media,
+          audioStart: setup.audio?.start,
+          audioDuration: setup.audio?.duration,
+        });
+        if (!begin.ok || !begin.sessionId) throw new Error(begin.error || 'Could not start FX bake');
+        const sessionId = begin.sessionId;
+        try {
+          for (let frame = 0; frame < setup.frameCount; frame += 1) {
+            if (options.signal?.aborted) throw new DOMException('Export canceled', 'AbortError');
+            const localTime = frame / fps;
+            const pixels = await setup.draw(localTime, frame, resolveStackAtTime(stack, localTime));
+            const sent = await bridge.bakeVideoFrame({ sessionId, pixels: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength) });
+            if (!sent.ok) throw new Error(sent.error || 'Frame upload failed');
+            if (frame % 4 === 0) report(frame, setup.frameCount, `FX: ${media.name}`);
+          }
+        } catch (error) {
+          await bridge.bakeVideoEnd({ sessionId, cancel: true });
+          throw error;
+        }
+        const end = await bridge.bakeVideoEnd({ sessionId });
+        if (!end.ok || !end.url) throw new Error(end.error || 'FX bake failed');
+        return end.url;
+      };
+
+      if (media.type === 'image' && animated) {
+        // Animated FX on a still: bake a video of the clip's length.
+        const img = await loadImage(media.url);
+        const duration = Math.max(1 / fps, clip.duration * (clip.speed || 1));
+        const frameCount = Math.max(1, Math.round(duration * fps));
+        const width = even(Math.min(4096, img.naturalWidth));
+        const height = even(Math.min(4096, Math.round((img.naturalHeight * width) / img.naturalWidth)));
+        const url = await bakeFrames({
+          width,
+          height,
+          frameCount,
+          draw: async (localTime, frame, frameStack) => {
+            if (native) return canvasPixels(await renderStackAsync(img, frameStack, { width, height, frameIndex: frame, keyframeTime: localTime }));
+            renderer.render(img, frameStack, { frameIndex: frame, time: localTime, quality: 'full', width, height });
+            return renderer.readPixels();
+          },
+        });
+        const id = `${media.id}__fx_${clip.id}`;
+        newMedia.push(bakedMedia(media, id, url, { type: 'video', duration } as Partial<MediaItem>));
+        replaced.set(clip.id, { mediaId: id, fxStack: undefined, sourceIn: 0, sourceOut: duration });
+        report(frameCount, frameCount, `FX: ${media.name}`);
+        continue;
+      }
+
       if (media.type === 'image') {
         report(0, 1, `FX: ${media.name}`);
         const img = await loadImage(media.url);
         let png: Uint8Array;
         if (native) {
-          const canvas = await renderStackAsync(img, stack, { width: img.naturalWidth, height: img.naturalHeight, frameIndex: 0 });
+          const canvas = await renderStackAsync(img, stack, { width: img.naturalWidth, height: img.naturalHeight, frameIndex: 0, keyframeTime: 0 });
           const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
           if (!blob) throw new Error('PNG encoding failed');
           png = new Uint8Array(await blob.arrayBuffer());
         } else {
-          renderer.render(img, stack, { frameIndex: 0, time: 0, quality: 'full' });
+          renderer.render(img, resolveStackAtTime(stack, 0), { frameIndex: 0, time: 0, quality: 'full' });
           const { width, height } = renderer.canvas;
           png = await rgbaToPng(renderer.readPixels(), width, height);
         }
@@ -146,7 +229,7 @@ export async function bakeFxForExport(
         continue;
       }
 
-      if (native) {
+      if (native && !animated) {
         const ofx = ofxBridge();
         if (!ofx) throw new Error('OFX-Export braucht die Desktop-App.');
         const source = await bridge.resolveSource({ folderPath: options.folderPath, media });
@@ -191,37 +274,22 @@ export async function bakeFxForExport(
       const frameCount = Math.max(1, Math.round(duration * fps));
       const width = even(Math.min(4096, video.videoWidth));
       const height = even(Math.min(4096, Math.round((video.videoHeight * width) / video.videoWidth)));
-      const begin = await bridge.bakeVideoBegin({
-        folderPath: options.folderPath,
-        name,
+      // GPU stacks, and OFX stacks with keyframes (host per frame, constant params each).
+      const url = await bakeFrames({
         width,
         height,
-        fps,
-        audioMedia: media,
-        audioStart: sourceIn,
-        audioDuration: duration,
-      });
-      if (!begin.ok || !begin.sessionId) throw new Error(begin.error || 'Could not start FX bake');
-      const sessionId = begin.sessionId;
-      try {
-        for (let frame = 0; frame < frameCount; frame += 1) {
-          if (options.signal?.aborted) throw new DOMException('Export canceled', 'AbortError');
-          const localTime = frame / fps;
+        frameCount,
+        audio: { media, start: sourceIn, duration },
+        draw: async (localTime, _frame, frameStack) => {
           await seek(video, Math.min(sourceOut - 1e-3, sourceIn + localTime + 0.5 / fps));
-          renderer.render(video, stack, { frameIndex: fxFrameIndex(sourceIn + localTime, fps), time: localTime, quality: 'full', width, height });
-          const pixels = renderer.readPixels();
-          const sent = await bridge.bakeVideoFrame({ sessionId, pixels: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength) });
-          if (!sent.ok) throw new Error(sent.error || 'Frame upload failed');
-          if (frame % 4 === 0) report(frame, frameCount, `FX: ${media.name}`);
-        }
-      } catch (error) {
-        await bridge.bakeVideoEnd({ sessionId, cancel: true });
-        throw error;
-      }
-      const end = await bridge.bakeVideoEnd({ sessionId });
-      if (!end.ok || !end.url) throw new Error(end.error || 'FX bake failed');
+          const frameIndex = fxFrameIndex(sourceIn + localTime, fps);
+          if (native) return canvasPixels(await renderStackAsync(video, frameStack, { width, height, frameIndex, keyframeTime: localTime }));
+          renderer.render(video, frameStack, { frameIndex, time: localTime, quality: 'full', width, height });
+          return renderer.readPixels();
+        },
+      });
       const id = `${media.id}__fx_${clip.id}`;
-      newMedia.push(bakedMedia(media, id, end.url, { duration }));
+      newMedia.push(bakedMedia(media, id, url, { duration }));
       // The baked file starts at the clip's source-in point.
       replaced.set(clip.id, { mediaId: id, fxStack: undefined, sourceIn: 0, sourceOut: duration });
       report(frameCount, frameCount, `FX: ${media.name}`);

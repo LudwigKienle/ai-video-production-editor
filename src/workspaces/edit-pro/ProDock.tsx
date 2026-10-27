@@ -3,11 +3,12 @@
  * groups. Tabs can be dragged onto another group's tab strip to re-dock them,
  * double-clicked (or `) to maximise, and closed / reopened via the window menu.
  */
-import React, { useRef, useState } from 'react';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Maximize2, Menu, Minimize2, X } from 'lucide-react';
 import {
     canResizeAt,
     findGroup,
+    listGroups,
     PRO_PANELS,
     resizeSizes,
     splitFlexibility,
@@ -99,6 +100,66 @@ const SplitView: React.FC<{ node: DockSplit; ctx: DockContext }> = ({ node, ctx 
     );
 };
 
+/** Panel menu (≡ next to the active tab): maximise, close, move to another group. */
+const PanelMenu: React.FC<{ node: DockGroup; ctx: DockContext }> = ({ node, ctx }) => {
+    const [open, setOpen] = useState(false);
+    const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!open) return;
+        const close = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) setOpen(false); };
+        const key = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+        window.addEventListener('mousedown', close);
+        window.addEventListener('keydown', key);
+        return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', key); };
+    }, [open]);
+    const layout = ctx.state.workspace === 'classic' ? null : ctx.state.layouts[ctx.state.workspace];
+    const targets = layout ? listGroups(layout).filter((group) => group.id !== node.id && !group.compact) : [];
+    const run = (fn: () => void) => () => { setOpen(false); fn(); };
+    return (
+        <div className="ppx-panelmenu" ref={ref}>
+            <button
+                type="button"
+                className="ppx-panelmenu__btn"
+                onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setPos({ left: Math.min(rect.left, window.innerWidth - 230), top: rect.bottom + 4 });
+                    setOpen((value) => !value);
+                }}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                title={`Menü: ${PRO_PANELS[node.active].label}`}
+                data-automation-id={`pp.panel.${node.active}.menu`}
+            >
+                <Menu size={12} />
+            </button>
+            {open && (
+                <div className="ppx-menu__list ppx-panelmenu__list" role="menu" style={{ position: 'fixed', left: pos.left, top: pos.top, right: 'auto' }}>
+                    <button type="button" role="menuitem" className="ppx-menu__item" onClick={run(() => ctx.dispatch({ type: 'toggleMaximize', groupId: node.id }))} data-automation-id={`pp.panel.${node.active}.menu.maximize`}>
+                        <span className="ppx-menu__check" />{ctx.state.maximizedGroupId === node.id ? 'Wiederherstellen' : 'Bedienfeld maximieren'}
+                    </button>
+                    <button type="button" role="menuitem" className="ppx-menu__item" onClick={run(() => ctx.dispatch({ type: 'closePanel', panel: node.active }))} data-automation-id={`pp.panel.${node.active}.menu.close`}>
+                        <span className="ppx-menu__check" />Bedienfeld schließen
+                    </button>
+                    {targets.length > 0 && <div className="ppx-menu__sep" />}
+                    {targets.map((group) => (
+                        <button
+                            key={group.id}
+                            type="button"
+                            role="menuitem"
+                            className="ppx-menu__item"
+                            onClick={run(() => ctx.dispatch({ type: 'moveTab', panel: node.active, toGroupId: group.id }))}
+                            data-automation-id={`pp.panel.${node.active}.menu.move.${group.id}`}
+                        >
+                            <span className="ppx-menu__check" />Verschieben zu „{PRO_PANELS[group.active].label}“
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const GroupView: React.FC<{ node: DockGroup; ctx: DockContext }> = ({ node, ctx }) => {
     const { state, dispatch } = ctx;
     const [dropActive, setDropActive] = useState(false);
@@ -134,8 +195,8 @@ const GroupView: React.FC<{ node: DockGroup; ctx: DockContext }> = ({ node, ctx 
                 <header className="ppx-group__head">
                     <div className="ppx-tabs" role="tablist">
                         {node.tabs.map((panel) => (
+                            <React.Fragment key={panel}>
                             <button
-                                key={panel}
                                 type="button"
                                 role="tab"
                                 aria-selected={node.active === panel}
@@ -155,6 +216,8 @@ const GroupView: React.FC<{ node: DockGroup; ctx: DockContext }> = ({ node, ctx 
                             >
                                 {PRO_PANELS[panel].label}
                             </button>
+                            {node.active === panel && <PanelMenu node={node} ctx={ctx} />}
+                            </React.Fragment>
                         ))}
                     </div>
                     <div className="ppx-group__tools">

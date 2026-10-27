@@ -5,7 +5,23 @@ import { formatTimecode, formatRulerLabel, pickRulerStep } from '../utils/timeco
 import Waveform from './Waveform';
 import { getClipEffectLayers } from '../utils/effects';
 import type { LibraryAsset } from '../hooks/useLibraryAssets';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Link2, Link2Off, Bookmark } from 'lucide-react';
+import { markerColorHex, markerLabel, type SequenceMarker } from '../workspaces/edit-pro/markers';
+import {
+  adjacentEditPoint,
+  clampTrackHeight,
+  editPoints as computeEditPoints,
+  linkedPartners,
+  stepAllTrackHeights,
+  trackHeightOf,
+  trackIndexAtY,
+  trackRowLayout,
+  TRACK_HEIGHT_MIN,
+} from '../workspaces/edit-pro/editOps';
+import { resolveEditShortcut } from '../workspaces/edit-pro/editShortcuts';
+import TimecodeField from '../workspaces/edit-pro/TimecodeField';
+import { registerLiveCommands } from '../mcp/liveCommands';
+import { EDIT_LIVE } from '../mcp/modules/timelineTools';
 
 /** Editing tools of the pro layout's tool strip (see workspaces/edit-pro). */
 export type TimelineTool = 'selection' | 'trackForward' | 'ripple' | 'razor' | 'slip' | 'pen' | 'hand' | 'type';
@@ -60,6 +76,15 @@ interface TimelineProps {
   onToggleTrackVisibility?: (trackId: string) => void;
   /** Drop of a GPU effect (Buckswood Post Plugins FX definition id) onto a clip. */
   onDropFx?: (clipId: string, fxId: string) => void;
+  /** Sequence markers drawn on the ruler (pro layout). */
+  markers?: SequenceMarker[];
+  selectedMarkerId?: string | null;
+  onSelectMarker?: (markerId: string | null) => void;
+  onMoveMarker?: (markerId: string, time: number) => void;
+  onAddMarker?: () => void;
+  /** Linked selection: moving a clip also moves its A/V partner (same media, same span). */
+  linkedSelection?: boolean;
+  onToggleLinkedSelection?: () => void;
 }
 
 const DEFAULT_PIXELS_PER_SECOND = 25;
@@ -70,6 +95,8 @@ const MIN_CLIP_DURATION = 0.5;
 const DEFAULT_TRACK_HEIGHT = 64;
 const TRACK_HEIGHTS = [44, 64, 96] as const;
 const TRACK_HEIGHT_STORAGE_KEY = 'timeline_track_height_v1';
+const TRACK_HEIGHTS_STORAGE_KEY = 'timeline_track_heights_v1';
+const ROW_GAP = 6;
 const RULER_HEIGHT = 30;
 const TRACK_HEADER_WIDTH = 156;
 const SNAP_THRESHOLD = 8;
@@ -128,6 +155,13 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     hiddenTrackIds,
     onToggleTrackVisibility,
     onDropFx,
+    markers,
+    selectedMarkerId = null,
+    onSelectMarker,
+    onMoveMarker,
+    onAddMarker,
+    linkedSelection = false,
+    onToggleLinkedSelection,
   } = props;
   const isPro = variant === 'pro';
 
@@ -169,7 +203,23 @@ const Timeline: React.FC<TimelineProps> = (props) => {
       return TRACK_HEIGHTS.includes(raw as (typeof TRACK_HEIGHTS)[number]) ? raw : DEFAULT_TRACK_HEIGHT;
     } catch { return DEFAULT_TRACK_HEIGHT; }
   });
-  const rowHeight = trackHeight + 6;
+  /** Per-track heights (pro: drag the header's bottom edge, Shift+= / Shift+-). Missing ids use `trackHeight`. */
+  const [trackHeights, setTrackHeights] = useState<Record<string, number>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(TRACK_HEIGHTS_STORAGE_KEY) || '{}');
+      if (!parsed || typeof parsed !== 'object') return {};
+      return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'number' && Number.isFinite(value)).map(([key, value]) => [key, clampTrackHeight(value as number)]));
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem(TRACK_HEIGHTS_STORAGE_KEY, JSON.stringify(trackHeights)); } catch { /* ignore */ }
+  }, [trackHeights]);
+  const heightOf = (trackId: string) => trackHeightOf(trackHeights, trackId, trackHeight);
+  const rowLayout = useMemo(
+    () => trackRowLayout(displayTracks.map((track) => track.id), trackHeights, trackHeight, ROW_GAP),
+    [displayTracks, trackHeights, trackHeight],
+  );
   const [clipMenu, setClipMenu] = useState<{ x: number; y: number; clipId: string } | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const getMediaForItem = (mediaId: string) => mediaItems.find((media) => media.id === mediaId);
@@ -194,6 +244,13 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [snapLinePosition, setSnapLinePosition] = useState<number | null>(null);
+
+  /** Markers and program In/Out are snap targets too (besides 0, playhead and clip edges). */
+  const extraSnapPoints = (): number[] => [
+    ...(markers ?? []).map((marker) => marker.time),
+    ...(rangeIn !== null ? [rangeIn] : []),
+    ...(rangeOut !== null ? [rangeOut] : []),
+  ];
 
   const applyClipSet = (nextClips: TimelineClip[]) => {
     if (onBatchUpdateClips) {
@@ -482,7 +539,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const y = tracksRect ? e.clientY - tracksRect.top : -1;
     const time = Math.max(0, x / pxPerSec);
 
-    const trackIndex = Math.floor(y / rowHeight);
+    const trackIndex = trackIndexAtY(rowLayout, y);
     if (trackIndex >= 0 && trackIndex < displayTracks.length) {
       if (mediaId && onDropMedia) {
         onDropMedia(mediaId, displayTracks[trackIndex].id, time);
@@ -523,7 +580,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
         setSnapLinePosition(null);
         if (isSnappingEnabled && mode !== 'slip') {
-          const snapPoints = [0, playheadPosition];
+          const snapPoints = [0, playheadPosition, ...extraSnapPoints()];
           initialClips.forEach((clip) => {
             if (clip.id !== initialClip.id) {
               snapPoints.push(clip.start, clip.end);
@@ -780,7 +837,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
         if (isSnappingEnabled) {
           const clipDuration = initialClip.end - initialClip.start;
-          const snapPoints = [0, playheadPosition];
+          const snapPoints = [0, playheadPosition, ...extraSnapPoints()];
           initialClips.forEach((clip) => {
             if (clip.id !== initialClip.id) {
               snapPoints.push(clip.start, clip.end);
@@ -812,7 +869,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         const tracksRect = tracksAreaRef.current?.getBoundingClientRect();
         if (tracksRect) {
           const yPosInTimeline = e.clientY - tracksRect.top;
-          const trackIndex = Math.floor(yPosInTimeline / rowHeight);
+          const trackIndex = trackIndexAtY(rowLayout, yPosInTimeline);
           const targetTrack = displayTracks[trackIndex];
           const media = getMediaForItem(initialClip.mediaId);
           if (
@@ -835,10 +892,23 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           trackId: newTrackId,
         });
 
+        const partnerTracks = new Set<string>();
+        if (linkedSelection && newTrackId === initialClip.trackId) {
+          const delta = newStart - initialClip.start;
+          linkedPartners(initialClips, initialClip).forEach((partner) => {
+            const partnerIndex = working.findIndex((clip) => clip.id === partner.id);
+            if (partnerIndex < 0 || tracks.find((entry) => entry.id === partner.trackId)?.isLocked) return;
+            const partnerStart = Math.max(0, partner.start + delta);
+            working[partnerIndex] = normalizeClip({ ...partner, start: partnerStart, end: partnerStart + (partner.end - partner.start) });
+            partnerTracks.add(partner.trackId);
+          });
+        }
+
         let resolved = resolveTrackCollisions(working, newTrackId);
         if (newTrackId !== initialClip.trackId) {
           resolved = resolveTrackCollisions(resolved, initialClip.trackId);
         }
+        partnerTracks.forEach((trackId) => { resolved = resolveTrackCollisions(resolved, trackId); });
         applyClipSet(resolved);
       }
     };
@@ -868,7 +938,11 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     isSnappingEnabled,
     playheadPosition,
     pxPerSec,
-    rowHeight,
+    rowLayout,
+    markers,
+    rangeIn,
+    rangeOut,
+    linkedSelection,
     onPlayheadUpdate,
     onUpdateClip,
     onBatchUpdateClips,
@@ -973,17 +1047,11 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     onSetActiveTrack(target.id);
   }, [clips, tracks, activeTrackId, playheadPosition, onSelectClip, onSetActiveTrack, applyClipSet]);
 
-  const editPoints = useMemo(() => {
-    const points = new Set<number>([0]);
-    clips.forEach((clip) => { points.add(Number(clip.start.toFixed(4))); points.add(Number(clip.end.toFixed(4))); });
-    return Array.from(points).sort((a, b) => a - b);
-  }, [clips]);
+  const editPoints = useMemo(() => computeEditPoints(clips), [clips]);
 
   const goToEditPoint = useCallback((direction: -1 | 1) => {
-    const target = direction < 0
-      ? [...editPoints].reverse().find((point) => point < playheadPosition - EPSILON)
-      : editPoints.find((point) => point > playheadPosition + EPSILON);
-    if (target !== undefined) onPlayheadUpdate(target);
+    const target = adjacentEditPoint(editPoints, playheadPosition, direction, EPSILON);
+    if (target !== null) onPlayheadUpdate(target);
   }, [editPoints, playheadPosition, onPlayheadUpdate]);
 
   useEffect(() => {
@@ -1001,12 +1069,22 @@ const Timeline: React.FC<TimelineProps> = (props) => {
         return;
       }
       if (event.altKey) return;
-      if (event.key === 'ArrowUp') { event.preventDefault(); goToEditPoint(-1); }
-      else if (event.key === 'ArrowDown') { event.preventDefault(); goToEditPoint(1); }
+      if (event.key === 'ArrowUp') { event.preventDefault(); goToEditPoint(-1); return; }
+      if (event.key === 'ArrowDown') { event.preventDefault(); goToEditPoint(1); return; }
+      // Zoom (= / - / backslash) and track heights (Shift+= / Shift+-), layout-aware.
+      const action = resolveEditShortcut(event, null);
+      if (action?.kind === 'zoom') {
+        event.preventDefault();
+        if (action.direction === 'fit') zoomToFitRef.current();
+        else zoomStepRef.current(action.direction === 'in' ? 1 : -1);
+      } else if (action?.kind === 'trackHeight') {
+        event.preventDefault();
+        setTrackHeights((prev) => stepAllTrackHeights(prev, tracks.map((track) => track.id), trackHeight, action.direction));
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [clips, selectedClipId, copyClip, pasteClip, duplicateClip, goToEditPoint, onDeleteClip]);
+  }, [clips, tracks, trackHeight, selectedClipId, copyClip, pasteClip, duplicateClip, goToEditPoint, onDeleteClip]);
 
   useEffect(() => {
     if (!clipMenu) return;
@@ -1037,6 +1115,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const index = TRACK_HEIGHTS.indexOf(trackHeight as (typeof TRACK_HEIGHTS)[number]);
     const next = TRACK_HEIGHTS[(index + 1) % TRACK_HEIGHTS.length];
     setTrackHeight(next);
+    setTrackHeights({});
     try { window.localStorage.setItem(TRACK_HEIGHT_STORAGE_KEY, String(next)); } catch { /* ignore */ }
   };
 
@@ -1061,6 +1140,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   }, [pxPerSec]);
 
   const zoomStep = (direction: -1 | 1) => applyZoom(pxPerSec * (direction > 0 ? 1.35 : 1 / 1.35));
+  const zoomStepRef = useRef(zoomStep);
+  zoomStepRef.current = zoomStep;
 
   const zoomToFit = () => {
     const container = timelineContainerRef.current;
@@ -1069,6 +1150,82 @@ const Timeline: React.FC<TimelineProps> = (props) => {
     const span = Math.max(1, contentDuration > 0 ? contentDuration : 10);
     applyZoom(available / span);
     requestAnimationFrame(() => { if (timelineContainerRef.current) timelineContainerRef.current.scrollLeft = 0; });
+  };
+  const zoomToFitRef = useRef(zoomToFit);
+  zoomToFitRef.current = zoomToFit;
+
+  /* ─── MCP live commands: zoom and track heights (timeline_zoom / timeline_track_height) ─── */
+  const viewLiveRef = useRef<{ zoom: (args: Record<string, unknown>) => unknown; trackHeight: (args: Record<string, unknown>) => unknown }>({ zoom: () => null, trackHeight: () => null });
+  viewLiveRef.current = {
+    zoom: (args) => {
+      if (typeof args.pixelsPerSecond === 'number' && Number.isFinite(args.pixelsPerSecond)) applyZoom(args.pixelsPerSecond);
+      else if (args.direction === 'fit') zoomToFit();
+      else if (args.direction === 'in' || args.direction === 'out') zoomStep(args.direction === 'in' ? 1 : -1);
+      else throw new Error('Pass direction (in/out/fit) or pixelsPerSecond.');
+      return { requested: args.pixelsPerSecond ?? args.direction, previousPixelsPerSecond: pxPerSec };
+    },
+    trackHeight: (args) => {
+      const ids = tracks.map((entry) => entry.id);
+      let next: Record<string, number>;
+      if (args.reset === true) next = {};
+      else if (args.step === 1 || args.step === -1) next = stepAllTrackHeights(trackHeights, ids, trackHeight, args.step);
+      else if (typeof args.height === 'number' && Number.isFinite(args.height)) {
+        const targets = typeof args.trackId === 'string' && args.trackId ? [args.trackId] : ids;
+        if (typeof args.trackId === 'string' && args.trackId && !ids.includes(args.trackId)) throw new Error(`Track ${args.trackId} not found.`);
+        next = { ...trackHeights };
+        targets.forEach((id) => { next[id] = clampTrackHeight(args.height as number); });
+      } else throw new Error('Pass height, step (1/-1) or reset.');
+      setTrackHeights(next);
+      return { heights: Object.fromEntries(ids.map((id) => [id, trackHeightOf(next, id, trackHeight)])) };
+    },
+  };
+  useEffect(() => registerLiveCommands({
+    [EDIT_LIVE.zoom]: (args) => viewLiveRef.current.zoom(args ?? {}),
+    [EDIT_LIVE.trackHeight]: (args) => viewLiveRef.current.trackHeight(args ?? {}),
+  }), []);
+
+  /* ─── Per-track height drag (bottom edge of a track header) ─── */
+
+  const startTrackResize = (event: React.MouseEvent, trackId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = heightOf(trackId);
+    document.body.style.cursor = 'row-resize';
+    const move = (ev: MouseEvent) => {
+      const next = clampTrackHeight(startHeight + (ev.clientY - startY));
+      setTrackHeights((prev) => (prev[trackId] === next ? prev : { ...prev, [trackId]: next }));
+    };
+    const up = () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  /* ─── Marker drag on the ruler: click selects + seeks, drag moves ─── */
+
+  const startMarkerDrag = (event: React.MouseEvent, marker: SequenceMarker) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    onSelectMarker?.(marker.id);
+    const startX = event.clientX;
+    let moved = false;
+    const move = (ev: MouseEvent) => {
+      if (!moved && Math.abs(ev.clientX - startX) < 3) return;
+      moved = true;
+      onMoveMarker?.(marker.id, Math.max(0, marker.time + (ev.clientX - startX) / pxPerSec));
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      if (!moved) onPlayheadUpdate(marker.time);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   };
 
   useEffect(() => {
@@ -1144,7 +1301,13 @@ const Timeline: React.FC<TimelineProps> = (props) => {
   const zoomPercent = Math.round((pxPerSec / DEFAULT_PIXELS_PER_SECOND) * 100);
   const playheadX = playheadPosition * pxPerSec + TRACK_HEADER_WIDTH;
   const hasClips = clips.length > 0;
-  const tracksHeight = tracks.length * rowHeight;
+  const tracksHeight = rowLayout.total;
+
+  const linkedIds = useMemo(() => {
+    if (!linkedSelection || !selectedClipId) return new Set<string>();
+    const selected = clips.find((clip) => clip.id === selectedClipId);
+    return new Set(selected ? linkedPartners(clips, selected).map((clip) => clip.id) : []);
+  }, [linkedSelection, selectedClipId, clips]);
 
   const trimToolActive = tool === 'selection' || tool === 'ripple' || tool === 'slip' || tool === 'pen' || tool === 'type';
 
@@ -1153,8 +1316,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
       {/* Header: trim modes · timecode · tools */}
       <div className="tl-header">
         {isPro && (
-          <div className="tl-header__group tl-header__tc-pro" data-automation-id="pp.timeline.timecode" title="Abspielposition">
-            {formatTimecode(playheadPosition)}
+          <div className="tl-header__group tl-header__tc-pro" title="Abspielposition">
+            <TimecodeField value={playheadPosition} onCommit={onPlayheadUpdate} automationId="pp.timeline.timecode" />
           </div>
         )}
         <div className="tl-header__group">
@@ -1207,6 +1370,29 @@ const Timeline: React.FC<TimelineProps> = (props) => {
           >
             <MagnetIcon className="w-4 h-4" />
           </button>
+          {onToggleLinkedSelection && (
+            <button
+              type="button"
+              className={`edit-icon-btn ${linkedSelection ? 'edit-icon-btn--accent' : ''}`}
+              title={`Verknüpfte Auswahl ${linkedSelection ? 'an' : 'aus'}: Bild- und Tonclip desselben Mediums gemeinsam verschieben`}
+              aria-pressed={linkedSelection}
+              data-automation-id="pp.timeline.linked"
+              onClick={onToggleLinkedSelection}
+            >
+              {linkedSelection ? <Link2 className="w-4 h-4" /> : <Link2Off className="w-4 h-4" />}
+            </button>
+          )}
+          {onAddMarker && (
+            <button
+              type="button"
+              className="edit-icon-btn"
+              title="Marke an der Abspielposition hinzufügen (M)"
+              data-automation-id="pp.timeline.add-marker"
+              onClick={onAddMarker}
+            >
+              <Bookmark className="w-4 h-4" />
+            </button>
+          )}
           {onSmartFill && (
             <button type="button" className="edit-icon-btn" title="Gap fill assistant" onClick={onSmartFill}>
               <WandSparklesIcon className="w-4 h-4" />
@@ -1297,6 +1483,19 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                 const selected = clips.find((clip) => clip.id === selectedClipId);
                 return selected ? <div className="tl-ruler__clipmark" style={{ left: `${selected.start * pxPerSec}px`, width: `${Math.max(2, (selected.end - selected.start) * pxPerSec)}px` }} /> : null;
               })()}
+              {(markers ?? []).map((marker, index) => (
+                <div
+                  key={marker.id}
+                  className={`tl-ruler__marker ${marker.id === selectedMarkerId ? 'tl-ruler__marker--selected' : ''}`}
+                  style={{ left: `${marker.time * pxPerSec}px`, ['--marker-color' as string]: markerColorHex(marker.color) }}
+                  onMouseDown={(event) => startMarkerDrag(event, marker)}
+                  onClick={(event) => event.stopPropagation()}
+                  title={`${markerLabel(marker, index)} · ${formatTimecode(marker.time)}${marker.comment ? `\n${marker.comment}` : ''}`}
+                  data-automation-id={`pp.timeline.marker.${marker.id}`}
+                >
+                  {marker.duration > 0 && <span className="tl-ruler__marker-span" style={{ width: `${marker.duration * pxPerSec}px` }} />}
+                </div>
+              ))}
               <div className="tl-ruler__playhead" style={{ left: `${playheadPosition * pxPerSec}px` }} onMouseDown={handlePlayheadMouseDown} />
             </div>
           </div>
@@ -1326,7 +1525,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
 
           {/* Tracks */}
           <div className="tl-tracks" ref={tracksAreaRef} style={{ height: `${tracksHeight}px` }}>
-            {displayTracks.map((track) => {
+            {displayTracks.map((track, rowIndex) => {
+              const laneHeight = heightOf(track.id);
               const trackClips = clips.filter((clip) => clip.trackId === track.id);
               const trackGaps = videoGapsByTrack[track.id] || [];
               const trackNumber = trackLabels[track.id]?.number ?? 1;
@@ -1339,7 +1539,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                   key={track.id}
                   className={`tl-track ${isActiveTrack ? 'tl-track--active' : ''} ${track.isLocked ? 'tl-track--locked' : ''} ${isHiddenTrack ? 'tl-track--hidden' : ''}`}
                   data-automation-id={`pp.timeline.track.${targetLabel}`}
-                  style={{ height: `${rowHeight}px` }}
+                  style={{ height: `${rowLayout.rows[rowIndex] ?? laneHeight + ROW_GAP}px` }}
                 >
                   <div
                     className={`track-header tl-track__header ${isActiveTrack ? 'tl-track__header--active' : ''}`}
@@ -1421,6 +1621,21 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                         {track.isLocked ? <LockIcon className="w-3.5 h-3.5" /> : <UnlockIcon className="w-3.5 h-3.5" />}
                       </button>
                     </div>
+                    <div
+                      className="tl-track__resize"
+                      onMouseDown={(event) => startTrackResize(event, track.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        setTrackHeights((prev) => {
+                          const next = { ...prev };
+                          if (laneHeight > TRACK_HEIGHT_MIN + 4) next[track.id] = TRACK_HEIGHT_MIN; else delete next[track.id];
+                          return next;
+                        });
+                      }}
+                      title="Ziehen: Spurhöhe ändern · Doppelklick: minimieren / zurücksetzen"
+                      data-automation-id={`pp.timeline.track.${targetLabel}.resize`}
+                    />
                   </div>
 
                   <div
@@ -1517,8 +1732,8 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                               onSetActiveTrack(clip.trackId);
                             }
                           }}
-                          style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${trackHeight}px` }}
-                          className={`clip-item tl-clip tl-clip--${kind} ${isSelected ? 'tl-clip--selected' : ''} ${track.isLocked ? 'tl-clip--locked' : ''}`}
+                          style={{ width: `${clipWidth}px`, left: `${clip.start * pxPerSec}px`, height: `${laneHeight}px` }}
+                          className={`clip-item tl-clip tl-clip--${kind} ${isSelected ? 'tl-clip--selected' : ''} ${linkedIds.has(clip.id) ? 'tl-clip--linked' : ''} ${track.isLocked ? 'tl-clip--locked' : ''} ${laneHeight < 40 ? 'tl-clip--compact' : ''}`}
                           data-automation-id={`pp.timeline.clip.${clip.id}`}
                           title={`${media.name} · ${formatTimecode(clip.start)} → ${formatTimecode(clip.end)}`}
                         >
@@ -1528,7 +1743,7 @@ const Timeline: React.FC<TimelineProps> = (props) => {
                             ) : media.type === 'video' ? (
                               <video src={media.url} className="w-full h-full object-cover" muted preload="metadata" />
                             ) : (
-                              waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={trackHeight} />
+                              waveformCache[media.id] && <Waveform data={waveformCache[media.id]} width={clipWidth} height={laneHeight} />
                             )}
                           </div>
                           <div className="tl-clip__scrim" />

@@ -1,10 +1,12 @@
-import React, { useRef, useEffect, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useImperativeHandle, forwardRef, useCallback, useState, useContext } from 'react';
+import { PlaybackResolutionContext } from '../workspaces/edit-pro/PlaybackResolutionContext';
 import { ClipEffectLayer, MediaItem, TimelineClip, TimelineTrack, EffectType, Keyframe, TransitionType } from '../types';
 import { PlayIcon } from './icons';
 import { buildFilterString, getBloomStrength, getGrainStrength, getHalationStrength, getVignetteStrength, normalizeFilters } from '../utils/colorGrading';
 import { applyCubeLutToImageData } from '../utils/lut';
 import { buildStyleFilterForEffect, getClipEffectLayers, hasOverlayRenderer, mergeFilterChunk } from '../utils/effects';
 import { applyFxStack, FX_PREVIEW_UPDATED_EVENT } from '../fx/preview';
+import { interpolateKeyframes } from '../fx/keyframes';
 
 export interface PreviewPlayerHandle {
     getCanvas: () => HTMLCanvasElement | null;
@@ -25,15 +27,7 @@ interface PreviewPlayerProps {
     showControls?: boolean;
 }
 
-const interpolate = (start: number, end: number, progress: number, easing: string) => {
-    let t = progress;
-    if (easing === 'ease-in') t = progress * progress;
-    else if (easing === 'ease-out') t = progress * (2 - progress);
-    else if (easing === 'ease-in-out') t = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-
-    return start + (end - start) * t;
-};
-
+// Interpolation (incl. 'hold') lives in src/fx/keyframes.ts, shared with FX param keyframes.
 const getKeyframeValue = (
     keyframes: Keyframe[] | undefined,
     property: Keyframe['property'],
@@ -42,29 +36,10 @@ const getKeyframeValue = (
     targetEffectId?: string,
 ) => {
     if (!keyframes || keyframes.length === 0) return defaultValue;
-
-    const props = keyframes
-        .filter((k) =>
-            k.property === property &&
-            (property !== 'effectIntensity' || !targetEffectId || k.targetEffectId === targetEffectId))
-        .sort((a, b) => a.time - b.time);
-    if (props.length === 0) return defaultValue;
-
-    // Before first keyframe
-    if (currentTime <= props[0].time) return props[0].value;
-    // After last keyframe
-    if (currentTime >= props[props.length - 1].time) return props[props.length - 1].value;
-
-    // Between keyframes
-    for (let i = 0; i < props.length - 1; i++) {
-        const k1 = props[i];
-        const k2 = props[i + 1];
-        if (currentTime >= k1.time && currentTime < k2.time) {
-            const progress = (currentTime - k1.time) / (k2.time - k1.time);
-            return interpolate(k1.value, k2.value, progress, k2.easing);
-        }
-    }
-    return defaultValue;
+    const props = keyframes.filter((k) =>
+        k.property === property &&
+        (property !== 'effectIntensity' || !targetEffectId || k.targetEffectId === targetEffectId));
+    return interpolateKeyframes(props, currentTime, defaultValue);
 };
 
 type ActiveClipEffect = ClipEffectLayer & { resolvedIntensity: number };
@@ -322,6 +297,10 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
     showControls = true,
 }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    // Monitor playback resolution (Voll/½/¼) caps the FX preview size; undefined = default.
+    const { fxMaxDimension } = useContext(PlaybackResolutionContext);
+    const fxMaxDimensionRef = useRef(fxMaxDimension);
+    fxMaxDimensionRef.current = fxMaxDimension;
     const audioContextRef = useRef<AudioContext | null>(null);
     const mediaElementsRef = useRef<Map<string, HTMLVideoElement | HTMLImageElement | HTMLAudioElement>>(new Map());
     const mediaMapRef = useRef<Map<string, MediaItem>>(new Map());
@@ -620,6 +599,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
             let kfX = getKeyframeValue(clip.keyframes, 'x', keyframeTime, transform.position.x);
             let kfY = getKeyframeValue(clip.keyframes, 'y', keyframeTime, transform.position.y);
             let kfOpacity = getKeyframeValue(clip.keyframes, 'opacity', keyframeTime, transform.opacity);
+            const kfRotation = getKeyframeValue(clip.keyframes, 'rotation', keyframeTime, transform.rotation ?? 0);
 
             // 3. Ken Burns (Additive if enabled, overrides keyframes for simplicity in this demo, or combines)
             // Let's prioritize Ken Burns if enabled, else Keyframes, else Static
@@ -737,6 +717,8 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
             const centerY = (canvas.height * kfY) / 100;
 
             ctx.translate(centerX, centerY);
+            // Rotation (degrees, clockwise) around the clip centre.
+            if (kfRotation) ctx.rotate((kfRotation * Math.PI) / 180);
             ctx.scale(kfScale + outgoingScaleOffset, kfScale + outgoingScaleOffset);
 
             let drawW = 0;
@@ -804,7 +786,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                 if (videoEl.readyState >= 2) {
                     drawW = canvas.width;
                     drawH = drawW / (videoEl.videoWidth / videoEl.videoHeight);
-                    const fxVideo = applyFxStack(videoEl, clip.fxStack, clipTime);
+                    const fxVideo = applyFxStack(videoEl, clip.fxStack, clipTime, { keyframeTime, maxDimension: fxMaxDimensionRef.current });
                     if (hasCustomLut) {
                         drawWithCustomLut(fxVideo);
                     } else {
@@ -824,7 +806,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                         drawH = canvas.height;
                         drawW = canvas.height * ratio;
                     }
-                    const fxImage = applyFxStack(imgEl, clip.fxStack, keyframeTime);
+                    const fxImage = applyFxStack(imgEl, clip.fxStack, keyframeTime, { keyframeTime, maxDimension: fxMaxDimensionRef.current });
                     if (hasCustomLut) {
                         drawWithCustomLut(fxImage);
                     } else {
@@ -1079,7 +1061,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                             }
                             nextDrawW = canvas.width;
                             nextDrawH = nextDrawW / (nextVideo.videoWidth / nextVideo.videoHeight);
-                            drawableSource = applyFxStack(nextVideo, nextTransitionClip.fxStack, nextClipTime);
+                            drawableSource = applyFxStack(nextVideo, nextTransitionClip.fxStack, nextClipTime, { keyframeTime: nextKeyframeTime, maxDimension: fxMaxDimensionRef.current });
                         }
                     } else if (nextMedia.type === 'image') {
                         const nextImage = nextElement as HTMLImageElement;
@@ -1093,7 +1075,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                                 nextDrawH = canvas.height;
                                 nextDrawW = canvas.height * ratio;
                             }
-                            drawableSource = applyFxStack(nextImage, nextTransitionClip.fxStack, nextLocalTime);
+                            drawableSource = applyFxStack(nextImage, nextTransitionClip.fxStack, nextLocalTime, { keyframeTime: nextKeyframeTime, maxDimension: fxMaxDimensionRef.current });
                         }
                     }
 
@@ -1104,6 +1086,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerHandle, PreviewPlayerProps>(({
                         const nextCenterX = (canvas.width * nextTransform.position.x) / 100 + incomingXOffset;
                         const nextCenterY = (canvas.height * nextTransform.position.y) / 100;
                         ctx.translate(nextCenterX, nextCenterY);
+                        if (nextTransform.rotation) ctx.rotate((nextTransform.rotation * Math.PI) / 180);
                         ctx.scale((nextTransform.scale || 1) * incomingScale, (nextTransform.scale || 1) * incomingScale);
                         ctx.filter = nextFilterString.trim() || 'none';
                         ctx.drawImage(drawableSource, -nextDrawW / 2, -nextDrawH / 2, nextDrawW, nextDrawH);

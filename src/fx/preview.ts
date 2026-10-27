@@ -5,7 +5,7 @@
  * never breaks because of an effect.
  */
 import { OfxPreviewCache } from './ofx.ts';
-import { hasActiveFx, needsNativeHost } from './registry.ts';
+import { hasActiveFx, needsNativeHost, resolveStackAtTime } from './registry.ts';
 import { getSharedFxRenderer } from './renderer.ts';
 import type { FxStack } from './types.ts';
 
@@ -37,15 +37,23 @@ const naturalSize = (source: CanvasImageSource): { width: number; height: number
   };
 };
 
+/**
+ * `timeSeconds` drives frame-dependent effects (grain seed); `keyframeTime`
+ * is the clip-local time at which FX keyframes are evaluated (seconds from
+ * the clip's source-in, the same clock as clip keyframes). It defaults to
+ * `timeSeconds` for callers without keyframes.
+ */
 export function applyFxStack(
   source: CanvasImageSource,
-  stack: FxStack | undefined | null,
+  fullStack: FxStack | undefined | null,
   timeSeconds: number,
-  options: { fps?: number; maxDimension?: number } = {},
+  options: { fps?: number; maxDimension?: number; keyframeTime?: number } = {},
 ): CanvasImageSource {
-  if (!hasActiveFx(stack)) return source;
+  if (!hasActiveFx(fullStack)) return source;
   const { width, height } = naturalSize(source);
   if (!width || !height) return source;
+  const stack = resolveStackAtTime(fullStack, options.keyframeTime ?? timeSeconds);
+  if (!hasActiveFx(stack)) return source;
   if (needsNativeHost(stack)) {
     const key = stack.map((entry) => entry.id).join('|');
     let cache = ofxCaches.get(key);
@@ -54,7 +62,8 @@ export function applyFxStack(
       cache = new OfxPreviewCache(notifyPreview);
       ofxCaches.set(key, cache);
     }
-    // Until the host answers the untouched frame is shown.
+    // Until the host answers the untouched frame is shown. The cache key
+    // serialises the resolved stack, so animated params re-render per value.
     return cache.get(source, stack, fxFrameIndex(timeSeconds, options.fps), width, height) ?? source;
   }
   const renderer = getSharedFxRenderer();

@@ -24,6 +24,7 @@ import {
   TextIcon,
   TrashIcon,
 } from '../components/icons';
+import { useLivePage } from '../mcp/livePage';
 
 interface DesignWorkspaceProps {
   designState: DesignCanvasState | null;
@@ -352,6 +353,7 @@ const DesignWorkspace: React.FC<DesignWorkspaceProps> = ({
       });
     }
     onChange(next);
+    return next;
   };
 
   const handlePointerDown = (event: React.PointerEvent, element: DesignCanvasElement, mode: CanvasAction['mode'] = 'move') => {
@@ -409,29 +411,34 @@ const DesignWorkspace: React.FC<DesignWorkspaceProps> = ({
     setDesign((current) => updateDesignElement(current, selectedElement.id, updates));
   };
 
+  /** Generates an image (paid) and adds it to the media bin and as a layer. Throws on errors. */
+  const generateLayer = async (rawPrompt: string) => {
+    const prompt = rawPrompt.trim();
+    if (!prompt) throw new Error('Enter a prompt first.');
+    if (!onGenerateImage) throw new Error('Image generation is not available.');
+    if (apiKeyReady === false) throw new Error('Add a Gemini API key first.');
+    const item = await onGenerateImage(prompt, getGenerationAspectRatio(designRef.current.preset));
+    onAddGeneratedMedia(item);
+    setDesign((current) => addDesignElement(current, {
+      type: 'image',
+      name: item.name || 'AI asset',
+      mediaId: item.id,
+      imageUrl: item.url,
+      prompt,
+      x: Math.round(current.width * 0.18),
+      y: Math.round(current.height * 0.14),
+      width: Math.round(current.width * 0.64),
+      height: Math.round(current.height * 0.58),
+    }));
+    return item;
+  };
+
   const handleGenerateAsset = async () => {
-    const prompt = aiPrompt.trim();
-    if (!prompt || !onGenerateImage) return;
-    if (apiKeyReady === false) {
-      setStatus('Add a Gemini API key first.');
-      return;
-    }
+    if (!aiPrompt.trim() || !onGenerateImage) return;
     setIsGenerating(true);
     setStatus(null);
     try {
-      const item = await onGenerateImage(prompt, getGenerationAspectRatio(design.preset));
-      onAddGeneratedMedia(item);
-      setDesign((current) => addDesignElement(current, {
-        type: 'image',
-        name: item.name || 'AI asset',
-        mediaId: item.id,
-        imageUrl: item.url,
-        prompt,
-        x: Math.round(current.width * 0.18),
-        y: Math.round(current.height * 0.14),
-        width: Math.round(current.width * 0.64),
-        height: Math.round(current.height * 0.58),
-      }));
+      await generateLayer(aiPrompt);
       setStatus('Generated asset added to canvas.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -440,13 +447,20 @@ const DesignWorkspace: React.FC<DesignWorkspaceProps> = ({
     }
   };
 
+  /** Renders the canvas to PNG and hands it to the media bin (and timeline). Throws on errors. */
+  const exportDesign = async (sendToTimeline = false) => {
+    const current = designRef.current;
+    const dataUrl = await renderDesignToPng(current, mediaItems);
+    const name = `${safeFileName(projectName || current.name)}_${current.preset}_${Date.now()}.png`;
+    onExportDesign(dataUrl, name, sendToTimeline);
+    return name;
+  };
+
   const handleExport = async (sendToTimeline = false) => {
     setIsExporting(true);
     setStatus(null);
     try {
-      const dataUrl = await renderDesignToPng(design, mediaItems);
-      const name = `${safeFileName(projectName || design.name)}_${design.preset}_${Date.now()}.png`;
-      onExportDesign(dataUrl, name, sendToTimeline);
+      await exportDesign(sendToTimeline);
       setStatus(sendToTimeline ? 'Exported PNG and sent it to the timeline.' : 'Exported PNG to the media bin.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -454,6 +468,25 @@ const DesignWorkspace: React.FC<DesignWorkspaceProps> = ({
       setIsExporting(false);
     }
   };
+
+  // MCP (design_* tools): the same actions as the buttons while this page is open.
+  useLivePage('design', {
+    settings: { aiPrompt: { value: aiPrompt, set: setAiPrompt, type: 'string' } },
+    info: () => ({ status, isGenerating, isExporting }),
+    actions: {
+      apply_template: (args) => {
+        const kind = args.kind as 'title' | 'thumbnail' | 'lower-third';
+        if (!['title', 'thumbnail', 'lower-third'].includes(kind)) throw new Error('kind must be title, thumbnail or lower-third.');
+        const next = applyTemplate(kind);
+        return { template: kind, layers: next.elements.map((element) => ({ id: element.id, name: element.name, type: element.type })) };
+      },
+      export_png: async (args) => ({ name: await exportDesign(args.sendToTimeline === true), sentToTimeline: args.sendToTimeline === true }),
+      generate_layer: async (args) => {
+        const item = await generateLayer(String(args.prompt ?? ''));
+        return { mediaItem: { id: item.id, name: item.name, url: item.url } };
+      },
+    },
+  });
 
   const sortedElements = [...design.elements].sort((a, b) => b.zIndex - a.zIndex);
   const stageAspect = `${design.width} / ${design.height}`;

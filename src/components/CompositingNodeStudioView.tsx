@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNodeStudioLiveCommands, type NodeStudioLiveProps } from '../workspaces/fusion-shared/useNodeStudioLiveCommands';
 import ReactFlow, { Background, Controls, Handle, MiniMap, Position } from 'reactflow';
 import type { Edge, Node, NodeProps } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -577,6 +578,12 @@ const CompositingNodeStudioView: React.FC<CompositingNodeStudioViewProps> = ({ m
       setIsRendering(false);
     }
   };
+
+  useNodeStudioLiveCommands({
+    graph, updateNode, selectedNodeId, setSelectedNodeId, addedEffects, setAddedEffects, effectGroups: NODE_STUDIO_EFFECT_GROUPS,
+    addEffectNode, aiNodeSettings, updateAiNodeSetting, queueAiNode, playhead, setPlayhead,
+    renderStatus, renderResult, isRendering, renderViewerStill,
+  } as unknown as NodeStudioLiveProps);
 
   const flowNodes = useMemo<Node<StudioNodeData>[]>(() => {
     const base = graph.nodes.map((node) => ({

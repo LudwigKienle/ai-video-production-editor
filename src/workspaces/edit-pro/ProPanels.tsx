@@ -16,6 +16,8 @@ import {
     List,
     MousePointer2,
     MoveHorizontal,
+    PanelRightClose,
+    PanelRightOpen,
     PenTool,
     Redo2,
     RotateCcw,
@@ -27,10 +29,30 @@ import {
 import FxStackPanel from '../../fx/ui/FxStackPanel';
 import { createFxInstance, listFxDefinitions } from '../../fx/registry';
 import type { FxStack } from '../../fx/types';
+import {
+    CLIP_ANIM_DEFAULTS,
+    clipLocalDuration,
+    clipLocalTime,
+    clipTrackKey,
+    getStaticValue,
+    getTrackPoints,
+    listAnimatedTracks,
+    parseTrackKey,
+    setAnimationEnabled,
+    setStaticValue,
+    setValueAtTime,
+    timelineTimeOf,
+    toggleKeyframeAtTime,
+    valueAtTime,
+} from '../../fx/clipAnimation';
+import { KEYFRAME_TIME_TOLERANCE } from '../../fx/keyframes';
+import { TrackNavigator, TrackStopwatch, type KeyframeBinding } from '../../fx/ui/KeyframeControls';
+import KeyframeLane, { useLaneRows } from './KeyframeLane';
+import { registerLiveCommands } from '../../mcp/liveCommands';
 import { EFFECTS, EFFECT_STACK_PRESETS, TRANSITIONS } from '../../constants';
 import { Effect, EffectType, MediaItem, TimelineClip, TimelineTrack, TransitionType, WaveformCache } from '../../types';
 import { TITLE_PRESETS, type TitlePreset } from '../../components/TitlesPanel';
-import { formatTimecode } from '../../utils/timecode';
+import { DEFAULT_TIMELINE_FPS, formatTimecode } from '../../utils/timecode';
 import { getClipEffectLayers } from '../../utils/effects';
 import {
     ALL_PANEL_IDS,
@@ -147,12 +169,45 @@ export const ScrubNumber: React.FC<{
     );
 };
 
-const Section: React.FC<{ id: string; title: string; children: React.ReactNode; onReset?: () => void; defaultOpen?: boolean; badge?: React.ReactNode }> = ({ id, title, children, onReset, defaultOpen = true, badge }) => {
-    const [open, setOpen] = useState(defaultOpen);
+/* Persisted UI state of the Effect Controls panel (collapse states, lane visibility). */
+const FXC_SECTIONS_KEY = 'avpe.pp.fxc.sections.v1';
+const FXC_LANE_KEY = 'avpe.pp.fxc.lane.v1';
+
+const readJson = <T,>(key: string, fallback: T): T => {
+    try {
+        const raw = window.localStorage.getItem(key);
+        return raw ? (JSON.parse(raw) as T) : fallback;
+    } catch {
+        return fallback;
+    }
+};
+const writeJson = (key: string, value: unknown) => {
+    try {
+        window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Storage unavailable (private mode) — state just isn't persisted.
+    }
+};
+
+/** Collapse state of all Effect Controls sections (persisted; also driven by the MCP tool effect_controls_ui). */
+const useSectionStates = () => {
+    const [states, setStates] = useState<Record<string, boolean>>(() => readJson<Record<string, boolean>>(FXC_SECTIONS_KEY, {}));
+    const setSection = (id: string, open: boolean) => setStates((prev) => {
+        const next = { ...prev, [id]: open };
+        writeJson(FXC_SECTIONS_KEY, next);
+        return next;
+    });
+    return [states, setSection] as const;
+};
+
+const SECTION_DEFAULTS: Record<string, boolean> = { motion: true, opacity: true, volume: false, 'gpu-fx': true, 'css-fx': false };
+
+const Section: React.FC<{ id: string; title: string; children: React.ReactNode; onReset?: () => void; open: boolean; onToggle: (open: boolean) => void; badge?: React.ReactNode; summaryKeys?: string[] }> = ({ id, title, children, onReset, open, onToggle, badge, summaryKeys }) => {
+    const setOpen = onToggle;
     return (
         <div className="ppx-section" data-automation-id={`pp.fxc.section.${id}`}>
-            <div className="ppx-section__head">
-                <button type="button" className="ppx-section__toggle" onClick={() => setOpen((prev) => !prev)} aria-expanded={open} data-automation-id={`pp.fxc.section.${id}.toggle`}>
+            <div className="ppx-section__head" data-kf-summary={summaryKeys?.length ? summaryKeys.join(' ') : undefined}>
+                <button type="button" className="ppx-section__toggle" onClick={() => setOpen(!open)} aria-expanded={open} data-automation-id={`pp.fxc.section.${id}.toggle`}>
                     {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     <span>{title}</span>
                     {badge}
@@ -175,6 +230,38 @@ const PropRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label
     </div>
 );
 
+/**
+ * Property row with stopwatch + keyframe navigator. `render` gets the value at
+ * the playhead and a setter that writes a keyframe while animated (or the
+ * constant value otherwise). Without a binding it behaves like PropRow.
+ */
+const KeyedRow: React.FC<{
+    clip: TimelineClip;
+    binding?: KeyframeBinding;
+    trackKey?: string;
+    label: string;
+    automationId: string;
+    onUpdateClip: (clip: TimelineClip) => void;
+    render: (value: number, onChange: (value: number) => void) => React.ReactNode;
+    children?: React.ReactNode;
+}> = ({ clip, binding, trackKey, label, automationId, onUpdateClip, render, children }) => {
+    if (!binding) {
+        if (!trackKey) return <PropRow label={label}>{children}</PropRow>;
+        return <PropRow label={label}>{render(getStaticValue(clip, trackKey), (value) => onUpdateClip(setStaticValue(clip, trackKey, value)))}{children}</PropRow>;
+    }
+    return (
+        <div className="ppx-prop kfx-prop" data-kf-track={trackKey}>
+            {trackKey ? <TrackStopwatch binding={binding} trackKey={trackKey} label={label} automationId={`${automationId}.stopwatch`} /> : <span />}
+            <span className="ppx-prop__label">{label}</span>
+            <span className="ppx-prop__value">
+                {trackKey ? render(binding.valueAt(trackKey), (value) => binding.setValue(trackKey, value)) : null}
+                {children}
+            </span>
+            {trackKey ? <TrackNavigator binding={binding} trackKey={trackKey} label={label} automationId={`${automationId}.keys`} /> : <span />}
+        </div>
+    );
+};
+
 /* ─── Effect Controls ─── */
 
 const BLEND_MODES: Array<{ id: NonNullable<TimelineClip['blendMode']>; label: string }> = [
@@ -189,15 +276,52 @@ const BLEND_MODES: Array<{ id: NonNullable<TimelineClip['blendMode']>; label: st
     { id: 'difference', label: 'Differenz' },
 ];
 
-const DEFAULT_TRANSFORM: NonNullable<TimelineClip['transform']> = { scale: 1, opacity: 1, position: { x: 50, y: 50 } };
+const MOTION_KEYS = [clipTrackKey('x'), clipTrackKey('y'), clipTrackKey('scale'), clipTrackKey('rotation')];
+const OPACITY_KEY = clipTrackKey('opacity');
+const VOLUME_KEY = clipTrackKey('volume');
+const LANE_RULER_HEIGHT = 22;
 
 export const EffectControlsPanel: React.FC<{
     clip: TimelineClip | null;
     media: MediaItem | null;
     trackLabel?: string;
     onUpdateClip: (clip: TimelineClip) => void;
-}> = ({ clip, media, trackLabel, onUpdateClip }) => {
+    /** Timeline playhead in seconds — enables stopwatches, navigators and the keyframe lane. */
+    playhead?: number;
+    /** Moves the timeline playhead (navigator jumps, lane ruler). */
+    onSeek?: (time: number) => void;
+}> = ({ clip, media, trackLabel, onUpdateClip, playhead, onSeek }) => {
     const [dropActive, setDropActive] = useState(false);
+    const [laneOn, setLaneOnState] = useState(() => readJson<boolean>(FXC_LANE_KEY, true));
+    const setLaneOn = (next: boolean) => {
+        setLaneOnState(next);
+        writeJson(FXC_LANE_KEY, next);
+    };
+    const [sectionStates, setSection] = useSectionStates();
+    const leftRef = useRef<HTMLDivElement>(null);
+    const laneColRef = useRef<HTMLDivElement>(null);
+    // UI-local state for the MCP tool effect_controls_ui.
+    const uiRef = useRef({ laneOn, sectionStates, setLaneOn, setSection });
+    uiRef.current = { laneOn, sectionStates, setLaneOn, setSection };
+    useEffect(() => registerLiveCommands({
+        'effectControls.ui': (args) => {
+            const ui = uiRef.current;
+            let laneVisible = ui.laneOn;
+            const sections = { ...SECTION_DEFAULTS, ...ui.sectionStates };
+            if (typeof args.laneVisible === 'boolean') { ui.setLaneOn(args.laneVisible); laneVisible = args.laneVisible; }
+            if (typeof args.section === 'string') {
+                if (!(args.section in SECTION_DEFAULTS)) throw new Error(`Unknown section ${args.section}.`);
+                const open = typeof args.open === 'boolean' ? args.open : !sections[args.section];
+                ui.setSection(args.section, open);
+                sections[args.section] = open;
+            }
+            return { laneVisible, sections };
+        },
+    }), []);
+    const keyframingAvailable = Boolean(clip && playhead !== undefined);
+    const showLane = keyframingAvailable && laneOn;
+    const rows = useLaneRows(leftRef, laneColRef, showLane);
+
     if (!clip) {
         return (
             <div className="ppx-empty" data-automation-id="pp.fxc.empty">
@@ -206,13 +330,37 @@ export const EffectControlsPanel: React.FC<{
             </div>
         );
     }
-    const transform = clip.transform ?? DEFAULT_TRANSFORM;
-    const setTransform = (next: Partial<NonNullable<TimelineClip['transform']>>) => onUpdateClip({ ...clip, transform: { ...transform, ...next, position: { ...transform.position, ...(next.position ?? {}) } } });
     const cssLayers = getClipEffectLayers(clip);
     const isAudio = media?.type === 'audio';
     const name = clip.textConfig?.content || media?.name || 'Clip';
+    const sourceName = media?.name || name;
+
+    // Keyframe clock: clip-local seconds (timeline offset × speed), like the preview.
+    const duration = clipLocalDuration(clip);
+    const local = playhead !== undefined ? clipLocalTime(clip, playhead) : 0;
+    const time = Math.max(0, Math.min(duration, local));
+    const binding: KeyframeBinding | undefined = playhead !== undefined ? {
+        time,
+        canKey: local >= -KEYFRAME_TIME_TOLERANCE && local <= duration + KEYFRAME_TIME_TOLERANCE,
+        tolerance: KEYFRAME_TIME_TOLERANCE,
+        points: (key) => getTrackPoints(clip, key),
+        valueAt: (key) => valueAtTime(clip, key, time),
+        setValue: (key, value) => onUpdateClip(setValueAtTime(clip, key, time, value)),
+        setAnimated: (key, enable) => onUpdateClip(setAnimationEnabled(clip, key, time, enable)),
+        toggleKey: (key) => onUpdateClip(toggleKeyframeAtTime(clip, key, time)),
+        seek: (localTime) => onSeek?.(timelineTimeOf(clip, localTime)),
+    } : undefined;
+    const keyCount = listAnimatedTracks(clip).reduce((sum, key) => sum + getTrackPoints(clip, key).length, 0);
+
+    /** Section reset: animated values get a keyframe with the default at the playhead (NLE behaviour). */
+    const resetKeys = (base: TimelineClip, keys: string[]) => keys.reduce((next, key) => {
+        const parsed = parseTrackKey(key);
+        const fallback = parsed?.kind === 'clip' ? CLIP_ANIM_DEFAULTS[parsed.property] : 0;
+        return binding ? setValueAtTime(next, key, time, fallback) : setStaticValue(next, key, fallback);
+    }, base);
 
     const acceptsFx = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes(FX_DRAG_TYPE);
+    const rowProps = { clip, binding, onUpdateClip };
 
     return (
         <div
@@ -228,64 +376,113 @@ export const EffectControlsPanel: React.FC<{
                 onUpdateClip({ ...clip, fxStack: [...(clip.fxStack ?? []), createFxInstance(fxId)] });
             }}
         >
-            <div className="ppx-fxc__head">
-                <span className="ppx-fxc__seq" title={name}>{trackLabel ? `${trackLabel} · ` : ''}{name}</span>
+            <div className="ppx-fxc__head kfx-head" data-automation-id="pp.fxc.header">
+                <span className="kfx-head__tab" title={`Quellclip: ${sourceName}`} data-automation-id="pp.fxc.header.source">Quelle · {sourceName}</span>
+                <span className="kfx-head__tab kfx-head__tab--active" title={`${trackLabel ? `${trackLabel} · ` : ''}${name}`} data-automation-id="pp.fxc.header.sequence">Sequenz · {name}</span>
                 <span className="ppx-fxc__range">{formatTimecode(clip.start)} – {formatTimecode(clip.end)}</span>
+                {keyframingAvailable && (
+                    <button
+                        type="button"
+                        className={`ppx-icon ${laneOn ? 'ppx-icon--on' : ''}`}
+                        onClick={() => setLaneOn(!laneOn)}
+                        aria-pressed={laneOn}
+                        title={laneOn ? 'Keyframe-Zeitleiste ausblenden' : 'Keyframe-Zeitleiste einblenden'}
+                        data-automation-id="pp.fxc.lane.toggle"
+                    >
+                        {laneOn ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+                    </button>
+                )}
             </div>
-            {!isAudio && (
-                <>
-                    <Section id="motion" title="Bewegung" onReset={() => setTransform({ scale: 1, position: { x: 50, y: 50 } })}>
-                        <PropRow label="Position">
-                            <ScrubNumber label="Position X" automationId="pp.fxc.position-x" value={transform.position.x} min={-100} max={200} step={0.1} decimals={1} defaultValue={50} onChange={(x) => setTransform({ position: { x, y: transform.position.y } })} />
-                            <ScrubNumber label="Position Y" automationId="pp.fxc.position-y" value={transform.position.y} min={-100} max={200} step={0.1} decimals={1} defaultValue={50} onChange={(y) => setTransform({ position: { x: transform.position.x, y } })} />
-                            <span className="ppx-unit">% des Bildes</span>
-                        </PropRow>
-                        <PropRow label="Skalierung">
-                            <ScrubNumber label="Skalierung" automationId="pp.fxc.scale" value={transform.scale} min={0.1} max={3} step={0.005} scale={100} unit=" %" decimals={1} defaultValue={1} onChange={(scale) => setTransform({ scale })} />
-                        </PropRow>
+            <div className={`kfx-body ${showLane ? 'kfx-body--lane' : ''}`}>
+                <div className="kfx-left" ref={leftRef}>
+                    {showLane && (
+                        <div className="kfx-colhead" style={{ height: LANE_RULER_HEIGHT }}>
+                            <strong>{isAudio ? 'Audio' : 'Video'}</strong>
+                            <span data-automation-id="pp.fxc.keycount">{keyCount ? `${keyCount} Keyframe${keyCount === 1 ? '' : 's'}` : 'Keine Keyframes'}</span>
+                        </div>
+                    )}
+                    {!isAudio && (
+                        <>
+                            <Section id="motion" open={sectionStates['motion'] ?? SECTION_DEFAULTS['motion']} onToggle={(open) => setSection('motion', open)} title="Bewegung" summaryKeys={binding ? MOTION_KEYS : undefined} onReset={() => onUpdateClip(resetKeys(clip, MOTION_KEYS))}>
+                                <KeyedRow {...rowProps} trackKey={clipTrackKey('x')} label="Position X" automationId="pp.fxc.position-x" render={(value, onChange) => (
+                                    <><ScrubNumber label="Position X" automationId="pp.fxc.position-x" value={value} min={-100} max={200} step={0.1} decimals={1} defaultValue={50} onChange={onChange} /><span className="ppx-unit">%</span></>
+                                )} />
+                                <KeyedRow {...rowProps} trackKey={clipTrackKey('y')} label="Position Y" automationId="pp.fxc.position-y" render={(value, onChange) => (
+                                    <><ScrubNumber label="Position Y" automationId="pp.fxc.position-y" value={value} min={-100} max={200} step={0.1} decimals={1} defaultValue={50} onChange={onChange} /><span className="ppx-unit">%</span></>
+                                )} />
+                                <KeyedRow {...rowProps} trackKey={clipTrackKey('scale')} label="Skalierung" automationId="pp.fxc.scale" render={(value, onChange) => (
+                                    <ScrubNumber label="Skalierung" automationId="pp.fxc.scale" value={value} min={0.1} max={3} step={0.005} scale={100} unit=" %" decimals={1} defaultValue={1} onChange={onChange} />
+                                )} />
+                                <KeyedRow {...rowProps} trackKey={clipTrackKey('rotation')} label="Drehung" automationId="pp.fxc.rotation" render={(value, onChange) => (
+                                    <ScrubNumber label="Drehung" automationId="pp.fxc.rotation" value={value} min={-3600} max={3600} step={0.5} unit=" °" decimals={1} defaultValue={0} onChange={onChange} />
+                                )} />
+                            </Section>
+                            <Section id="opacity" open={sectionStates['opacity'] ?? SECTION_DEFAULTS['opacity']} onToggle={(open) => setSection('opacity', open)} title="Deckkraft" summaryKeys={binding ? [OPACITY_KEY] : undefined} onReset={() => onUpdateClip({ ...resetKeys(clip, [OPACITY_KEY]), blendMode: 'normal' })}>
+                                <KeyedRow {...rowProps} trackKey={OPACITY_KEY} label="Deckkraft" automationId="pp.fxc.opacity" render={(value, onChange) => (
+                                    <ScrubNumber label="Deckkraft" automationId="pp.fxc.opacity" value={value} min={0} max={1} step={0.005} scale={100} unit=" %" decimals={1} defaultValue={1} onChange={onChange} />
+                                )} />
+                                <KeyedRow {...rowProps} label="Mischmodus" automationId="pp.fxc.blend-mode" render={() => null}>
+                                    <select
+                                        className="ppx-select"
+                                        value={clip.blendMode ?? 'normal'}
+                                        onChange={(event) => onUpdateClip({ ...clip, blendMode: event.target.value as NonNullable<TimelineClip['blendMode']> })}
+                                        data-automation-id="pp.fxc.blend-mode"
+                                    >
+                                        {BLEND_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+                                    </select>
+                                </KeyedRow>
+                            </Section>
+                        </>
+                    )}
+                    <Section id="volume" open={sectionStates.volume ?? isAudio} onToggle={(open) => setSection('volume', open)} title="Lautstärke" summaryKeys={binding ? [VOLUME_KEY] : undefined} onReset={() => onUpdateClip(resetKeys(clip, [VOLUME_KEY]))}>
+                        <KeyedRow {...rowProps} trackKey={VOLUME_KEY} label="Pegel" automationId="pp.fxc.volume" render={(value, onChange) => (
+                            <>
+                                <ScrubNumber label="Clip-Lautstärke" automationId="pp.fxc.volume" value={value} min={0} max={2} step={0.005} scale={100} unit=" %" decimals={0} defaultValue={1} onChange={onChange} />
+                                <span className="ppx-unit">{volumeToDb(value)} dB</span>
+                            </>
+                        )} />
                     </Section>
-                    <Section id="opacity" title="Deckkraft" onReset={() => onUpdateClip({ ...clip, transform: { ...transform, opacity: 1 }, blendMode: 'normal' })}>
-                        <PropRow label="Deckkraft">
-                            <ScrubNumber label="Deckkraft" automationId="pp.fxc.opacity" value={transform.opacity} min={0} max={1} step={0.005} scale={100} unit=" %" decimals={1} defaultValue={1} onChange={(opacity) => setTransform({ opacity })} />
-                        </PropRow>
-                        <PropRow label="Mischmodus">
-                            <select
-                                className="ppx-select"
-                                value={clip.blendMode ?? 'normal'}
-                                onChange={(event) => onUpdateClip({ ...clip, blendMode: event.target.value as NonNullable<TimelineClip['blendMode']> })}
-                                data-automation-id="pp.fxc.blend-mode"
-                            >
-                                {BLEND_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
-                            </select>
-                        </PropRow>
-                    </Section>
-                </>
-            )}
-            <Section id="volume" title="Lautstärke" defaultOpen={isAudio} onReset={() => onUpdateClip({ ...clip, volume: 1 })}>
-                <PropRow label="Pegel">
-                    <ScrubNumber label="Clip-Lautstärke" automationId="pp.fxc.volume" value={clip.volume ?? 1} min={0} max={2} step={0.005} scale={100} unit=" %" decimals={0} defaultValue={1} onChange={(volume) => onUpdateClip({ ...clip, volume })} />
-                    <span className="ppx-unit">{volumeToDb(clip.volume ?? 1)} dB</span>
-                </PropRow>
-            </Section>
-            {!isAudio && (
-                <Section id="gpu-fx" title="GPU-Effekte (Buckswood Post Plugins FX)" badge={clip.fxStack?.length ? <span className="ppx-badge">{clip.fxStack.length}</span> : null}>
-                    <FxStackPanel
-                        stack={clip.fxStack}
-                        onChange={(fxStack: FxStack) => onUpdateClip({ ...clip, fxStack })}
-                        emptyHint="Noch keine GPU-Effekte. Effekt hinzufügen oder aus dem Effekte-Panel hierher ziehen."
-                    />
-                </Section>
-            )}
-            {cssLayers.length > 0 && (
-                <Section id="css-fx" title="Video-Effekte (Looks)" defaultOpen={false}>
-                    {cssLayers.map((layer) => (
-                        <PropRow key={layer.id} label={String(layer.effect)}>
-                            <span className="ppx-unit">Intensität {Math.round((layer.intensity ?? 1) * 100)} %</span>
-                        </PropRow>
-                    ))}
-                    <p className="ppx-hint">Looks bearbeiten und entfernen im Tab „Eigenschaften“.</p>
-                </Section>
-            )}
+                    {!isAudio && (
+                        <Section id="gpu-fx" open={sectionStates['gpu-fx'] ?? SECTION_DEFAULTS['gpu-fx']} onToggle={(open) => setSection('gpu-fx', open)} title="GPU-Effekte (Buckswood Post Plugins FX)" badge={clip.fxStack?.length ? <span className="ppx-badge">{clip.fxStack.length}</span> : null}>
+                            <FxStackPanel
+                                stack={clip.fxStack}
+                                onChange={(fxStack: FxStack) => onUpdateClip({ ...clip, fxStack })}
+                                emptyHint="Noch keine GPU-Effekte. Effekt hinzufügen oder aus dem Effekte-Panel hierher ziehen."
+                                keyframing={binding}
+                            />
+                        </Section>
+                    )}
+                    {cssLayers.length > 0 && (
+                        <Section id="css-fx" open={sectionStates['css-fx'] ?? SECTION_DEFAULTS['css-fx']} onToggle={(open) => setSection('css-fx', open)} title="Video-Effekte (Looks)">
+                            {cssLayers.map((layer) => (
+                                <PropRow key={layer.id} label={String(layer.effect)}>
+                                    <span className="ppx-unit">Intensität {Math.round((layer.intensity ?? 1) * 100)} %</span>
+                                </PropRow>
+                            ))}
+                            <p className="ppx-hint">Looks bearbeiten und entfernen im Tab „Eigenschaften“.</p>
+                        </Section>
+                    )}
+                    {binding && Math.abs(clip.transform?.rotation ?? 0) + (getTrackPoints(clip, clipTrackKey('rotation')).length ? 1 : 0) > 1e-6 && (
+                        <p className="ppx-hint" data-automation-id="pp.fxc.rotation-hint">Drehung wirkt in der Vorschau; der HQ-Export wendet sie noch nicht an.</p>
+                    )}
+                </div>
+                {showLane && (
+                    <div className="kfx-lane-col" ref={laneColRef}>
+                        <KeyframeLane
+                            clip={clip}
+                            duration={duration}
+                            localTime={local}
+                            rows={rows}
+                            rulerHeight={LANE_RULER_HEIGHT}
+                            fps={DEFAULT_TIMELINE_FPS}
+                            onUpdateClip={onUpdateClip}
+                            onSeekLocal={(localTime) => onSeek?.(timelineTimeOf(clip, localTime))}
+                            timelineStart={clip.start}
+                            speed={clip.speed || 1}
+                        />
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

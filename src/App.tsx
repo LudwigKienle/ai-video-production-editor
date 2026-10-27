@@ -79,6 +79,8 @@ import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
 import { registerStudioTools } from './services/localAgentsService';
+import { useSceneMapBridge } from './shotdesigner/useSceneMapBridge';
+import { connectSetDesignSelection } from './shotdesigner/setDesignSelectionSync';
 import { createProjectAgentExecutor, describeAgentTool, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
 import { onStudioConnectActivity } from './services/studioConnectService';
 import LiveConversation from './components/LiveConversation';
@@ -87,6 +89,13 @@ import ProjectHubWorkspace, { type ProjectHubStudioAutomationBindings } from './
 import OutfitWorkspace from './workspaces/OutfitWorkspace';
 import ImportWorkspace from './workspaces/ImportWorkspace';
 import EditWorkspace from './workspaces/EditWorkspace';
+import { normalizeMarkers, type SequenceMarker } from './workspaces/edit-pro/markers';
+import { collectStudioTools, subscribeStudioToolModules, type StudioState, type StudioToolContext } from './mcp/toolModules';
+import type { AnalysisExtra } from './mcp/projectExtras';
+
+// MCP tool modules (src/mcp/modules/*Tools.ts) register themselves on import and are
+// published to the "ai-video-studio" MCP server next to the assistant tools.
+import.meta.glob('./mcp/modules/*Tools.ts', { eager: true });
 import AssetLibraryWorkspace from './workspaces/AssetLibraryWorkspace';
 import DesignWorkspace from './workspaces/DesignWorkspace';
 import ImageGenerationWorkspace from './workspaces/ImageGenerationWorkspace';
@@ -226,6 +235,7 @@ import { analyzeImageAsset, resolveLookAgentSource, runLookAgentTool } from './s
 import { findCreativeDNASceneOverride, resolveCreativeDNAProfile } from './services/creativeDnaService';
 import { env } from './config/env';
 import type { LibraryAsset } from './hooks/useLibraryAssets';
+import { useSetDesignAppBridge } from './setdesign/useSetDesignAppBridge';
 
 type ProjectSyncStatus = {
     state: 'idle' | 'checking' | 'up-to-date' | 'incoming' | 'error';
@@ -939,6 +949,10 @@ function App() {
         resetTimelineClips,
     ] = useHistoryState<TimelineClip[]>([]);
     const [timelineTracks, setTimelineTracks] = useState<TimelineTrack[]>(INITIAL_TRACKS);
+    const [sequenceMarkers, setSequenceMarkers] = useState<SequenceMarker[]>([]);
+    /** Module data published to MCP and saved with the project (compositions, soundMix …). */
+    const [mcpExtras, setMcpExtras] = useState<Record<string, unknown>>({});
+    const handleSoundMixChange = useCallback((mix: unknown) => setMcpExtras(prev => ({ ...prev, soundMix: mix })), []);
     const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
     const [activeTrackId, setActiveTrackId] = useState<string | null>(INITIAL_TRACKS[0]?.id || null);
     const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -1061,6 +1075,21 @@ function App() {
         lastHistoryDomainRef.current = 'shots';
         setShotPromptsWithHistory(nextShotPrompts);
     }, [setShotPromptsWithHistory]);
+    // Scene Map (Kameraplan) ↔ project state for UI and MCP tools (scene_map_*).
+    useSceneMapBridge({
+        setDesign: setDesignState,
+        setSetDesign: setSetDesignState,
+        shotPrompts,
+        setShotPrompts: (next) => setShotPrompts(next),
+        references,
+        sceneMap: sceneMapState,
+        setSceneMap: setSceneMapState,
+        projectPath,
+        projectName: projectName || storyBible.title,
+        openSceneMap: () => setActiveWorkspace('SCENE_MAP'),
+    });
+    // One selection for the 2D camera plan and the 3D set.
+    useEffect(() => connectSetDesignSelection(), [projectPath]);
     const activeProfile = profiles.find(profile => profile.id === activeProfileId) || profiles[0] || null;
     const isDirector = activeProfile?.role === 'director';
     const activeRole = activeProfile?.role || 'artist';
@@ -3058,6 +3087,11 @@ function App() {
             ensureTargeted('video');
             ensureTargeted('audio');
             setTimelineTracks(loadedTracks);
+            setSequenceMarkers(normalizeMarkers((project as { sequenceMarkers?: unknown }).sequenceMarkers));
+            {
+                const raw = (project as { moduleExtras?: unknown }).moduleExtras;
+                setMcpExtras(raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {});
+            }
             setActiveTrackId(loadedTracks[0]?.id || null);
             setWaveformCache(project.waveformCache || {});
             setNodeGraph(project.nodeGraph || null);
@@ -3294,6 +3328,8 @@ function App() {
                     mediaItems,
                     timelineClips,
                     timelineTracks,
+                    sequenceMarkers,
+                    moduleExtras: mcpExtras,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3409,6 +3445,8 @@ function App() {
                     mediaItems,
                     timelineClips,
                     timelineTracks,
+                    sequenceMarkers,
+                    moduleExtras: mcpExtras,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3470,6 +3508,8 @@ function App() {
         mediaItems,
         timelineClips,
         timelineTracks,
+        sequenceMarkers,
+        mcpExtras,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -3527,6 +3567,8 @@ function App() {
         mediaItems,
         timelineClips,
         timelineTracks,
+        sequenceMarkers,
+        mcpExtras,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -7452,6 +7494,95 @@ function App() {
             for (const task of running.values()) task.complete();
         };
     }, []);
+    // Set design: scene commands shared by the workspace UI and agents (setdesign_* tools, published via collectStudioTools).
+    useSetDesignAppBridge({
+        scene: setDesignState,
+        setScene: setSetDesignState,
+        projectKey: projectPath,
+        addMedia: (item) => setMediaItems(prev => [...prev, item]),
+        applyToShot: handleApplySetDesignSnapshotToShot,
+        getReferences: () => projectAgentStateRef.current?.references || [],
+        getShots: () => projectAgentStateRef.current?.shotPrompts || [],
+        setReferences: (update) => setReferencesWithHistory(update),
+        setActiveWorkspace,
+    });
+    // ---- MCP tool context: latest project state + write actions for src/mcp tool modules.
+    const mcpStateRef = useRef<StudioState | null>(null);
+    const mcpNormalizeRef = useRef(normalizeClipTiming);
+    mcpNormalizeRef.current = normalizeClipTiming;
+    mcpStateRef.current = {
+        activeWorkspace,
+        timelineClips,
+        timelineTracks,
+        mediaItems,
+        playheadPosition,
+        selectedClipId,
+        projectPath,
+        // Keys: src/mcp/projectExtras.ts (project fields) + module data in mcpExtras (compositions, soundMix …).
+        extras: {
+            ...mcpExtras,
+            markers: sequenceMarkers,
+            storyBible,
+            references,
+            shotPrompts,
+            reviewData,
+            namingTemplates,
+            sceneMap: sceneMapState,
+            designCanvas: designCanvasState,
+            nodeGraph,
+            worldGen: worldGenState,
+            avatars,
+            setDesign: setDesignState,
+            analysis: { videoUrl: analysisVideoUrl, scriptText: analysisScriptText, result: analysisResult },
+            uiMode,
+            isDirector,
+            allowedWorkspaces,
+        },
+    };
+    const mcpAnalysisVideoUrlRef = useRef(analysisVideoUrl);
+    mcpAnalysisVideoUrlRef.current = analysisVideoUrl;
+    const [mcpModuleRevision, setMcpModuleRevision] = useState(0);
+    useEffect(() => subscribeStudioToolModules(() => setMcpModuleRevision((value) => value + 1)), []);
+    const mcpContextRef = useRef<StudioToolContext>({
+        getState: () => mcpStateRef.current as StudioState,
+        actions: {
+            setActiveWorkspace: (workspace) => setActiveWorkspace(workspace),
+            updateClip: (clip) => setTimelineClips((prev) => prev.map((entry) => (entry.id === clip.id ? mcpNormalizeRef.current(clip) : entry))),
+            setTimelineClips: (clips) => setTimelineClips(clips.map((clip) => mcpNormalizeRef.current(clip))),
+            setTimelineTracks: (tracks) => setTimelineTracks(tracks),
+            addMediaItem: (item) => setMediaItems((prev) => (prev.some((entry) => entry.id === item.id) ? prev : [...prev, item])),
+            setPlayhead: (seconds) => setPlayheadPosition(Math.max(0, seconds)),
+            selectClip: (clipId) => setSelectedClipId(clipId),
+            setExtra: (key, value) => {
+                // Keep the ref current so a second read in the same tool call sees the write.
+                const state = mcpStateRef.current;
+                if (state) state.extras = { ...state.extras, [key]: value };
+                switch (key) {
+                    case 'markers': setSequenceMarkers(normalizeMarkers(value)); break;
+                    case 'storyBible': setStoryBible(value as StoryBible); break;
+                    case 'reviewData': setReviewData(value as ReviewData); break;
+                    case 'namingTemplates': setNamingTemplates(value as NamingTemplate[]); break;
+                    case 'sceneMap': setSceneMapState(value as SceneMapState | null); break;
+                    case 'designCanvas': setDesignCanvasState(value as DesignCanvasState | null); break;
+                    case 'nodeGraph': setNodeGraph(value as NodeGraphState | null); break;
+                    case 'worldGen': setWorldGenState(value as WorldGenerationState | null); break;
+                    case 'avatars': setAvatars(value as AvatarProfile[]); break;
+                    case 'uiMode': setUiMode(value as UIMode); break;
+                    case 'setDesign': setSetDesignState((prev) => ({ ...(prev || buildDefaultSetDesignState()), ...(value as Partial<SetDesignState>) })); break;
+                    case 'analysis': {
+                        const next = value as AnalysisExtra;
+                        if (next.videoUrl !== mcpAnalysisVideoUrlRef.current) setAnalysisVideoFile(null);
+                        setAnalysisVideoUrl(next.videoUrl);
+                        setAnalysisScriptText(next.scriptText);
+                        setAnalysisResult(next.result);
+                        break;
+                    }
+                    default: setMcpExtras((prev) => ({ ...prev, [key]: value }));
+                }
+            },
+        },
+    });
+
     const studioToolSignature = assistantTools.map((tool) => tool.name).join('|');
     useEffect(() => {
         const executor: Record<string, Function> = {};
@@ -7464,9 +7595,14 @@ function App() {
             };
         }
         Object.assign(executor, projectAgentExecutor);
-        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS], executor);
+        const moduleTools = collectStudioTools(() => mcpContextRef.current);
+        for (const [name, run] of Object.entries(moduleTools.executor)) {
+            // Let state written by the previous tool call commit before the next one reads it.
+            executor[name] = async (args: Record<string, unknown>) => { await nextPaint(); return run(args); };
+        }
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...moduleTools.declarations] as FunctionDeclaration[], executor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [studioToolSignature, projectAgentExecutor]);
+    }, [studioToolSignature, projectAgentExecutor, mcpModuleRevision]);
 
     const [apiKeysRevision, setApiKeysRevision] = useState(0);
     const hasAnyApiKeyConfigured = useMemo(() => hasAnyLocalApiKey(), [
@@ -8743,6 +8879,8 @@ function App() {
                     onUpdateMediaItem={(item) => setMediaItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, ...item } : entry))}
                     onAddMediaItems={addMediaItems}
                     onAddClips={addTimelineClips}
+                    sequenceMarkers={sequenceMarkers}
+                    onSequenceMarkersChange={setSequenceMarkers}
                 />
             );
             case 'IMAGE_GEN': return (
@@ -8784,6 +8922,8 @@ function App() {
             case 'SOUND': return (
                 <SoundWorkspace
                     {...commonProps}
+                    soundMix={mcpExtras.soundMix}
+                    onSoundMixChange={handleSoundMixChange}
                     apiKeyReady={apiKeyReady}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
                     onAddToTimeline={(item) => {
@@ -8830,6 +8970,10 @@ function App() {
                     onChange={setSceneMapState}
                     references={references}
                     shotPrompts={shotPrompts}
+                    setDesign={setDesignState}
+                    onSetDesignChange={setSetDesignState}
+                    onShotPromptsChange={(next) => setShotPrompts(next)}
+                    projectName={projectName || storyBible.title}
                 />
             );
             case 'WORLD_GEN': return (
@@ -8843,6 +8987,7 @@ function App() {
             case 'UPSCALE': return (
                 <UpscaleWorkspace
                     apiKeyReady={apiKeyReady}
+                    costRates={effectiveCostRates}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
                     mediaItems={mediaItems}
                     references={references}
@@ -8875,6 +9020,8 @@ function App() {
                     seedVideoUrl={compositingSeedVideo}
                     onConsumeSeed={() => setCompositingSeedVideo(null)}
                     currentProjectPath={projectPath}
+                    compositionsExtra={mcpExtras.compositions}
+                    onCompositionsChange={(store) => setMcpExtras(prev => ({ ...prev, compositions: store }))}
                 />
             );
             case 'ANALYSIS': return (
@@ -8936,7 +9083,7 @@ function App() {
                     onOpenSettings={() => setShowSettings(true)}
                 />
             );
-            case 'EXPORT': return <ExportWorkspace mediaItems={mediaItems} timelineClips={timelineClips} timelineTracks={timelineTracks} projectPath={projectPath} />;
+            case 'EXPORT': return <ExportWorkspace mediaItems={mediaItems} timelineClips={timelineClips} timelineTracks={timelineTracks} projectPath={projectPath} soundMix={mcpExtras.soundMix} />;
             default: return <ScriptWorkspace />;
         }
     };

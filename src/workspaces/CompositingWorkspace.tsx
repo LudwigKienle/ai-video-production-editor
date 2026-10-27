@@ -23,6 +23,8 @@ import NatronCompositorPanel from '../components/NatronCompositorPanel';
 import ArtRelightPanel from '../components/ArtRelightPanel';
 import CompositingNodeStudioView from '../components/CompositingNodeStudioView';
 import { type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
+import { useCompositingAiLiveCommands, type CompositingAiLiveProps } from './fusion-shared/useCompositingAiLiveCommands';
+import CompShell from './fusion-pro/CompShell';
 
 interface CompositingWorkspaceProps extends SharedSequenceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -33,6 +35,9 @@ interface CompositingWorkspaceProps extends SharedSequenceProps {
   /** Places a result on the shared timeline at the playhead. */
   onAddToTimeline?: (item: MediaItem) => void;
   onSwitchToEdit?: () => void;
+  /** `extras.compositions` of the project (Fusion page store). */
+  compositionsExtra?: unknown;
+  onCompositionsChange?: (store: unknown) => void;
 }
 
 type BlendMode = 'source-over' | 'screen' | 'multiply' | 'overlay' | 'soft-light';
@@ -44,6 +49,15 @@ type CorridorKeySourceRole = 'source' | 'alpha';
 type CompositeTab = 'layer' | 'key' | 'relight' | 'pose' | 'reframe' | 'kling';
 
 const CORRIDOR_KEY_REPO_STORAGE_KEY = 'ai-video-studio:corridor-key-repo-path';
+const FUSION_PAGE_MODE_KEY = 'avpe.fusion.pageMode';
+type FusionPageMode = 'comp' | 'tools';
+const loadPageMode = (): FusionPageMode => {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(FUSION_PAGE_MODE_KEY) === 'tools' ? 'tools' : 'comp';
+  } catch {
+    return 'comp';
+  }
+};
 
 const loadImage = (url: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -115,7 +129,11 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
 
   const [corridorKeyRepoPath, setCorridorKeyRepoPath] = useState(() => {
     if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(CORRIDOR_KEY_REPO_STORAGE_KEY) || '';
+    try {
+      return window.localStorage.getItem(CORRIDOR_KEY_REPO_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
   });
   const [corridorKeyEnvStatus, setCorridorKeyEnvStatus] = useState<CorridorKeyStatus | null>(null);
   const [corridorKeySourceFile, setCorridorKeySourceFile] = useState<File | null>(null);
@@ -162,6 +180,15 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
   const [isKlingBridgeRunning, setIsKlingBridgeRunning] = useState(false);
   const [compositingView, setCompositingView] = useState<CompositingWorkspaceView>('tools');
   const [compositeTab, setCompositeTab] = useState<CompositeTab>('layer');
+  const [pageMode, setPageModeState] = useState<FusionPageMode>(loadPageMode);
+  const setPageMode = (mode: FusionPageMode) => {
+    setPageModeState(mode);
+    try {
+      window.localStorage.setItem(FUSION_PAGE_MODE_KEY, mode);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const readyForGeneration = apiKeyReady !== false;
   const hasDesktopCorridorKey = typeof window !== 'undefined' && Boolean(window.electron?.corridorKey);
@@ -349,7 +376,11 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     const folderPath = await window.electron?.project?.selectFolder?.();
     if (!folderPath) return;
     setCorridorKeyRepoPath(folderPath);
-    window.localStorage.setItem(CORRIDOR_KEY_REPO_STORAGE_KEY, folderPath);
+    try {
+      window.localStorage.setItem(CORRIDOR_KEY_REPO_STORAGE_KEY, folderPath);
+    } catch {
+      /* storage unavailable */
+    }
     setCorridorKeyStatus('CorridorKey checkout selected.');
   };
 
@@ -660,6 +691,24 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     setCompositingView(tool.view);
     if (tool.tab) setCompositeTab(tool.tab);
   };
+
+  useCompositingAiLiveCommands({
+    pageMode, setPageMode, tools: FUSION_TOOLS, selectTool, activeToolId: activeTool.id,
+    mediaItems, timelineClips: props.timelineClips, selectedClipId: props.selectedClipId ?? null, readyForGeneration, hasDesktopCorridorKey, onAddToTimeline,
+    setBackgroundMediaId, setBackgroundSource, setBackgroundFile, setOverlayMediaId, setOverlaySource, setOverlayFile,
+    blendMode, setBlendMode, overlayOpacity, setOverlayOpacity, compositeStatus, compositeResult, handleComposite,
+    corridorKeyRepoPath, setCorridorKeyRepoPath, corridorKeyEnvStatus,
+    setCorridorKeySourceMediaId, setCorridorKeySourceKind, setCorridorKeySourceFile, setCorridorKeyAlphaMediaId, setCorridorKeyAlphaKind, setCorridorKeyAlphaFile,
+    corridorKeyOptions, setCorridorKeyOptions, corridorKeyMaxFrames, setCorridorKeyMaxFrames, corridorKeyStatus, corridorKeyResult,
+    handlePrepareCorridorKey, handleRunCorridorKey,
+    openPoseOptions, setOpenPoseOptions, setOpenPoseFile, openPoseStatus, openPoseResult, handleGenerateOpenPose,
+    setMotionVideoUrl, setMotionVideo, setCharacterImage, animateSettings, setAnimateSettings, animateStatus, animateResult, handleAnimateReplace,
+    setReframeVideoMediaId, setReframeVideoSource, setReframeVideoUrl, setReframeVideoFile, reframePrompt, setReframePrompt, reframeAspect, setReframeAspect,
+    reframeGuideFrame, setReframeGuideFrame, reframeUseManualWindow, setReframeUseManualWindow, reframeWindow, setReframeWindow,
+    reframeStatus, reframeResult, handleLumaReframe,
+    klingBridgePrompt, setKlingBridgePrompt, klingBridgeDuration, setKlingBridgeDuration, klingBridgeAspect, setKlingBridgeAspect,
+    klingBridgeStatus, klingBridgeResult, handleKlingBridge,
+  } as unknown as CompositingAiLiveProps);
 
   const left = (
     <div className="fusion-tools">
@@ -1625,16 +1674,39 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
   const toolbar = (
     <div className="edit-toolbar__group">
       <span style={{ color: 'var(--app-accent-strong)' }}><LayersIcon className="w-4 h-4" /></span>
-      <span className="text-sm font-semibold">Fusion</span>
+      <span className="text-sm font-semibold">Fusion · Werkzeuge</span>
       <span className="edit-toolbar__hint">{activeTool.label} · {activeTool.hint}</span>
     </div>
   );
+
+  const toolbarEnd = (
+    <button type="button" className="edit-text-btn edit-text-btn--primary" onClick={() => setPageMode('comp')} data-automation-id="fusion-back-to-comp" title="Zurück zur Komposition (Fusion / After Effects / Nuke)">
+      Zur Komposition
+    </button>
+  );
+
+  if (pageMode === 'comp') {
+    return (
+      <CompShell
+        mediaItems={mediaItems}
+        currentProjectPath={currentProjectPath}
+        onAddGeneratedMedia={onAddGeneratedMedia}
+        onAddToTimeline={onAddToTimeline}
+        clipMedia={timelineMedia && timelineMedia.type !== 'audio' ? timelineMedia : null}
+        clipDuration={timelineClip ? Math.max(0.04, timelineClip.end - timelineClip.start) : null}
+        onOpenTools={() => setPageMode('tools')}
+        extrasStore={props.compositionsExtra}
+        onStoreChange={props.onCompositionsChange}
+      />
+    );
+  }
 
   return (
     <EditorPageShell
       {...props}
       page="fusion"
       toolbar={toolbar}
+      toolbarEnd={toolbarEnd}
       left={left}
       main={main}
       transportPlacement="bar"

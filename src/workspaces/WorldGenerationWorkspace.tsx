@@ -19,8 +19,8 @@ import {
   getWorldModelGeneratedBy,
   getWorldModelLabel,
   getWorldModelOptionsForProvider,
-  normalizeWorldModelId,
 } from '../services/worldModelProviderRegistry';
+import { addWorldEntry, buildWorldEntry, worldMeshToSetDesignAsset } from '../services/worldHistory';
 import { MagicWandIcon, MapIcon, UploadIcon } from '../components/icons';
 
 type WorldMode = 'text' | 'image' | 'video';
@@ -48,15 +48,6 @@ const toDisplayDate = (value?: string) => {
   return parsed.toLocaleString();
 };
 
-const inferModelFormat = (value?: string | null) => {
-  if (!value) return undefined;
-  const clean = value.split('?')[0];
-  const ext = clean.split('.').pop()?.toLowerCase() || '';
-  if (ext === 'glb' || ext === 'gltf' || ext === 'obj' || ext === 'fbx') {
-    return ext;
-  }
-  return undefined;
-};
 
 const WorldGenerationWorkspace: React.FC<WorldGenerationWorkspaceProps> = ({
   worldGen,
@@ -178,34 +169,16 @@ const WorldGenerationWorkspace: React.FC<WorldGenerationWorkspaceProps> = ({
         );
       }
 
-      const assets = getWorldAssetUrls(world);
-      const normalizedModel = normalizeWorldModelId(world.model || model);
-      const entry: WorldGenerationEntry = {
-        id: world.id,
-        name: world.display_name || trimmedName,
-        provider: 'worldlabs',
-        model: normalizedModel,
-        createdAt: world.created_at || new Date().toISOString(),
-        source: {
-          type: mode,
-          prompt: trimmedPrompt || undefined,
-          imageUrl: mode === 'image' ? (trimmedImageUrl || undefined) : undefined,
-          videoUrl: mode === 'video' ? trimmedVideoUrl : undefined,
-          isPano: mode === 'image' ? isPano : undefined,
-        },
-        assets: {
-          viewUrl: assets.viewUrl,
-          thumbnailUrl: assets.thumbnail,
-          panoramaUrl: assets.panorama,
-          meshUrl: assets.colliderMesh,
-          splat100kUrl: assets.splat100k,
-          splat500kUrl: assets.splat500k,
-          splatFullResUrl: assets.splatFullRes,
-        },
-      };
-
-      const nextHistory = [entry, ...worldState.history].slice(0, 50);
-      emitChange({ history: nextHistory });
+      const entry = buildWorldEntry(world, getWorldAssetUrls(world), {
+        mode,
+        name: trimmedName,
+        prompt: trimmedPrompt,
+        imageUrl: trimmedImageUrl,
+        videoUrl: trimmedVideoUrl,
+        isPano,
+        model,
+      });
+      emitChange(addWorldEntry(worldState, entry));
       setSelectedId(entry.id);
       setStatus('World ready.');
     } catch (error) {
@@ -253,16 +226,8 @@ const WorldGenerationWorkspace: React.FC<WorldGenerationWorkspaceProps> = ({
       setStatus('No mesh available to send to Set Design.');
       return;
     }
-    onSendToSetDesign({
-      id: buildId(),
-      name: `${selectedWorld.name} Mesh`,
-      kind: 'model',
-      format: inferModelFormat(selectedWorld.assets.meshUrl) || 'glb',
-      url: selectedWorld.assets.meshUrl,
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-    });
+    const asset = worldMeshToSetDesignAsset(selectedWorld);
+    if (asset) onSendToSetDesign(asset);
     setStatus('Mesh sent to Set Design.');
   };
 

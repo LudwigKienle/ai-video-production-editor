@@ -61,6 +61,7 @@ import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { RELIGHT_DIRECTIONS, RELIGHT_PRESETS, buildRelightPrompt } from '../utils/relight';
 import type { RelightSettings } from '../utils/relight';
 import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
+import { useLivePage } from '../mcp/livePage';
 import { LensSelection } from '../components/LensSelection';
 import { CAMERA_PRESETS, LENS_PRESETS } from '../data/cameraData';
 import { estimateGenerationCost, formatUnitSummary, formatUsd } from '../utils/generationPricing';
@@ -2066,8 +2067,7 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
     }
   };
 
-  const handleExportWorkflow = () => {
-    const workflow = createComfyWorkflow({
+  const buildExportWorkflow = () => createComfyWorkflow({
       baseUrl: normalizeComfyUrl(comfyUrl),
       prompt: finalPrompt || 'Your prompt here',
       negativePrompt,
@@ -2089,6 +2089,9 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
         backgroundText: comfyFreeFuseBackgroundText,
       },
     });
+
+  const handleExportWorkflow = () => {
+    const workflow = buildExportWorkflow();
     const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -3047,6 +3050,182 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
       return true;
     });
   }, [libraryAssets, librarySearch]);
+
+
+  // MCP (image_gen_* tools): settings and buttons of this page as live commands.
+  const str = 'string' as const;
+  const num = 'number' as const;
+  const bool = 'boolean' as const;
+  const json = 'json' as const;
+  const findHistoryEntry = (id: unknown) => {
+    const entry = generationHistory.find((item) => item.id === id) ?? (typeof id === 'number' ? generationHistory[id] : undefined);
+    if (!entry) throw new Error(`History entry ${String(id)} not found.`);
+    return entry;
+  };
+  const addReferenceFromUrl = async (target: 'reference' | 'moodboard', url: string, name: string) => {
+    if (target === 'reference') {
+      if (!supportsReferences) throw new Error('This model does not accept reference images.');
+      if (contextRef.current.length >= referenceLimit) throw new Error(`Only ${referenceLimit} reference images are supported for this model.`);
+    }
+    const file = await fileFromUrl(url, name || target);
+    const entry = { id: `${target === 'reference' ? 'ctx' : 'mood'}-mcp-${Date.now()}`, file, url: URL.createObjectURL(file) };
+    if (target === 'reference') setContextReferences((prev) => [...prev, entry]);
+    else setMoodboard((prev) => [...prev, entry]);
+    return { id: entry.id };
+  };
+  useLivePage('image_gen', {
+    settings: {
+      activeTab: { value: activeTab, set: setActiveTab, type: str, options: ['generate', 'moodboard', 'relight', 'photoreal', 'director'] },
+      prompt: { value: prompt, set: setPrompt, type: str },
+      negativePrompt: { value: negativePrompt, set: setNegativePrompt, type: str },
+      customStyle: { value: customStyle, set: setCustomStyle, type: str },
+      modelId: { value: modelId, set: setModelId, type: str, options: MODEL_OPTIONS.map((option) => option.id) },
+      aspectRatio: { value: aspectRatio, set: setAspectRatio, type: str, options: ASPECT_RATIOS },
+      imageSize: { value: imageSize, set: setImageSize, type: str, options: IMAGE_SIZES },
+      selectedStyleId: { value: selectedStyleId, set: setSelectedStyleId, type: str },
+      selectedShotTypeId: { value: selectedShotTypeId, set: setSelectedShotTypeId, type: str },
+      selectedLightingId: { value: selectedLightingId, set: setSelectedLightingId, type: str },
+      cameraPresetId: { value: cameraPresetId, set: setCameraPresetId, type: str, options: ['auto', ...CAMERA_PRESETS.map((preset) => preset.id)] },
+      lensPresetId: { value: lensPresetId, set: setLensPresetId, type: str, options: ['auto', ...LENS_PRESETS.map((preset) => preset.id)] },
+      customCameraNote: { value: customCameraNote, set: setCustomCameraNote, type: str },
+      customLensNote: { value: customLensNote, set: setCustomLensNote, type: str },
+      smartRouterGoal: { value: smartRouterGoal, set: setSmartRouterGoal, type: str },
+      loraUrl: { value: loraUrl, set: setLoraUrl, type: str },
+      loraScale: { value: loraScale, set: setLoraScale, type: num, min: 0, max: 2 },
+      trainerDestination: { value: trainerDestination, set: setTrainerDestination, type: str },
+      trainerInputImagesUrl: { value: trainerInputImagesUrl, set: setTrainerInputImagesUrl, type: str },
+      trainerTriggerWord: { value: trainerTriggerWord, set: setTrainerTriggerWord, type: str },
+      trainerType: { value: trainerType, set: setTrainerType, type: str, options: ['subject', 'style'] },
+      trainerId: { value: trainerId, set: setTrainerId, type: str },
+      relightSourceUrl: { value: relightSourceUrl, set: setRelightSourceUrl, type: str },
+      relightModel: { value: relightModel, set: setRelightModel, type: str, options: ['gemini', 'replicate'] },
+      relightPresetId: { value: relightPresetId, set: setRelightPresetId, type: str, options: RELIGHT_PRESETS.map((preset) => preset.id) },
+      relightDirectionId: { value: relightDirectionId, set: setRelightDirectionId, type: str, options: RELIGHT_DIRECTIONS.map((direction) => direction.id) },
+      relightIntensity: { value: relightIntensity, set: setRelightIntensity, type: num, min: 0, max: 1 },
+      relightSoftness: { value: relightSoftness, set: setRelightSoftness, type: num, min: 0, max: 1 },
+      relightColor: { value: relightColor, set: setRelightColor, type: str },
+      relightEnvironment: { value: relightEnvironment, set: setRelightEnvironment, type: str },
+      relightNotes: { value: relightNotes, set: setRelightNotes, type: str },
+      photorealSourceUrl: { value: photorealSourceUrl, set: setPhotorealSourceUrl, type: str },
+      directorScript: { value: directorScript, set: setDirectorScript, type: str },
+      librarySearch: { value: librarySearch, set: setLibrarySearch, type: str },
+      comfyUrl: { value: comfyUrl, set: setComfyUrl, type: str },
+      comfyCheckpoint: { value: comfyCheckpoint, set: setComfyCheckpoint, type: str },
+      comfyVae: { value: comfyVae, set: setComfyVae, type: str },
+      comfyClip: { value: comfyClip, set: setComfyClip, type: str },
+      comfyLora: { value: comfyLora, set: setComfyLora, type: str },
+      comfyLoraScale: { value: comfyLoraScale, set: setComfyLoraScale, type: num, min: 0, max: 2 },
+      comfyLoraStackText: { value: comfyLoraStackText, set: setComfyLoraStackText, type: str },
+      comfyUseFreeFuse: { value: comfyUseFreeFuse, set: setComfyUseFreeFuse, type: bool },
+      comfyFreeFuseBackgroundText: { value: comfyFreeFuseBackgroundText, set: setComfyFreeFuseBackgroundText, type: str },
+      comfySteps: { value: comfySteps, set: setComfySteps, type: num, min: 1, max: 200 },
+      comfyCfg: { value: comfyCfg, set: setComfyCfg, type: num, min: 0, max: 30 },
+      comfySampler: { value: comfySampler, set: setComfySampler, type: str, options: COMFY_SAMPLERS },
+      comfyScheduler: { value: comfyScheduler, set: setComfyScheduler, type: str, options: COMFY_SCHEDULERS },
+      comfySeed: { value: comfySeed, set: setComfySeed, type: json },
+      comfyDenoise: { value: comfyDenoise, set: setComfyDenoise, type: num, min: 0, max: 1 },
+      comfyWorkflowMode: { value: comfyWorkflowMode, set: setComfyWorkflowMode, type: str, options: ['auto', 'custom'] },
+      comfyWorkflowJson: { value: comfyWorkflowJson, set: setComfyWorkflowJson, type: str },
+      comfyPatchMap: { value: comfyPatchMap, set: setComfyPatchMap, type: json },
+      comfyChainEnabled: { value: comfyChainEnabled, set: setComfyChainEnabled, type: bool },
+      comfyChainSteps: { value: comfyChainSteps, set: setComfyChainSteps, type: json },
+      comfyPresetName: { value: comfyPresetName, set: setComfyPresetName, type: str },
+      selectedComfyPresetId: { value: selectedComfyPresetId, set: setSelectedComfyPresetId, type: str },
+      comfyLaunchCommand: { value: comfyLaunchCommand, set: setComfyLaunchCommand, type: str },
+      comfyLaunchArgs: { value: comfyLaunchArgs, set: setComfyLaunchArgs, type: str },
+      comfyLaunchCwd: { value: comfyLaunchCwd, set: setComfyLaunchCwd, type: str },
+      comfyAutoStart: { value: comfyAutoStart, set: setComfyAutoStart, type: bool },
+      comfyAutoProfileId: { value: comfyAutoProfileId, set: setComfyAutoProfileId, type: str },
+    },
+    info: () => ({
+      status,
+      finalPrompt,
+      effectiveAspectRatio,
+      referenceLimit,
+      supportsSize,
+      supportsLora,
+      costEstimate: generationCostEstimate,
+      references: contextReferences.map(({ id, url }) => ({ id, url: url.startsWith('blob:') ? 'local file' : url })),
+      moodboard: moodboard.map(({ id }) => ({ id })),
+      activeJobs,
+      latestResults: latestResults.map(({ id, name, url, prompt: itemPrompt, generatedBy }) => ({ id, name, url, prompt: itemPrompt, generatedBy })),
+      history: generationHistory.map(({ id, createdAt, prompt: entryPrompt, modelId: entryModel, aspectRatio: entryAspect }) => ({ id, createdAt, prompt: entryPrompt, modelId: entryModel, aspectRatio: entryAspect })),
+      relightStatus,
+      photorealStatus,
+      photorealResult,
+      directorStatus,
+      directorTreatment,
+      trainerStatus,
+      comfy: { status: comfyStatus, launchStatus: comfyLaunchStatus, health: comfyHealth, healthStatus: comfyHealthStatus, models: comfyModels, presets: comfyPresets.map(({ id, name }) => ({ id, name })), favorites: comfyFavorites, logLines: comfyLogLines.slice(-50), workflowError: comfyWorkflowError },
+      library: filteredLibraryAssets.slice(0, 40).map(({ id, name, url, projectName, prompt: assetPrompt }) => ({ id, name, url, projectName, prompt: assetPrompt })),
+      catalogs: {
+        models: MODEL_OPTIONS.map(({ id, label, provider, goodFor }) => ({ id, label, provider, goodFor, aspectRatios: MODEL_ASPECT_RATIOS[id] ?? ASPECT_RATIOS, referenceLimit: MODEL_REFERENCE_LIMITS[id] ?? 0, pricing: IMAGE_MODEL_PRICING[id] ?? null })),
+        styles: STYLE_PRESETS.map(({ id, label }) => ({ id, label })),
+        shotTypes: SHOT_TYPE_PRESETS.map(({ id, label }) => ({ id, label })),
+        lighting: LIGHTING_PRESETS.map(({ id, label }) => ({ id, label })),
+        cameras: CAMERA_PRESETS.map(({ id, label }) => ({ id, label })),
+        lenses: LENS_PRESETS.map(({ id, label }) => ({ id, label })),
+        relightPresets: RELIGHT_PRESETS.map(({ id, label }) => ({ id, label })),
+        relightDirections: RELIGHT_DIRECTIONS.map(({ id, label }) => ({ id, label })),
+        smartRouterGoals: SMART_ROUTER_GOAL_PRESETS,
+        comfyChainTemplates: COMFY_CHAIN_TEMPLATES.map(({ id, name, description }) => ({ id, name, description })),
+      },
+    }),
+    actions: {
+      generate: () => handleGenerate(),
+      apply_smart_route: (args) => handleApplySmartRoute(typeof args.goal === 'string' ? args.goal : undefined),
+      add_reference: (args) => addReferenceFromUrl('reference', String(args.url ?? args.imagePath ?? ''), String(args.name ?? '')),
+      remove_reference: (args) => handleContextRemove(String(args.id ?? '')),
+      clear_references: () => handleContextClear(),
+      add_moodboard_image: (args) => addReferenceFromUrl('moodboard', String(args.url ?? args.imagePath ?? ''), String(args.name ?? '')),
+      remove_moodboard_image: (args) => handleMoodboardRemove(String(args.id ?? '')),
+      clear_moodboard: () => handleMoodboardClear(),
+      use_library_asset: async (args) => {
+        const asset = libraryAssets.find((item) => item.id === args.assetId);
+        if (!asset) throw new Error(`Library asset ${String(args.assetId)} not found.`);
+        const target = String(args.target ?? 'reference');
+        if (target === 'reference') await addLibraryReference(asset);
+        else if (target === 'moodboard') await addLibraryMoodboard(asset);
+        else if (target === 'relight') addLibraryRelight(asset);
+        else if (target === 'photoreal') addLibraryPhotoreal(asset);
+        else throw new Error('target must be reference, moodboard, relight or photoreal.');
+      },
+      relight: () => handleRelight(),
+      photoreal_check: () => handlePhotorealCheck(),
+      director_plan: () => handleDirectorGenerate(),
+      director_apply_shot: (args) => {
+        const shot = directorTreatment?.shots.find((item) => item.shotNumber === Number(args.shotNumber));
+        if (!shot) throw new Error(`Director shot ${String(args.shotNumber)} not found (run director_plan first).`);
+        handleApplyDirectorShot(shot);
+      },
+      start_lora_training: () => handleStartLoraTraining(),
+      refresh_lora_training: () => handleRefreshLoraTraining(),
+      reuse_history: (args) => handleReuse(findHistoryEntry(args.historyId)),
+      reuse_prompt: (args) => handleReusePrompt(String(args.prompt ?? '')),
+      clear_completed_jobs: () => handleClearCompletedJobs(),
+      animate_in_video_gen: (args) => {
+        const item = latestResults.find((entry) => entry.id === args.mediaId) ?? mediaItems.find((entry) => entry.id === args.mediaId);
+        if (!item) throw new Error(`Image ${String(args.mediaId)} not found.`);
+        if (!onAnimateImage) throw new Error('Animate is not available.');
+        onAnimateImage(item);
+      },
+      comfy_connect: () => handleComfyConnect(),
+      comfy_start: () => handleComfyStart(),
+      comfy_stop: () => handleComfyStop(),
+      comfy_refresh_status: () => handleComfyRefreshStatus(),
+      comfy_health_check: () => handleComfyHealthCheck(),
+      comfy_load_logs: () => handleComfyLoadLogs(),
+      comfy_clear_logs: () => handleComfyClearLogs(),
+      comfy_save_preset: () => saveComfyPreset(),
+      comfy_apply_preset: (args) => applyComfyPreset(String(args.presetId ?? '')),
+      comfy_delete_preset: () => deleteComfyPreset(),
+      comfy_toggle_favorite: (args) => toggleFavorite(String(args.group) as keyof typeof comfyFavorites, String(args.value ?? '')),
+      comfy_apply_chain_template: (args) => applyComfyChainTemplate(String(args.templateId ?? '')),
+      comfy_add_chain_step: () => addComfyChainStep(),
+      comfy_remove_chain_step: (args) => removeComfyChainStep(String(args.stepId ?? '')),
+      comfy_export_workflow: () => ({ workflow: buildExportWorkflow() }),
+    },
+  });
 
   return (
     <div className="studio-workspace p-6 h-full overflow-auto">

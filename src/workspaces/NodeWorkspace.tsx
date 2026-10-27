@@ -76,11 +76,13 @@ import { getBase64FromUrl } from '../utils/helpers';
 import { FILM_LUTS, buildFilterString, getBloomStrength, getGrainStrength, getHalationStrength, getVignetteStrength, normalizeFilters } from '../utils/colorGrading';
 import { applyCubeLutToImageData, parseCubeLut } from '../utils/lut';
 import { LibraryAsset, useLibraryAssets } from '../hooks/useLibraryAssets';
+import { useLivePage } from '../mcp/livePage';
 import {
   paletteGroupLabels,
   paletteGroupOrder,
   paletteItems,
   quickTemplateOptions,
+  NODE_PORTS,
   type NodeKind,
   type PaletteGroupId,
   type PaletteItem,
@@ -3318,6 +3320,131 @@ const NodeWorkspaceContent: React.FC<NodeWorkspaceProps> = ({
   }, [pipelineNeedsApi, validation.pipelines]);
 
   const readyForRun = validation.pipelines.length > 0 && (apiKeyReady !== false || !requiresApi);
+
+  // MCP (nodes_* tools): graph editing, templates, layout and Run as live commands.
+  const nodeById = (id: unknown) => {
+    const node = nodes.find((entry) => entry.id === id);
+    if (!node) throw new Error(`Node ${String(id)} not found.`);
+    return node;
+  };
+  const dataUpdates = (node: Node<NodeData>, args: Record<string, unknown>): Partial<NodeData> => {
+    const updates: Partial<NodeData> = {};
+    if (typeof args.label === 'string') updates.label = args.label;
+    if (args.value !== undefined) updates.value = args.value === null ? '' : String(args.value);
+    if (typeof args.selected === 'string') updates.selected = args.selected;
+    if (args.params && typeof args.params === 'object') updates.params = { ...(node.data.params || {}), ...(args.params as Record<string, unknown>) } as NodeData['params'];
+    return updates;
+  };
+  useLivePage('nodes', {
+    settings: {
+      executionMode: { value: executionMode, set: setExecutionMode, type: 'string', options: ['local', 'cloud', 'hybrid'] },
+      safetyMode: { value: safetyMode, set: setSafetyMode, type: 'string', options: ['draft', 'review', 'locked'] },
+      paletteSearch: { value: paletteSearch, set: setPaletteSearch, type: 'string' },
+      activePaletteGroup: { value: activePaletteGroup, set: setActivePaletteGroup, type: 'string', options: ['all', ...paletteGroupOrder] },
+      librarySearch: { value: librarySearch, set: setLibrarySearch, type: 'string' },
+    },
+    info: () => ({
+      nodes: nodes.map((node) => {
+        const { previewUrl, previewType, ...params } = (node.data.params || {}) as Record<string, unknown>;
+        return { id: node.id, type: node.type, position: node.position, label: node.data.label, value: node.data.value, selected: node.data.selected, options: node.data.options, params, preview: previewUrl ? { url: previewUrl, type: previewType } : null };
+      }),
+      edges: edges.map(({ id, source, sourceHandle, target, targetHandle }) => ({ id, source, sourceHandle, target, targetHandle })),
+      selectedNodeId,
+      validation: { errors: validation.errors, targets: validation.pipelines.map((pipeline) => ({ nodeId: pipeline.nodeId, kind: pipeline.kind, model: pipeline.model })) },
+      readyForRun,
+      requiresApi,
+      isRunning,
+      runStatus,
+      runTrace,
+      runResults: runResults.map(({ id, name, type, url, generatedBy }) => ({ id, name, type, url, generatedBy })),
+      runTextResults,
+      library: filteredLibraryAssets.slice(0, 40).map(({ id, name, url, kind }) => ({ id, name, url, kind })),
+      catalogs: {
+        nodeTypes: paletteItems.map((item) => ({ ...item, ports: NODE_PORTS[item.type] })),
+        templates: quickTemplateOptions,
+        imageModels: [...IMAGE_MODEL_SET],
+        videoModels: [...VIDEO_MODEL_SET],
+        imageUpscalers: [...UPSCALE_IMAGE_SET],
+        videoUpscalers: [...UPSCALE_VIDEO_SET],
+      },
+    }),
+    actions: {
+      add_node: (args) => {
+        const type = String(args.type) as NodeKind;
+        if (!NODE_PORTS[type]) throw new Error(`Unknown node type ${type}.`);
+        const viewportNow = getViewport();
+        const position = {
+          x: typeof args.x === 'number' ? args.x : Math.round((220 - viewportNow.x) / viewportNow.zoom),
+          y: typeof args.y === 'number' ? args.y : Math.round((160 - viewportNow.y) / viewportNow.zoom),
+        };
+        const created = createNodeInstance(type, position);
+        const node = { ...created, data: { ...created.data, ...dataUpdates(created, args) } };
+        const [withHandlers] = attachNodeHandlers([node]);
+        setNodes((prev) => prev.concat(withHandlers));
+        setSelectedNodeId(withHandlers.id);
+        if (type === 'imageInput') setSelectedImageNodeId(withHandlers.id);
+        return { nodeId: withHandlers.id };
+      },
+      update_node: (args) => {
+        const node = nodeById(args.nodeId);
+        handleNodeDataChange(node.id, dataUpdates(node, args));
+        if (typeof args.x === 'number' || typeof args.y === 'number') {
+          setNodes((prev) => prev.map((entry) => (entry.id === node.id ? { ...entry, position: { x: typeof args.x === 'number' ? args.x : entry.position.x, y: typeof args.y === 'number' ? args.y : entry.position.y } } : entry)));
+        }
+        return { nodeId: node.id };
+      },
+      select_node: (args) => {
+        const node = args.nodeId ? nodeById(args.nodeId) : null;
+        setSelectedNodeId(node?.id ?? null);
+        if (node?.type === 'imageInput') setSelectedImageNodeId(node.id);
+      },
+      duplicate_node: (args) => {
+        const node = nodeById(args.nodeId);
+        const clone = createNodeInstance(node.type as NodeKind, { x: node.position.x + 60, y: node.position.y + 60 }, node.data);
+        const [withHandlers] = attachNodeHandlers([clone]);
+        setNodes((prev) => prev.concat(withHandlers));
+        setSelectedNodeId(withHandlers.id);
+        return { nodeId: withHandlers.id };
+      },
+      delete_node: (args) => {
+        const node = nodeById(args.nodeId);
+        setEdges((prev) => prev.filter((edge) => edge.source !== node.id && edge.target !== node.id));
+        setNodes((prev) => prev.filter((entry) => entry.id !== node.id));
+        if (selectedImageNodeId === node.id) setSelectedImageNodeId(null);
+        if (selectedNodeId === node.id) setSelectedNodeId(null);
+        return { removed: node.id };
+      },
+      connect: (args) => {
+        const source = nodeById(args.source);
+        const target = nodeById(args.target);
+        const sourceHandle = typeof args.sourceHandle === 'string' ? args.sourceHandle : NODE_PORTS[source.type as NodeKind]?.output;
+        const inputs = NODE_PORTS[target.type as NodeKind]?.inputs ?? [];
+        const targetHandle = typeof args.targetHandle === 'string' ? args.targetHandle : inputs[0];
+        if (!sourceHandle) throw new Error(`${source.type} has no output.`);
+        if (!targetHandle || !inputs.includes(targetHandle)) throw new Error(`${target.type} inputs: ${inputs.join(', ') || 'none'}.`);
+        onConnect({ source: source.id, target: target.id, sourceHandle, targetHandle });
+        return { source: source.id, sourceHandle, target: target.id, targetHandle };
+      },
+      disconnect: (args) => {
+        if (!edges.some((edge) => edge.id === args.edgeId)) throw new Error(`Connection ${String(args.edgeId)} not found.`);
+        setEdges((prev) => prev.filter((edge) => edge.id !== args.edgeId));
+      },
+      insert_template: (args) => {
+        if (!quickTemplateOptions.some((option) => option.id === args.templateId)) throw new Error(`Unknown template ${String(args.templateId)}.`);
+        handleInsertQuickTemplate(String(args.templateId));
+      },
+      auto_layout: () => handleAutoSpace(),
+      use_library_asset: (args) => {
+        const node = nodeById(args.nodeId);
+        if (node.type !== 'imageInput') throw new Error('Library assets go into an Image In node.');
+        const asset = libraryAssets.find((entry) => entry.id === args.assetId);
+        if (!asset?.url) throw new Error(`Library asset ${String(args.assetId)} not found.`);
+        handleNodeDataChange(node.id, { value: asset.url });
+      },
+      run: () => handleRun(),
+    },
+  });
+
   const shouldFitView = !nodeGraph?.viewport;
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) || null,

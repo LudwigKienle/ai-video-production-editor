@@ -1,14 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AvatarProfile, MediaItem } from '../types';
-import {
-  generateVideoWithOmniHuman,
-  generateVideoWithWanAnimateReplace,
-  generateVideoWithWanI2V,
-  generateVideoWithKling26,
-  generateVideoWithKlingMotionControl,
-} from '../services/replicateService';
+import { generateAvatarVideo, type AvatarModelMode } from '../services/avatarGeneration';
 import { ElevenLabsVoice, fetchElevenLabsVoices, generateSpeechWithElevenLabs } from '../services/elevenLabsService';
-import { generateVideoWithFalCreatifyAurora } from '../services/falAiService';
 import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
 import { AddIcon, UploadIcon, UserCircleIcon, WandSparklesIcon } from '../components/icons';
 
@@ -18,7 +11,7 @@ interface AvatarWorkspaceProps {
   onAddGeneratedMedia?: (item: MediaItem) => void;
 }
 
-type ModelMode = 'omni-human' | 'wan-replace' | 'wan-i2v' | 'kling-26' | 'kling-motion' | 'aurora-fal';
+type ModelMode = AvatarModelMode;
 
 const VOICE_MODEL_OPTIONS = [
   { id: 'eleven_multilingual_v2', label: 'Multilingual v2' },
@@ -262,64 +255,28 @@ const AvatarWorkspace: React.FC<AvatarWorkspaceProps> = ({ avatars, onUpdateAvat
         }
         return null;
       };
-      let item: MediaItem | null = null;
-
-      if (modelMode === 'omni-human') {
-        const audioPayload = await resolveAudioPayload();
-        if (!audioPayload) {
-          alert('Please provide audio or voiceover text.');
-          return;
-        }
-        setStatus('Generating OmniHuman video...');
-        item = await generateVideoWithOmniHuman(avatarPayload, audioPayload);
-      } else if (modelMode === 'wan-replace') {
-        const videoPayload = await fileToPayload(videoFile);
-        setStatus('Running Wan Animate Replace...');
-        item = await generateVideoWithWanAnimateReplace(videoPayload, avatarPayload, {
-          resolution: wanResolution,
-          fps: wanFps,
-          refertNum: wanRefertNum,
-          mergeAudio: wanMergeAudio,
-          goFast: wanGoFast,
-        });
-      } else if (modelMode === 'wan-i2v') {
-        setStatus('Animating with Wan 2.2...');
-        item = await generateVideoWithWanI2V(prompt, avatarPayload, {
-          resolution: wanResolution === '480' ? '480p' : '720p',
-          fps: wanFps,
-          numFrames: wanFrames,
-          interpolate: wanInterpolate,
-        });
-      } else if (modelMode === 'kling-26') {
-        const startImagePayload = startImageFile ? await fileToPayload(startImageFile) : undefined;
-        setStatus('Generating Kling 2.6 video...');
-        item = await generateVideoWithKling26(prompt, {
-          startImage: startImagePayload,
-          aspectRatio: klingAspect,
-          duration: klingDuration,
-          generateAudio: klingAudio,
-          negativePrompt: negativePrompt || '',
-        });
-      } else if (modelMode === 'kling-motion') {
-        const videoPayload = await fileToPayload(videoFile);
-        setStatus('Driving motion with Kling...');
-        item = await generateVideoWithKlingMotionControl(prompt, avatarPayload, videoPayload, {
-          mode: klingMode,
-          keepOriginalSound: klingKeepSound,
-          characterOrientation: klingOrientation,
-        });
-      } else if (modelMode === 'aurora-fal') {
-        const audioPayload = await resolveAudioPayload();
-        if (!audioPayload) {
-          alert('Please provide audio or voiceover text.');
-          return;
-        }
-        setStatus('Generating Aurora avatar video...');
-        item = await generateVideoWithFalCreatifyAurora(avatarPayload, audioPayload, {
-          prompt: prompt.trim() || undefined,
-          resolution: auroraResolution,
-        });
+      const needsAudio = modelMode === 'omni-human' || modelMode === 'aurora-fal';
+      const audioPayload = needsAudio ? await resolveAudioPayload() : null;
+      if (needsAudio && !audioPayload) {
+        alert('Please provide audio or voiceover text.');
+        return;
       }
+      const needsVideo = modelMode === 'wan-replace' || modelMode === 'kling-motion';
+      const item: MediaItem | null = await generateAvatarVideo({
+        mode: modelMode,
+        avatarImage: avatarPayload,
+        prompt,
+        negativePrompt,
+        audio: audioPayload,
+        video: needsVideo && videoFile ? await fileToPayload(videoFile) : null,
+        startImage: modelMode === 'kling-26' && startImageFile ? await fileToPayload(startImageFile) : null,
+        settings: {
+          wanResolution, wanFps, wanRefertNum, wanMergeAudio, wanGoFast, wanFrames, wanInterpolate,
+          klingAspect, klingDuration, klingAudio, klingMode, klingKeepSound, klingOrientation,
+          auroraResolution,
+        },
+        onStatus: setStatus,
+      });
 
       if (item) {
         onAddGeneratedMedia(item);

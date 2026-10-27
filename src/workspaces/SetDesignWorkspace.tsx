@@ -74,6 +74,10 @@ import {
 } from '../services/falAiService';
 import type { SetDesignCameraKeyframe, SetDesignCameraPath } from '../types';
 import { CameraIcon, MagicWandIcon, TrashIcon, UploadIcon } from '../components/icons';
+import SetProWorkspace from './set-pro/SetProWorkspace';
+import { registerLiveCommands } from '../mcp/liveCommands';
+import { buildPrimitiveObject } from '../setdesign/sceneBuilder';
+import { CAMERA_MOVE_PRESETS, DEFAULT_CAMERA_PATH, evaluateCameraPath, resolveLensFov, sortKeyframes } from '../setdesign/cameraPath';
 
 type TransformMode = 'translate' | 'rotate' | 'scale';
 type AiDirectorMessage = { id: string; role: 'user' | 'assistant'; text: string };
@@ -112,111 +116,6 @@ const BLOCKOUT_ENGINES: Array<{ id: BlockoutEngine; label: string; hint: string;
   { id: 'rodin-replicate', label: 'Rodin (Replicate)', hint: 'Legacy route via your Replicate key.', provider: 'replicate' },
 ];
 
-const DEFAULT_CAMERA_PATH: SetDesignCameraPath = {
-  keyframes: [],
-  durationSeconds: 6,
-  fps: 24,
-  loop: false,
-  easing: 'smooth',
-};
-
-const smoothstep = (value: number) => {
-  const t = Math.min(1, Math.max(0, value));
-  return t * t * (3 - 2 * t);
-};
-
-const sortKeyframes = (keyframes: SetDesignCameraKeyframe[]) =>
-  [...keyframes].sort((a, b) => a.time - b.time);
-
-/**
- * Evaluates the camera pose at `time` along the keyframed path. Positions and
- * look-at targets follow a centripetal Catmull-Rom spline so dolly and crane
- * moves stay smooth; timing between keyframes is respected exactly.
- */
-const evaluateCameraPath = (path: SetDesignCameraPath | undefined, time: number): SetDesignCamera | null => {
-  if (!path || path.keyframes.length === 0) return null;
-  const keyframes = sortKeyframes(path.keyframes);
-  if (keyframes.length === 1) return keyframes[0].camera;
-  const first = keyframes[0];
-  const last = keyframes[keyframes.length - 1];
-  if (time <= first.time) return first.camera;
-  if (time >= last.time) return last.camera;
-
-  let index = 0;
-  while (index < keyframes.length - 2 && keyframes[index + 1].time <= time) index += 1;
-  const a = keyframes[index];
-  const b = keyframes[index + 1];
-  const span = Math.max(0.0001, b.time - a.time);
-  const rawU = (time - a.time) / span;
-  const u = path.easing === 'linear' ? rawU : smoothstep(rawU);
-
-  const positions = keyframes.map((kf) => new THREE.Vector3(kf.camera.position.x, kf.camera.position.y, kf.camera.position.z));
-  const targets = keyframes.map((kf) => new THREE.Vector3(kf.camera.target.x, kf.camera.target.y, kf.camera.target.z));
-  const positionCurve = new THREE.CatmullRomCurve3(positions, false, 'centripetal');
-  const targetCurve = new THREE.CatmullRomCurve3(targets, false, 'centripetal');
-  const globalParam = (index + u) / (keyframes.length - 1);
-  const position = positionCurve.getPoint(globalParam);
-  const target = targetCurve.getPoint(globalParam);
-  const fov = a.camera.fov + (b.camera.fov - a.camera.fov) * u;
-  return {
-    position: { x: position.x, y: position.y, z: position.z },
-    target: { x: target.x, y: target.y, z: target.z },
-    fov,
-  };
-};
-
-const CAMERA_MOVE_PRESETS: Array<{ id: string; label: string; build: (base: SetDesignCamera) => SetDesignCamera[] }> = [
-  {
-    id: 'push-in',
-    label: 'Push in',
-    build: (base) => {
-      const dir = new THREE.Vector3(base.target.x - base.position.x, base.target.y - base.position.y, base.target.z - base.position.z);
-      const distance = dir.length();
-      dir.normalize();
-      const end = new THREE.Vector3(base.position.x, base.position.y, base.position.z).addScaledVector(dir, distance * 0.45);
-      return [base, { ...base, position: { x: end.x, y: end.y, z: end.z } }];
-    },
-  },
-  {
-    id: 'orbit',
-    label: 'Orbit 90°',
-    build: (base) => {
-      const center = new THREE.Vector3(base.target.x, base.target.y, base.target.z);
-      const offset = new THREE.Vector3(base.position.x, base.position.y, base.position.z).sub(center);
-      const frames: SetDesignCamera[] = [];
-      for (let i = 0; i <= 3; i += 1) {
-        const angle = (Math.PI / 2) * (i / 3);
-        const rotated = offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).add(center);
-        frames.push({ ...base, position: { x: rotated.x, y: rotated.y, z: rotated.z } });
-      }
-      return frames;
-    },
-  },
-  {
-    id: 'crane-up',
-    label: 'Crane up',
-    build: (base) => [
-      base,
-      { ...base, position: { x: base.position.x, y: base.position.y + 3, z: base.position.z } },
-    ],
-  },
-  {
-    id: 'dolly-left',
-    label: 'Dolly left',
-    build: (base) => {
-      const forward = new THREE.Vector3(base.target.x - base.position.x, 0, base.target.z - base.position.z).normalize();
-      const left = new THREE.Vector3(-forward.z, 0, forward.x).multiplyScalar(2.5);
-      return [
-        base,
-        {
-          ...base,
-          position: { x: base.position.x + left.x, y: base.position.y, z: base.position.z + left.z },
-          target: { x: base.target.x + left.x, y: base.target.y, z: base.target.z + left.z },
-        },
-      ];
-    },
-  },
-];
 
 const DEFAULT_SET_DESIGN: SetDesignState = {
   assets: [],
@@ -331,6 +230,8 @@ const createPrimitive = (asset: SetDesignAsset) => {
     opacity: asset.material?.opacity ?? 1.0,
   });
 
+  // Primitives added in the Blender-style workspace use its geometry.
+  if (asset.primitive && !['box', 'sphere', 'plane'].includes(asset.primitive)) return buildPrimitiveObject(asset);
   switch (asset.primitive) {
     case 'sphere':
       return new THREE.Mesh(new THREE.SphereGeometry(0.6, 32, 32), material);
@@ -365,17 +266,6 @@ const buildLight = (light: SetDesignLight) => {
   }
   configureDirectionalShadow(dir);
   return dir;
-};
-
-const focalToFov = (focalLength: number, sensor = 36) => {
-  return (2 * Math.atan(sensor / (2 * focalLength)) * 180) / Math.PI;
-};
-
-const resolveLensFov = (lensPresetId?: string) => {
-  if (!lensPresetId) return 45;
-  const match = lensPresetId.match(/(\d{2,3})/);
-  const focal = match ? Number(match[1]) : 50;
-  return Math.min(90, Math.max(25, focalToFov(focal)));
 };
 
 const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
@@ -471,6 +361,14 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     setSceneState(next);
     onChange(next);
   }, [onChange]);
+
+  /** Keep the HDRI in the project (world.hdriUrl) so the Blender-style tabs and agents see it. */
+  const saveHdriToScene = useCallback((url: string | null) => {
+    const current = sceneStateRef.current;
+    const world = { color: '#3d3d40', strength: 1, ...(current.world || {}) };
+    if (url) world.hdriUrl = url; else { delete world.hdriUrl; delete world.hdriBackground; }
+    emitChange({ ...current, world });
+  }, [emitChange]);
 
   useEffect(() => {
     sceneStateRef.current = sceneState;
@@ -1196,11 +1094,11 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
   const [aiProcessing, setAiProcessing] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
 
-  const applyAiMutations = async (prompt: string) => {
-    if (!prompt.trim()) return;
+  const applyAiMutations = async (prompt: string): Promise<string> => {
+    if (!prompt.trim()) return 'Empty instruction.';
     if (apiKeyReady === false) {
       setAiStatus('Add API keys in Settings to enable AI Director.');
-      return;
+      return 'Add API keys in Settings to enable AI Director.';
     }
     const hasDirectorKey = (() => {
       if (typeof window === 'undefined') return false;
@@ -1212,7 +1110,7 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     })();
     if (!hasDirectorKey) {
       setAiStatus('Add a Gemini or Replicate API key to enable AI Director.');
-      return;
+      return 'Add a Gemini or Replicate API key to enable AI Director.';
     }
     setAiProcessing(true);
     setAiStatus('Director is thinking...');
@@ -1441,11 +1339,13 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
       emitChange(nextState);
       setAiStatus(finalReply);
       setAiInput('');
+      return finalReply;
 
     } catch (error) {
       console.error(error);
       setAiStatus('Director error.');
       setAiMessages(prev => [...prev, { id: buildId(), role: 'assistant', text: 'Director error.' }]);
+      return 'Director error.';
     } finally {
       setAiProcessing(false);
     }
@@ -1679,6 +1579,7 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     revokeHdriObjectUrl();
     setHdrUrlInput(normalized);
     setHdrUrl(normalized);
+    saveHdriToScene(normalized);
   }, [hdrUrlInput, revokeHdriObjectUrl]);
 
   const handleImportHdriFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1710,6 +1611,7 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     setHdrUrl('');
     setUseHdriBackground(false);
     setRenderStatus('HDRI environment cleared.');
+    saveHdriToScene(null);
   }, [revokeHdriObjectUrl]);
 
   const handleApplyHdriPackItem = useCallback((item: PackedAssetItem) => {
@@ -1722,6 +1624,7 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     setHdrUrlInput(nextUrl);
     setHdrUrl(nextUrl);
     setRenderStatus(`HDRI pack applied: ${item.label}`);
+    saveHdriToScene(nextUrl);
   }, [revokeHdriObjectUrl]);
 
   const handleApplyRenderPresetItem = useCallback((item: PackedAssetItem) => {
@@ -2187,6 +2090,87 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
       scale: { x: 1, y: 1, z: 1 },
     });
   };
+
+  // HDRI set elsewhere (Blender-style tabs, agents) shows here too.
+  const savedHdri = sceneState.world?.hdriUrl || '';
+  const savedHdriBackground = sceneState.world?.hdriBackground;
+  useEffect(() => {
+    if (savedHdri && savedHdri !== hdrUrl) {
+      setHdrUrlInput(savedHdri);
+      setHdrUrl(savedHdri);
+    } else if (!savedHdri && hdrUrl && !hdrUrl.startsWith('blob:')) {
+      setHdrUrlInput('');
+      setHdrUrl('');
+    }
+    if (savedHdriBackground !== undefined) setUseHdriBackground(savedHdriBackground);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedHdri, savedHdriBackground]);
+
+  // Live commands: agents (MCP setdesign_*) drive what only exists on this page.
+  const liveRef = useRef<Record<string, unknown>>({});
+  liveRef.current = {
+    handlePlayCamera, handlePauseCamera, handleStopCamera, handleRecordCameraMove, handleApplyRenderPresetItem, applyAiMutations,
+    cameraPath, sortedKeyframes, cameraStatus,
+    render: { quality: renderQuality, exposure: renderExposure, sky: skyEnabled, sun: sunEnabled, sunAzimuth, sunElevation, sunIntensity, hdriBackground: useHdriBackground, hdri: hdrUrl || null },
+  };
+  useEffect(() => registerLiveCommands({
+    'setdesign.classic.playback': (args) => {
+      const l = liveRef.current as any;
+      const action = String(args.action || '');
+      if (action === 'play') {
+        if (l.sortedKeyframes.length < 2) throw new Error('Add at least two keyframes to play a move.');
+        l.handlePlayCamera();
+      } else if (action === 'pause') l.handlePauseCamera();
+      else if (action === 'stop') l.handleStopCamera();
+      else throw new Error('action must be play, pause or stop.');
+      return { action, durationSeconds: l.cameraPath.durationSeconds, keyframes: l.sortedKeyframes.length };
+    },
+    'setdesign.classic.record': async () => {
+      const l = liveRef.current as any;
+      if (l.sortedKeyframes.length < 2) throw new Error('Add at least two keyframes before recording.');
+      if (typeof MediaRecorder === 'undefined') throw new Error('Recording is not supported in this runtime.');
+      l.handleRecordCameraMove();
+      const limit = Date.now() + (l.cameraPath.durationSeconds + 20) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      while (cameraRecorderRef.current && Date.now() < limit) await new Promise((resolve) => setTimeout(resolve, 250));
+      if (cameraRecorderRef.current) {
+        // Hidden windows get no animation frames, so playback cannot reach the end: stop cleanly.
+        cameraRecorderRef.current.stop();
+        throw new Error('Recording did not finish in time (is the editor window visible?). It was stopped.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return { durationSeconds: l.cameraPath.durationSeconds, fps: l.cameraPath.fps, savedTo: 'media (WebM, generatedBy "Set Design Camera Move")' };
+    },
+    'setdesign.classic.renderPreset': (args) => {
+      const l = liveRef.current as any;
+      const item = RENDER_PRESET_PACK_ASSETS.find((entry) => entry.id === args.preset || entry.label.toLowerCase() === String(args.preset || '').toLowerCase());
+      if (!item) throw new Error(`Unknown render preset. Use one of: ${RENDER_PRESET_PACK_ASSETS.map((entry) => entry.id).join(', ')}.`);
+      l.handleApplyRenderPresetItem(item);
+      return { preset: item.label, ...item.renderPreset };
+    },
+    'setdesign.classic.renderSettings': (args) => {
+      const l = liveRef.current as any;
+      const next = { ...l.render };
+      if (typeof args.quality === 'string') {
+        if (!['realtime', 'cinematic', 'final'].includes(args.quality)) throw new Error('quality must be realtime, cinematic or final.');
+        setRenderQuality(args.quality as RenderQuality); next.quality = args.quality;
+      }
+      if (typeof args.exposure === 'number') { next.exposure = clampRenderExposure(args.exposure); setRenderExposure(next.exposure); }
+      if (typeof args.sky === 'boolean') { setSkyEnabled(args.sky); next.sky = args.sky; }
+      if (typeof args.sun === 'boolean') { setSunEnabled(args.sun); next.sun = args.sun; }
+      if (typeof args.sunAzimuth === 'number') { setSunAzimuth(args.sunAzimuth); next.sunAzimuth = args.sunAzimuth; }
+      if (typeof args.sunElevation === 'number') { setSunElevation(args.sunElevation); next.sunElevation = args.sunElevation; }
+      if (typeof args.sunIntensity === 'number') { setSunIntensity(args.sunIntensity); next.sunIntensity = args.sunIntensity; }
+      if (typeof args.hdriBackground === 'boolean') { setUseHdriBackground(args.hdriBackground); next.hdriBackground = args.hdriBackground; }
+      return next;
+    },
+    'setdesign.classic.aiDirector': async (args) => {
+      const l = liveRef.current as any;
+      const reply = await l.applyAiMutations(String(args.prompt || ''));
+      if (/^(Add |Director error|Empty instruction)/.test(reply)) throw new Error(reply);
+      return reply;
+    },
+  }), []);
 
   return (
     <div className="studio-workspace p-6 h-full overflow-auto">
@@ -3265,4 +3249,22 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
   );
 };
 
-export default SetDesignWorkspace;
+/**
+ * Set design: the Blender-style workspace (set-pro/) is the default; this page stays available
+ * as its "Klassisch" tab with the AI blockout, World Labs, Sketchfab, HDRI and render presets.
+ * Both edit the same project field (setDesign).
+ */
+const SetDesignWorkspaceShell: React.FC<SetDesignWorkspaceProps> = (props) => (
+  <SetProWorkspace
+    mediaItems={props.mediaItems}
+    references={props.references}
+    shotPrompts={props.shotPrompts}
+    recentProjects={props.recentProjects}
+    currentProjectName={props.currentProjectName}
+    currentProjectPath={props.currentProjectPath}
+    onAddGeneratedMedia={props.onAddGeneratedMedia}
+    classic={<SetDesignWorkspace {...props} />}
+  />
+);
+
+export default SetDesignWorkspaceShell;

@@ -131,6 +131,8 @@ export type FxDefinition = {
    * (`ofxIdentifier` is the plugin id). Such definitions have no passes.
    */
   native?: 'ofx';
+  /** Restricts where the effect is offered (e.g. 'compositing' = Fusion page only). */
+  scope?: 'compositing';
 };
 
 export type FxPreset = {
@@ -138,6 +140,18 @@ export type FxPreset = {
   name: string;
   description?: string;
   values: FxParamValues;
+};
+
+/** Interpolation of an FX keyframe — same semantics as clip keyframes (src/fx/keyframes.ts). */
+export type FxKeyframeEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'hold';
+
+/** One keyframe of an animated FX parameter. `time` is clip-local (seconds from the clip's source-in). */
+export type FxKeyframe = {
+  /** Stable id for selection in the keyframe lane (older/hand-written data may omit it). */
+  id?: string;
+  time: number;
+  value: number;
+  easing: FxKeyframeEasing;
 };
 
 /** One effect applied to a clip or photo layer (serialised in projects). */
@@ -151,6 +165,11 @@ export type FxInstance = {
   mix?: number;
   /** Collapsed state in the Effect Controls panel. */
   collapsed?: boolean;
+  /**
+   * Animated numeric params (and 'mix'). A param with keyframes ignores its
+   * constant value in `params`; resolve with `resolveParamsAtTime()`.
+   */
+  keyframes?: Record<string, FxKeyframe[]>;
 };
 
 export type FxStack = FxInstance[];
