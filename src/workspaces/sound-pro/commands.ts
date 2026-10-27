@@ -186,15 +186,22 @@ const parseParam = (p: Record<string, unknown>): AutomationParam => {
 /* ─── role detection (Studio view) ─── */
 
 export const guessRole = (track: TimelineTrack, clips: TimelineClip[], media: SoundMediaLike[]): StemRole => {
-  const words = [track.name ?? '', ...clips.filter((c) => c.trackId === track.id).flatMap((c) => {
+  // the track name decides first, then the media on it (name, generator, prompt)
+  const fromWords = (words: string): StemRole | null => {
+    const w = words.toLowerCase();
+    if (/(dialog|dialogue|voice|stimme|sprech|tts|speech|\bvo\b|adr|voiceover|interview)/.test(w)) return 'dialog';
+    if (/(sfx|\bfx\b|effect|effekt|foley|whoosh|hit|impact|boom)/.test(w)) return 'effects';
+    if (/(atmo|ambien|room ?tone|raumton|wind|rain|regen|street|crowd|background)/.test(w)) return 'ambience';
+    if (/(music|musik|score|song|lyria|sonauto|beat|melod)/.test(w)) return 'music';
+    return null;
+  };
+  const byName = fromWords(track.name ?? '');
+  if (byName) return byName;
+  const mediaWords = clips.filter((c) => c.trackId === track.id).flatMap((c) => {
     const m = media.find((x) => x.id === c.mediaId);
     return m ? [m.name, m.generatedBy ?? '', m.prompt ?? ''] : [];
-  })].join(' ').toLowerCase();
-  if (/(dialog|dialogue|voice|stimme|sprech|tts|speech|vo\b|adr|eleven|minimax|interview)/.test(words)) return 'dialog';
-  if (/(music|musik|score|song|lyria|sonauto|beat|melod)/.test(words)) return 'music';
-  if (/(atmo|ambien|room ?tone|wind|rain|regen|street|crowd|background)/.test(words)) return 'ambience';
-  if (/(sfx|fx|effect|effekt|foley|whoosh|hit|impact|boom)/.test(words)) return 'effects';
-  return track.type === 'video' ? 'dialog' : 'effects';
+  }).join(' ');
+  return fromWords(mediaWords) ?? (track.type === 'video' ? 'dialog' : 'effects');
 };
 
 /** Merges [start,end] intervals. */

@@ -143,6 +143,10 @@ test('studio: auto routing by name and ducking automation', () => {
   const st = baseState([clip('c1', 'a1', 1, 3), clip('c2', 'a2', 0, 10)]);
   assert.equal(guessRole(tracks[0], st.clips, st.media), 'dialog');
   assert.equal(guessRole(tracks[1], st.clips, st.media), 'music');
+  // regression: an SFX generator named after a music model must not become music
+  const sfxTrack = { id: 'a9', name: 'A9', type: 'audio' as const, isLocked: false, isMuted: false };
+  assert.equal(guessRole(sfxTrack, [clip('x', 'a9', 0, 1)], [{ id: 'm-x', type: 'audio', name: 'Impacts.wav', generatedBy: 'Lyria 2 SFX' }]), 'effects');
+  assert.equal(guessRole({ ...sfxTrack, name: 'Effekte' }, [], []), 'effects');
   const routed = runSoundCommand(st, 'studio.autoRoute', {});
   assert.ok(routed.ok);
   if (!routed.ok) return;
