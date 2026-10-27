@@ -20,6 +20,7 @@ const ALL = [
     'timeline_set_playhead', 'timeline_goto_edit_point', 'timeline_ripple_delete', 'timeline_lift', 'timeline_extract',
     'timeline_source_edit', 'timeline_editor_state', 'timeline_set_in_out', 'timeline_set_playback_resolution', 'timeline_shuttle',
     'timeline_linked_selection', 'timeline_track_height', 'timeline_zoom', 'timeline_layout_set', 'timeline_mode_switch',
+    'timeline_list_clips', 'timeline_select_clip',
 ];
 
 test('timeline tools are published with schemas', async () => {
@@ -81,6 +82,9 @@ test('playhead, edit points, ripple delete, lift and extract', async () => {
     try {
         assert.equal((await mcp.call('timeline_set_playhead', { time: '00:00:01:00' })).playhead, 1);
         assert.equal((await mcp.call('timeline_set_playhead', { time: '+12' })).playhead, 1.5);
+        // Plain number strings are seconds (agents), not typed frames.
+        assert.equal((await mcp.call('timeline_set_playhead', { time: '4' })).playhead, 4);
+        assert.equal((await mcp.call('timeline_set_playhead', { time: '2.5' })).playhead, 2.5);
         assert.equal((await mcp.call('timeline_goto_edit_point', { direction: 'next' })).playhead, 4);
         assert.equal((await mcp.call('timeline_goto_edit_point', { direction: 'previous' })).playhead, 0);
 
@@ -151,6 +155,50 @@ test('editor UI tools go through live commands; mode switch sets the workspace',
         assert.equal((await mcp.call('timeline_mode_switch', { mode: 'x' })).ok, false);
     } finally {
         dispose();
+        mcp.dispose();
+    }
+});
+
+test('list and select clips by id or by time', async () => {
+    const v2 = { id: 'v2', name: 'V2', type: 'video' as const, isLocked: false, isMuted: false, isTargeted: false };
+    const { ctx, state } = createTestContext({
+        timelineTracks: [...tracks, v2],
+        timelineClips: [clip('c1', 'v1', 0, 5), clip('c2', 'v1', 5, 9), clip('t1', 'v2', 4, 6), clip('a1', 'a1', 0, 9)],
+        mediaItems: [{ id: 'm-c1', name: 'cliff.mp4', type: 'video', url: 'x' } as never],
+    });
+    const mcp = await createMcpHarness(ctx);
+    try {
+        const all = await mcp.call('timeline_list_clips');
+        assert.equal((all.clips as unknown[]).length, 4);
+        assert.equal((all.clips as Array<{ name: string }>)[0].name, 'cliff.mp4');
+        assert.equal((all.tracks as unknown[]).length, 3);
+        const under = await mcp.call('timeline_list_clips', { time: 5.5 });
+        assert.deepEqual((under.clips as Array<{ id: string }>).map((c) => c.id).sort(), ['a1', 'c2', 't1']);
+        const onTrack = await mcp.call('timeline_list_clips', { trackId: 'v1' });
+        assert.deepEqual((onTrack.clips as Array<{ id: string }>).map((c) => c.id), ['c1', 'c2']);
+
+        const byTime = await mcp.call('timeline_select_clip', { time: 5, moveTo: 'start' });
+        assert.equal(byTime.selectedClipId, 't1', 'topmost video track wins');
+        assert.equal(state.selectedClipId, 't1');
+        assert.equal(state.playheadPosition, 4);
+        await mcp.call('timeline_select_clip', { clipId: 'c1' });
+        assert.equal(state.selectedClipId, 'c1');
+        assert.equal((await mcp.call('timeline_select_clip', { clipId: 'nope' })).ok, false);
+        assert.equal((await mcp.call('timeline_select_clip', { time: 50 })).ok, false);
+    } finally {
+        mcp.dispose();
+    }
+});
+
+test('plain number strings are seconds for markers', async () => {
+    const { ctx } = createTestContext({ timelineTracks: tracks, timelineClips: [clip('c1', 'v1', 0, 30)] });
+    const mcp = await createMcpHarness(ctx);
+    try {
+        const plain = await mcp.call('timeline_marker_add', { time: '16', name: 'Plain seconds' });
+        assert.equal((plain.marker as { time: number }).time, 16, '"16" means 16 seconds, not 16 frames');
+        const decimal = await mcp.call('timeline_marker_add', { time: '5.5', name: 'Decimal' });
+        assert.equal((decimal.marker as { time: number }).time, 5.5);
+    } finally {
         mcp.dispose();
     }
 });

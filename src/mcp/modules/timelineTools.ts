@@ -46,11 +46,15 @@ const markersOf = (ctx: StudioToolContext): SequenceMarker[] => normalizeMarkers
 const saveMarkers = (ctx: StudioToolContext, markers: SequenceMarker[]) => ctx.actions.setExtra('markers', markers);
 const sequenceEnd = (ctx: StudioToolContext) => ctx.getState().timelineClips.reduce((max, clip) => Math.max(max, clip.end), 0);
 
-/** Seconds from a number or a timecode string ("00:00:05:12", "+12" frames …). */
+/** Seconds from a number, a plain number string ("16", "5.5" = seconds) or a timecode ("00:00:05:12", "+12" frames …). */
 const timeArg = (args: Record<string, unknown>, key: string, ctx: StudioToolContext, fallback?: number): number => {
     const value = args[key];
     if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value);
     if (typeof value === 'string' && value.trim()) {
+        // Agents send "16" or "5.5" meaning seconds. The timecode field would read bare digits as
+        // typed frames ("16" = 16 frames, "5.5" = 5 s 5 frames), so plain numbers are seconds here.
+        const plain = /^\s*(\d+(?:[.,]\d+)?)\s*$/.exec(value);
+        if (plain) return Math.max(0, Math.round(Number(plain[1].replace(',', '.')) * TIMELINE_FPS) / TIMELINE_FPS);
         const parsed = parseTimecodeInput(value, TIMELINE_FPS, ctx.getState().playheadPosition);
         if (parsed === null) throw new Error(`Cannot read time "${value}" (use seconds or hh:mm:ss:ff).`);
         return parsed;
@@ -206,10 +210,87 @@ export const TIMELINE_TOOL_MODULE: StudioToolModule = {
             },
         },
 
+        /* ── Clips ── */
+        {
+            name: 'timeline_list_clips',
+            description: 'List the tracks and the clips on the timeline (id, media name and type, track, start/end/duration in seconds, source in/out, speed, selected, GPU effects). Optional trackId, or time (seconds) to list only the clips under that time. Use the ids with fx_*, timeline_select_clip and other clip tools.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    trackId: { type: 'string', description: 'Only this track.' },
+                    time: { type: 'number', description: 'Only clips under this time, in seconds.' },
+                },
+            },
+            handler: (args, ctx) => {
+                const state = ctx.getState();
+                const at = args.time !== undefined && args.time !== '' ? timeArg(args, 'time', ctx) : null;
+                const trackId = typeof args.trackId === 'string' && args.trackId ? args.trackId : null;
+                const mediaById = new Map(state.mediaItems.map((item) => [item.id, item]));
+                const order = new Map(state.timelineTracks.map((track, index) => [track.id, index]));
+                const clips = state.timelineClips
+                    .filter((clip) => (!trackId || clip.trackId === trackId) && (at === null || (clip.start <= at && at < clip.end)))
+                    .sort((a, b) => (order.get(a.trackId) ?? 99) - (order.get(b.trackId) ?? 99) || a.start - b.start)
+                    .map((clip) => {
+                        const media = mediaById.get(clip.mediaId);
+                        return {
+                            id: clip.id,
+                            name: clip.textConfig?.content ? `Text: ${clip.textConfig.content}` : media?.name ?? clip.mediaId,
+                            mediaType: clip.textConfig ? 'text' : media?.type ?? null,
+                            trackId: clip.trackId,
+                            start: clip.start,
+                            end: clip.end,
+                            duration: clip.end - clip.start,
+                            sourceIn: clip.sourceIn ?? 0,
+                            sourceOut: clip.sourceOut ?? null,
+                            speed: clip.speed,
+                            selected: clip.id === state.selectedClipId,
+                            fx: (clip.fxStack ?? []).map((entry) => entry.effectId),
+                        };
+                    });
+                return {
+                    playhead: state.playheadPosition,
+                    selectedClipId: state.selectedClipId,
+                    tracks: state.timelineTracks.map((track) => ({ id: track.id, name: track.name, type: track.type, locked: track.isLocked, muted: track.isMuted })),
+                    clips,
+                };
+            },
+        },
+        {
+            name: 'timeline_select_clip',
+            description: 'Select a timeline clip (like clicking it): by clipId, or by time (seconds) for the topmost video clip under that time (optional trackId). Effect Controls and fx_* tools then act on it. moveTo = "start" also moves the playhead to the clip start.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    clipId: { type: 'string' },
+                    time: { type: 'number', description: 'Pick the clip under this time (seconds) instead of an id.' },
+                    trackId: { type: 'string' },
+                    moveTo: { type: 'string', enum: ['none', 'start'] },
+                },
+            },
+            handler: (args, ctx) => {
+                const state = ctx.getState();
+                let clip = typeof args.clipId === 'string' && args.clipId ? state.timelineClips.find((entry) => entry.id === args.clipId) : undefined;
+                if (!clip && args.time !== undefined && args.time !== '') {
+                    const at = timeArg(args, 'time', ctx);
+                    const trackId = typeof args.trackId === 'string' && args.trackId ? args.trackId : null;
+                    // Topmost first: video tracks are listed bottom-up (V1 first), so prefer the highest index.
+                    const order = new Map(state.timelineTracks.map((track, index) => [track.id, index]));
+                    const videoTracks = new Set(state.timelineTracks.filter((track) => track.type === 'video').map((track) => track.id));
+                    clip = state.timelineClips
+                        .filter((entry) => entry.start <= at && at < entry.end && (trackId ? entry.trackId === trackId : videoTracks.has(entry.trackId)))
+                        .sort((a, b) => (order.get(b.trackId) ?? 0) - (order.get(a.trackId) ?? 0))[0];
+                }
+                if (!clip) throw new Error(args.clipId ? `Clip ${String(args.clipId)} not found.` : 'Pass clipId, or a time with a clip under it (see timeline_list_clips).');
+                ctx.actions.selectClip(clip.id);
+                if (args.moveTo === 'start') ctx.actions.setPlayhead(clip.start);
+                return { selectedClipId: clip.id, trackId: clip.trackId, start: clip.start, end: clip.end };
+            },
+        },
+
         /* ── Playhead / edit points ── */
         {
             name: 'timeline_set_playhead',
-            description: 'Set the playhead like typing into the timecode field: seconds, "00:00:05:12", "512", "+12" (frames), "-1:00", "2.5s".',
+            description: 'Set the playhead: seconds (16 or "16", "2.5"), timecode "00:00:05:12", relative "+12" / "-12" frames or "-1:00", or "2.5s".',
             parameters: { type: 'object', properties: { time: { type: 'string' } }, required: ['time'] },
             handler: (args, ctx) => {
                 const time = Math.min(Math.max(0, sequenceEnd(ctx)), timeArg(args, 'time', ctx));
