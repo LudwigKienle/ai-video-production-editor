@@ -33,11 +33,15 @@ const blockedArtifactPatterns = [
   /^__pycache__$/u,
   /^certificate(?:\..*)?$/iu,
 ];
+const brandPattern = new RegExp('bucks' + 'wood', 'iu');
+const brandDomainPattern = new RegExp('bucks' + 'wood' + 'studios\\.com', 'iu');
+// The app logo is the brand mark (Ludwig's decision): the brand name may appear only in these folders.
+const brandMarkDirs = ['src/brand/', 'scripts/brand/'];
 const forbiddenPatterns = [
   new RegExp('/' + 'Users/', 'u'),
   new RegExp('Downloads/' + 'claude' + '-code-main', 'iu'),
-  new RegExp('bucks' + 'wood', 'iu'),
-  new RegExp('bucks' + 'wood' + 'studios\\.com', 'iu'),
+  brandPattern,
+  brandDomainPattern,
   new RegExp('nov' + 'ella', 'iu'),
   new RegExp('\\b' + 'li' + 'dl' + '\\b', 'iu'),
   new RegExp('star\\s*' + 'wars|' + 'star' + 'wars|' + 'dar' + 'th|' + 'ma' + 'lak|' + 're' + 'van', 'iu'),
@@ -94,8 +98,11 @@ const walk = (dir) => {
     }
 
     const lines = text.split(/\r?\n/);
+    const patterns = brandMarkDirs.some((dir) => relPath.split('\\').join('/').startsWith(dir))
+      ? forbiddenPatterns.filter((pattern) => pattern !== brandPattern)
+      : forbiddenPatterns;
     lines.forEach((line, index) => {
-      if (forbiddenPatterns.some((pattern) => pattern.test(withoutAllowed(line)))) {
+      if (patterns.some((pattern) => pattern.test(withoutAllowed(line)))) {
         findings.push(`${relPath}:${index + 1}: ${line.trim()}`);
       }
     });
