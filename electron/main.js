@@ -121,7 +121,8 @@ function createWindow() {
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 } }
       : {}),
-    icon: path.join(__dirname, '../public/vite.svg'), // Use your icon here
+    // Window/taskbar icon (Windows/Linux; macOS uses the bundle icon). public/ is copied to dist/ by Vite.
+    icon: path.join(__dirname, app.isPackaged ? '../dist/app-icon.png' : '../public/app-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
