@@ -222,6 +222,7 @@ export const UPSCALE_TOOL_MODULE: StudioToolModule = {
       name: 'upscale_preview_render',
       description: 'Render a short preview of the active (or given) input with the current settings: lengthSeconds 0 = single frame, 1–3 = clip from the playhead (or atSeconds). Spends credits: requires confirm: true.',
       writes: true,
+      cost: 'paid',
       parameters: {
         type: 'object',
         properties: {
@@ -240,6 +241,7 @@ export const UPSCALE_TOOL_MODULE: StudioToolModule = {
       name: 'upscale_queue_add',
       description: 'Queue a full upscale job for a media bin item (added to the input queue if needed) over its In/Out range. Optional settings fields (size, model, grain …) are applied first. Results land in the media bin. Spends credits: requires confirm: true.',
       writes: true,
+      cost: 'paid',
       parameters: {
         type: 'object',
         properties: {
