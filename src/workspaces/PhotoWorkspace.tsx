@@ -35,6 +35,7 @@ import { AdjustmentsPanel, PropertiesPanel } from './photo-pro/PropertiesPanel.t
 import { ColorPanel, Dialog, HistoryPanel, SwatchesPanel } from './photo-pro/panels.tsx';
 import type { DialogSpec } from './photo-pro/panels.tsx';
 import { PixelStore } from './photo-pro/pixelStore.ts';
+import { usePhotoAiLiveCommands } from './photo-pro/usePhotoAiLiveCommands';
 import {
   canMergeDown, createDoc, docPixelKeys, docReducer, getActiveLayer, makeAdjustmentLayer, makeRasterLayer,
   makeTextLayer, nextLayerName,
@@ -2240,6 +2241,14 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
   useEffect(() => registerLiveCommands(Object.fromEntries(
     Object.values(PHOTO_LIVE).map((name) => [name, (args: Record<string, unknown>) => liveRef.current[name](args)]),
   )), []);
+
+  usePhotoAiLiveCommands({
+    inpaintPrompt, setInpaintPrompt, inpaintModel, setInpaintModel, resolution, setResolution,
+    expandPadding, setExpandPadding, expandPrompt, setExpandPrompt,
+    neuralIntensity, setNeuralIntensity, neuralPrompt, setNeuralPrompt, neuralReference, setNeuralReference,
+    neuralPresets: NEURAL_PRESETS, busy, statusRef, docRef,
+    runInpaint, handleHeal, expandCanvas, expandAndFill, applyNeuralPreset, resizeImage, exportFlattened,
+  });
 
   // ---------- Menus ----------
   const hasDoc = Boolean(doc);

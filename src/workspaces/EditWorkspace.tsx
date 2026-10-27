@@ -29,6 +29,7 @@ import TransitionsPanel from '../components/TransitionsPanel';
 import ImageEditorModal from '../components/ImageEditorModal';
 import EditorAgentPanel from '../components/EditorAgentPanel';
 import TitlesPanel, { TitlePreset } from '../components/TitlesPanel';
+import { useEditLegacyLiveCommands, type EditLegacyLiveProps } from './edit-pro/useEditLegacyLiveCommands';
 import { ChevronLeftIcon, ChevronRightIcon, BrushIcon, MaximizeIcon, KeyboardIcon, PaletteIcon, FilmIcon, TextIcon, EffectsIcon, TransitionsIcon, MusicNoteIcon, ScissorsIcon, BrainIcon } from '../components/icons';
 import EditTransportBar from '../components/EditTransportBar';
 import { formatTimecode, DEFAULT_TIMELINE_FPS } from '../utils/timecode';
@@ -1694,6 +1695,23 @@ const EditWorkspace: React.FC<EditWorkspaceProps> = (props) => {
     useEffect(() => registerLiveCommands(Object.fromEntries(
         Object.values(EDIT_LIVE).filter((name) => name.startsWith('edit.')).map((name) => [name, (args: Record<string, unknown>) => liveRef.current[name](args ?? {})]),
     )), []);
+    useEditLegacyLiveCommands({
+        mediaItems: props.mediaItems, timelineClips: props.timelineClips, timelineTracks: props.timelineTracks,
+        selectedClipId: props.selectedClipId, playheadPosition: props.playheadPosition,
+        projectName: props.projectName, storyContext: props.storyContext, analysisResult: props.analysisResult,
+        onSelectClip: props.onSelectClip, onApplyCSSEffect: props.onApplyCSSEffect, onApplyEffectStack: props.onApplyEffectStack,
+        onApplyNativeEffect: props.onApplyNativeEffect, onApplyTransition: props.onApplyTransition,
+        createTitleClipFromPreset, applyTitlePresetToSelected, applyTitleTreatmentToSelected, applyTitleMotionToSelected, toggleTitleAutoContrastForSelected,
+        onGenerateSubtitlesFromClip: props.onGenerateSubtitlesFromClip, onUpdateSubtitleClipContent: props.onUpdateSubtitleClipContent,
+        onSplitSubtitleClip: props.onSplitSubtitleClip, onMergeSubtitleClip: props.onMergeSubtitleClip,
+        allLayouts, savedLayouts, activeLayoutName, applyLayout, deleteLayout,
+        currentLayout: () => ({ panelWidths, collapsed, tlHeight }),
+        storeSavedLayouts: (layouts) => { setSavedLayouts(layouts as typeof savedLayouts); saveSavedLayouts(layouts as typeof savedLayouts); },
+        handleMatchTimelineGap, notice: () => proNotice,
+        canUndoLastAgentApply: props.canUndoLastAgentApply, onPreviewEditPlan: props.onPreviewEditPlan, onApplyEditPlan: props.onApplyEditPlan,
+        onUndoLastAgentApply: props.onUndoLastAgentApply, onRunAgentReviewPass: props.onRunAgentReviewPass,
+        openProPanel: isPro ? (panel: string) => dispatchPro({ type: 'openPanel', panel: panel as never }) : null,
+    } as unknown as EditLegacyLiveProps);
     useEffect(() => {
         if (!isPro) return;
         // Capture phase: runs before the App/Timeline window listeners so pro-only keys

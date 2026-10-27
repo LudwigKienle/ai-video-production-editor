@@ -277,3 +277,26 @@ export const getQuickTemplateById = (id: string): QuickTemplateOption | undefine
 export const getPaletteItemsByGroup = (group: PaletteGroupId): PaletteItem[] => {
   return paletteItems.filter((item) => item.group === group);
 };
+
+/** Connection points per node type (handle ids used by edges): inputs on the left, output on the right. */
+export const NODE_PORTS: Record<NodeKind, { inputs: string[]; output: string | null }> = {
+  prompt: { inputs: ['text'], output: 'prompt' },
+  imageInput: { inputs: [], output: 'image' },
+  model: { inputs: ['prompt', 'image'], output: 'model' },
+  sampler: { inputs: ['model', 'prompt'], output: 'sampled' },
+  output: { inputs: ['image'], output: null },
+  video: { inputs: ['image', 'prompt'], output: 'video' },
+  upscale: { inputs: ['image'], output: 'upscaled' },
+  filter: { inputs: ['image'], output: 'filtered' },
+  chroma: { inputs: ['image'], output: 'keyed' },
+  blend: { inputs: ['base', 'overlay'], output: 'composited' },
+  sketch: { inputs: ['image'], output: 'sketch' },
+  openpose: { inputs: ['image'], output: 'pose' },
+  depth: { inputs: ['image'], output: 'depth' },
+  faceRestore: { inputs: ['image'], output: 'restored' },
+  bgRemove: { inputs: ['image'], output: 'cutout' },
+  rife: { inputs: ['video'], output: 'video' },
+  music: { inputs: ['video', 'prompt'], output: 'audio' },
+  sfx: { inputs: ['video', 'prompt'], output: 'audio' },
+  llm: { inputs: ['prompt'], output: 'text' },
+};

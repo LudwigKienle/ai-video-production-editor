@@ -14,6 +14,16 @@ import {
   UserProfile,
 } from '../types';
 import { renderNamingTemplate } from '../utils/naming';
+import {
+  addChangeRequest,
+  getAffectedShotNumbers as matchAffectedShots,
+  getProjectNamingTemplate,
+  missingShotAssets,
+  removeChangeRequest,
+  saveShotAnnotation,
+  setProjectNamingTemplate,
+  upsertFeedback as upsertFeedbackEntry,
+} from '../services/reviewLogic';
 import AnnotationModal from '../components/AnnotationModal';
 
 interface ReviewWorkspaceProps {
@@ -45,19 +55,10 @@ type ReviewAssetCard = {
   hasAnnotation?: boolean;
 };
 
-const buildId = () => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-};
-
 const resolveProfileName = (profiles: UserProfile[], id?: string) => {
   if (!id) return 'Unknown';
   return profiles.find((profile) => profile.id === id)?.name || 'Unknown';
 };
-
-const clampScore = (value: number) => Math.min(10, Math.max(1, value));
 
 const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
   reviewData,
@@ -76,10 +77,7 @@ const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
   const feedback = reviewData.directorFeedback ?? [];
   const changeRequests = reviewData.changeRequests ?? [];
   const shotAnnotations = reviewData.shotAnnotations ?? [];
-  const projectTemplate = useMemo(() => {
-    const projectTemplates = namingTemplates.filter((template) => template.scope === 'project');
-    return projectTemplates.find((template) => template.isDefault) || projectTemplates[0] || null;
-  }, [namingTemplates]);
+  const projectTemplate = useMemo(() => getProjectNamingTemplate(namingTemplates), [namingTemplates]);
   const [templateValue, setTemplateValue] = useState(projectTemplate?.template ?? '');
   const [requestTarget, setRequestTarget] = useState('');
   const [requestType, setRequestType] = useState<ChangeRequest['type']>('character');
@@ -101,33 +99,7 @@ const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
   }, [projectTemplate?.template]);
 
   const upsertFeedback = (scope: DirectorFeedback['scope'], targetId: string, updates: Partial<DirectorFeedback>) => {
-    setReviewData((prev) => {
-      const entries = prev.directorFeedback ?? [];
-      const index = entries.findIndex((entry) => entry.scope === scope && entry.targetId === targetId);
-      const now = new Date().toISOString();
-      if (index === -1) {
-        const newEntry: DirectorFeedback = {
-          id: buildId(),
-          scope,
-          targetId,
-          score: clampScore(updates.score ?? 1),
-          note: updates.note ?? '',
-          createdAt: now,
-          updatedAt: now,
-        };
-        return { ...prev, directorFeedback: [...entries, newEntry] };
-      }
-      const existing = entries[index];
-      const updated: DirectorFeedback = {
-        ...existing,
-        ...updates,
-        score: clampScore(typeof updates.score === 'number' ? updates.score : existing.score),
-        updatedAt: now,
-      };
-      const next = [...entries];
-      next[index] = updated;
-      return { ...prev, directorFeedback: next };
-    });
+    setReviewData((prev) => upsertFeedbackEntry(prev, scope, targetId, { score: updates.score, note: updates.note }));
   };
 
   const getFeedback = (scope: DirectorFeedback['scope'], targetId: string) =>
@@ -136,27 +108,7 @@ const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
   const getAnnotationForAsset = (shotNumber: number, assetType: ShotAnnotation['assetType']) =>
     shotAnnotations.find((annotation) => annotation.shotNumber === shotNumber && annotation.assetType === assetType);
 
-  const normalize = (value: string) => value.trim().toLowerCase();
-
-  const requestMatchesShot = (request: ChangeRequest, shot: ShotPrompt) => {
-    const target = normalize(request.targetName);
-    if (!target) return false;
-    if (request.type === 'character') {
-      return shot.characters?.some((name) => normalize(name) === target) ?? false;
-    }
-    if (request.type === 'environment') {
-      return normalize(shot.environment || '') === target;
-    }
-    if (request.type === 'product' || request.type === 'brand') {
-      const productMatch = shot.products?.some((name) => normalize(name) === target);
-      const textMatch = normalize(shot.prompt || '').includes(target) || normalize(shot.description || '').includes(target);
-      return Boolean(productMatch || textMatch);
-    }
-    return false;
-  };
-
-  const getAffectedShotNumbers = (request: ChangeRequest) =>
-    shotPrompts.filter((shot) => requestMatchesShot(request, shot)).map((shot) => shot.shot);
+  const getAffectedShotNumbers = (request: ChangeRequest) => matchAffectedShots(request, shotPrompts);
 
   const handleScoreChange =
     (scope: DirectorFeedback['scope'], targetId: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,98 +166,22 @@ const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
   const handleCreateChangeRequest = () => {
     const targetName = requestTarget.trim();
     if (!targetName) return;
-    const now = new Date().toISOString();
-    const newRequest: ChangeRequest = {
-      id: buildId(),
-      type: requestType,
-      targetName,
-      action: requestAction,
-      note: requestNote.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    const affectedShots = getAffectedShotNumbers(newRequest);
-    const newTasks: ShotTask[] = affectedShots.map((shotNumber) => ({
-      id: buildId(),
-      requestId: newRequest.id,
-      shotNumber,
-      status: 'open',
-      createdAt: now,
-      updatedAt: now,
-    }));
-    setReviewData((prev) => ({
-      ...prev,
-      changeRequests: [...(prev.changeRequests ?? []), newRequest],
-      shotTasks: [...(prev.shotTasks ?? []), ...newTasks],
-    }));
+    setReviewData((prev) => addChangeRequest(prev, { type: requestType, targetName, action: requestAction, note: requestNote }, shotPrompts).data);
     setRequestTarget('');
     setRequestNote('');
   };
 
   const handleRemoveChangeRequest = (id: string) => {
-    setReviewData((prev) => ({
-      ...prev,
-      changeRequests: (prev.changeRequests ?? []).filter((request) => request.id !== id),
-      shotTasks: (prev.shotTasks ?? []).filter((task) => task.requestId !== id),
-    }));
+    setReviewData((prev) => removeChangeRequest(prev, id));
   };
 
   const handleSaveNamingTemplate = () => {
-    const trimmed = templateValue.trim();
-    const now = new Date().toISOString();
-    setNamingTemplates((prev) => {
-      const existing = prev.find((template) => template.scope === 'project');
-      if (!trimmed) {
-        return prev.filter((template) => template.scope !== 'project');
-      }
-      if (existing) {
-        return prev.map((template) =>
-          template.id === existing.id ? { ...template, template: trimmed, isDefault: true, updatedAt: now } : template,
-        );
-      }
-      const newTemplate: NamingTemplate = {
-        id: buildId(),
-        scope: 'project',
-        template: trimmed,
-        isDefault: true,
-        createdAt: now,
-        updatedAt: now,
-      };
-      return [...prev, newTemplate];
-    });
+    setNamingTemplates((prev) => setProjectNamingTemplate(prev, templateValue));
   };
 
   const handleSaveAnnotation = (dataUrl: string) => {
     if (!annotationTarget) return;
-    const now = new Date().toISOString();
-    setReviewData((prev) => {
-      const entries = prev.shotAnnotations ?? [];
-      const index = entries.findIndex(
-        (entry) => entry.shotNumber === annotationTarget.shotNumber && entry.assetType === annotationTarget.assetType,
-      );
-      if (index === -1) {
-        const nextEntry: ShotAnnotation = {
-          id: buildId(),
-          shotNumber: annotationTarget.shotNumber,
-          assetType: annotationTarget.assetType,
-          assetLabel: annotationTarget.assetLabel,
-          imageUrl: dataUrl,
-          createdAt: now,
-          updatedAt: now,
-        };
-        return { ...prev, shotAnnotations: [...entries, nextEntry] };
-      }
-      const existing = entries[index];
-      const updated: ShotAnnotation = {
-        ...existing,
-        assetLabel: annotationTarget.assetLabel,
-        imageUrl: dataUrl,
-        updatedAt: now,
-      };
-      const next = [...entries];
-      next[index] = updated;
-      return { ...prev, shotAnnotations: next };
-    });
+    setReviewData((prev) => saveShotAnnotation(prev, annotationTarget, dataUrl));
     setAnnotationTarget(null);
   };
 
@@ -560,11 +436,7 @@ const ReviewWorkspace: React.FC<ReviewWorkspaceProps> = ({
               const shotChangeRequests = requestSummaries.filter((request) =>
                 request.affectedShots.includes(shot.shot),
               );
-              const missingKinds = [
-                !shot.imageUrl ? 'image' : null,
-                !shot.sketchUrl ? 'sketch' : null,
-                !shot.videoUrl ? 'video' : null,
-              ].filter(Boolean) as Array<'image' | 'sketch' | 'video'>;
+              const missingKinds = missingShotAssets(shot);
               const imageAnnotation = getAnnotationForAsset(shot.shot, 'image');
               const sketchAnnotation = getAnnotationForAsset(shot.shot, 'sketch');
               const startFrameAnnotation = getAnnotationForAsset(shot.shot, 'start_frame');

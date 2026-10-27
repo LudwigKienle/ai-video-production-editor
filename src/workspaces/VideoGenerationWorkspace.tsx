@@ -60,6 +60,9 @@ import { getProductionFormat, type ProductionFormatId } from '../data/production
 import { adaptPromptForModel } from '../services/promptStyle';
 import PromptPreview from '../components/PromptPreview';
 import BurstFramePanel from '../components/BurstFramePanel';
+import { useLivePage } from '../mcp/livePage';
+import { analyzeImage } from '../services/geminiService';
+import { BURST_ANALYSIS_INSTRUCTION, buildBurstFramePrompt, checkBurstFramePrompt, parseBurstAnalysis, type BurstLighting, type BurstSubjectKind } from '../services/burstFrame';
 
 interface VideoGenerationWorkspaceProps {
   onAddGeneratedMedia: (item: MediaItem) => void;
@@ -1502,6 +1505,133 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
     });
   }, [libraryAssets, librarySearch]);
 
+  /** Burst Frame "Apply": prompt verbatim, 5 s, audio off, matching aspect. */
+  const applyBurstPrompt = ({ prompt: burstPrompt, aspectRatio: burstAspect }: { prompt: string; aspectRatio?: string }) => {
+    setPrompt(burstPrompt);
+    setVideoDurationSeconds(5);
+    setSeedanceGenerateAudio(false);
+    setSeedanceOmniGenerateAudio(false);
+    setKlingGenerateAudio(false);
+    setLtxGenerateAudio(false);
+    setPixverseGenerateAudio(false);
+    if (burstAspect && (availableAspectRatios as string[]).includes(burstAspect)) setAspectRatio(burstAspect as AspectRatioOption);
+  };
+
+  // MCP (video_gen_* tools): settings and buttons of this page as live commands.
+  const fileFromUrl = async (url: string, name: string, fallbackType: string) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Could not load ${url}.`);
+    const blob = await response.blob();
+    return new File([blob], name, { type: blob.type || fallbackType });
+  };
+  const libraryRef = (assetId: unknown) => {
+    const asset = libraryAssets.find((item) => item.id === assetId) ?? mediaItems.find((item) => item.id === assetId);
+    if (!asset?.url) throw new Error(`Library asset ${String(assetId)} not found.`);
+    return { id: asset.id, name: asset.name, url: asset.url };
+  };
+  useLivePage('video_gen', {
+    settings: {
+      prompt: { value: prompt, set: setPrompt, type: 'string' },
+      modelId: { value: modelId, set: setModelId, type: 'string', options: MODEL_OPTIONS.map((option) => option.id) },
+      aspectRatio: { value: aspectRatio, set: setAspectRatio, type: 'string', options: ASPECT_RATIOS },
+      videoDurationSeconds: { value: videoDurationSeconds, set: setVideoDurationSeconds, type: 'number', min: 1, max: 60 },
+      burstMode: { value: burstMode, set: setBurstMode, type: 'boolean' },
+      referenceUrl: { value: referenceFile ? 'local file' : referenceUrl, set: ((value: string) => { setReferenceFile(null); setReferenceUrl(value || null); }) as never, type: 'string' },
+      endFrameUrl: { value: endFrameFile ? 'local file' : endFrameUrl, set: ((value: string) => { setEndFrameFile(null); setEndFrameUrl(value || null); }) as never, type: 'string' },
+      motionReferenceUrl: { value: motionReferenceFile ? 'local file' : motionReferenceUrl, set: ((value: string) => { setMotionReferenceFile(null); setMotionReferenceUrl(value || null); }) as never, type: 'string' },
+      elements: { value: elements, set: setElements, type: 'json' },
+      ltxResolution: { value: ltxResolution, set: setLtxResolution, type: 'string', options: ['1080p', '2k', '4k'] },
+      ltxFps: { value: ltxFps, set: setLtxFps, type: 'number', options: [24, 25, 48, 50] },
+      ltxCameraMotion: { value: ltxCameraMotion, set: setLtxCameraMotion, type: 'string', options: ['none', 'low', 'medium', 'high'] },
+      ltxGenerateAudio: { value: ltxGenerateAudio, set: setLtxGenerateAudio, type: 'boolean' },
+      ltxAudioResolution: { value: ltxAudioResolution, set: setLtxAudioResolution, type: 'string', options: ['720p', '1080p', '1440p', '2160p'] },
+      pVideoResolution: { value: pVideoResolution, set: setPVideoResolution, type: 'string', options: ['720p', '1080p'] },
+      pVideoFps: { value: pVideoFps, set: setPVideoFps, type: 'number', options: [24, 48] },
+      pVideoDraftMode: { value: pVideoDraftMode, set: setPVideoDraftMode, type: 'boolean' },
+      pVideoPromptUpsampling: { value: pVideoPromptUpsampling, set: setPVideoPromptUpsampling, type: 'boolean' },
+      seedanceGenerateAudio: { value: seedanceGenerateAudio, set: setSeedanceGenerateAudio, type: 'boolean' },
+      seedanceResolution: { value: seedanceResolution, set: setSeedanceResolution, type: 'string', options: ['480p', '720p', '1080p'] },
+      seedanceOmniGenerateAudio: { value: seedanceOmniGenerateAudio, set: setSeedanceOmniGenerateAudio, type: 'boolean' },
+      pixverseGenerateAudio: { value: pixverseGenerateAudio, set: setPixverseGenerateAudio, type: 'boolean' },
+      klingGenerateAudio: { value: klingGenerateAudio, set: setKlingGenerateAudio, type: 'boolean' },
+      klingShotType: { value: klingShotType, set: setKlingShotType, type: 'string', options: ['static', 'dynamic', 'customize', 'intelligent'] },
+      klingNegativePrompt: { value: klingNegativePrompt, set: setKlingNegativePrompt, type: 'string' },
+      klingCfgScale: { value: klingCfgScale, set: setKlingCfgScale, type: 'number', min: 0, max: 1 },
+      klingVoiceIdsText: { value: klingVoiceIdsText, set: setKlingVoiceIdsText, type: 'string' },
+      klingMultiPromptText: { value: klingMultiPromptText, set: setKlingMultiPromptText, type: 'string' },
+      klingUseReferenceVideoForO3: { value: klingUseReferenceVideoForO3, set: setKlingUseReferenceVideoForO3, type: 'boolean' },
+      librarySearch: { value: librarySearch, set: setLibrarySearch, type: 'string' },
+    },
+    info: () => ({
+      status,
+      isGenerating,
+      normalizedDurationSeconds,
+      costEstimate: generationCostEstimate,
+      readiness: generationReadinessItems,
+      audioTrack: audioFile ? audioFile.name : null,
+      elementReferences: elementReferenceAssets,
+      storyboardReferences: storyboardReferenceAssets,
+      latestResults: latestResults.map(({ id, name, url, generatedBy }) => ({ id, name, url, generatedBy })),
+      library: filteredLibraryAssets.slice(0, 40).map(({ id, name, url, kind, projectName }) => ({ id, name, url, kind, projectName })),
+      catalogs: {
+        models: MODEL_OPTIONS.map((option) => ({ ...option, aspectRatios: MODEL_ASPECT_RATIOS[option.id] ?? ASPECT_RATIOS, durations: VIDEO_DURATION_OPTIONS[option.id] ?? null, pricing: VIDEO_MODEL_PRICING[option.id] ?? null })),
+      },
+    }),
+    actions: {
+      generate: () => handleGenerate(),
+      set_frame: async (args) => {
+        const target = String(args.target ?? 'start');
+        const source = String(args.url ?? args.imagePath ?? args.videoPath ?? '');
+        const asset = args.mediaId ? libraryRef(args.mediaId) : null;
+        const url = asset?.url ?? source;
+        if (target === 'start') { setReferenceFile(null); setReferenceUrl(url || null); }
+        else if (target === 'end') { setEndFrameFile(null); setEndFrameUrl(url || null); }
+        else if (target === 'motion') { setMotionReferenceFile(null); setMotionReferenceUrl(url || null); }
+        else throw new Error('target must be start, end or motion.');
+        return { target, url: url || null };
+      },
+      set_audio: async (args) => {
+        const url = String(args.url ?? args.audioPath ?? '') || (args.mediaId ? libraryRef(args.mediaId).url : '');
+        if (!url) { setAudioFile(null); return { audio: null }; }
+        const file = await fileFromUrl(url, String(args.name ?? 'audio-track'), 'audio/mpeg');
+        setAudioFile(file);
+        return { audio: file.name };
+      },
+      add_storyboard_reference: (args) => {
+        const asset = libraryRef(args.mediaId);
+        setStoryboardReferenceAssets((prev) => (prev.some((item) => item.id === asset.id) ? prev : [...prev, asset].slice(0, 9)));
+      },
+      remove_storyboard_reference: (args) => setStoryboardReferenceAssets((prev) => prev.filter((item) => item.id !== args.mediaId)),
+      add_element_reference: (args) => {
+        const asset = libraryRef(args.mediaId);
+        setElementReferenceAssets((prev) => (prev.some((item) => item.id === asset.id) ? prev : [...prev, asset].slice(0, 3)));
+      },
+      remove_element_reference: (args) => setElementReferenceAssets((prev) => prev.filter((item) => item.id !== args.mediaId)),
+      burst_analyze: async () => {
+        const source = referenceFile
+          ? { base64: await fileToBase64(referenceFile), mimeType: referenceFile.type || 'image/png' }
+          : referenceUrl ? await getBase64FromUrl(referenceUrl) : null;
+        if (!source) throw new Error('Set a start frame first (set_frame).');
+        const parsed = parseBurstAnalysis(await analyzeImage(BURST_ANALYSIS_INSTRUCTION, { base64: source.base64, mimeType: source.mimeType || 'image/png' }));
+        if (!parsed) throw new Error('The image analysis returned no usable result.');
+        return parsed;
+      },
+      burst_apply: (args) => {
+        const burstPrompt = buildBurstFramePrompt({
+          continuity: String(args.continuity ?? ''),
+          style: String(args.style ?? ''),
+          shots: Array.isArray(args.shots) ? (args.shots as string[]) : undefined,
+          subjectKind: (args.subjectKind as BurstSubjectKind) || 'person',
+          lighting: (args.lighting as BurstLighting) || 'continuous',
+          compact: args.compact === true,
+        });
+        setBurstMode(true);
+        applyBurstPrompt({ prompt: burstPrompt, aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : undefined });
+        return { prompt: burstPrompt, check: checkBurstFramePrompt(burstPrompt) };
+      },
+    },
+  });
+
   return (
     <div className="studio-workspace p-6 h-full overflow-auto">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -1573,16 +1703,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     modelSupportsImage={modelId === 'auto' || Boolean(modelOption?.supportsImage)}
                     analysisReady={readyForGeneration}
                     onPickImageModel={() => setModelId('seedance-25-i2v-fal')}
-                    onApply={({ prompt: burstPrompt, aspectRatio: burstAspect }) => {
-                      setPrompt(burstPrompt);
-                      setVideoDurationSeconds(5);
-                      setSeedanceGenerateAudio(false);
-                      setSeedanceOmniGenerateAudio(false);
-                      setKlingGenerateAudio(false);
-                      setLtxGenerateAudio(false);
-                      setPixverseGenerateAudio(false);
-                      if (burstAspect && (availableAspectRatios as string[]).includes(burstAspect)) setAspectRatio(burstAspect as AspectRatioOption);
-                    }}
+                    onApply={applyBurstPrompt}
                   />
                 )}
                 <div>

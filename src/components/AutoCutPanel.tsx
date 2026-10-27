@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useAutoCutLiveCommands, type AutoCutLiveProps } from '../workspaces/edit-pro/useAutoCutLiveCommands';
 import {
     runAutoCutSourcePipeline,
     VideoSegment,
@@ -920,6 +921,16 @@ const AutoCutPanel: React.FC<AutoCutPanelProps> = ({
     const analyzeLabel = effectiveScope === 'clip' ? 'Analyze clip' : effectiveScope === 'timeline' ? 'Analyze timeline' : 'Analyze media pool';
     const analyzeDisabled = effectiveScope === 'clip' ? !selectedClip : effectiveScope === 'timeline' ? videoClips.length === 0 : mediaPoolCandidates.length === 0;
     const resetResults = () => { setStatus('idle'); setError(null); };
+
+    useAutoCutLiveCommands({
+        scope, setScope, config, setConfig, localMode, setLocalMode, localSettings, setLocalSettings,
+        customModelId, setCustomModelId, unusedOnlyInPool, setUnusedOnlyInPool, scriptSourceMode, setScriptSourceMode,
+        customScriptText, setCustomScriptText, status, progress, error, localBusy,
+        segments, selectedSegments, setSelectedSegments, timelineGroups, timelineSelected, setTimelineSelected,
+        mediaPoolGroups, mediaPoolSelected, setMediaPoolSelected, finalScore, timelineScore, mediaPoolScore, localResult,
+        handleAnalyze, handleAnalyzeTimeline, handleAnalyzeMediaPool, runLocalDetection, applyLocalResult,
+        handleSelectBestPerScene, handleApplySegments, handleApplyTimelineCut, handleApplyMediaPoolCut, handleTrimToSingleSegment,
+    } as unknown as AutoCutLiveProps);
 
     const renderSegmentRow = (
         segment: VideoSegment,

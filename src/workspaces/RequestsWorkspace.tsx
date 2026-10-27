@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { ReviewData, ShotPrompt, ShotTask, StoryBible } from '../types';
+import { buildRequestsExport, buildRequestsReportHtml, missingShotAssets, setShotTaskStatus, summarizeRequests } from '../services/reviewLogic';
 
 interface RequestsWorkspaceProps {
   reviewData: ReviewData;
@@ -7,8 +8,6 @@ interface RequestsWorkspaceProps {
   shotPrompts: ShotPrompt[];
   storyBible: StoryBible;
 }
-
-const normalize = (value: string) => value.trim().toLowerCase();
 
 const RequestsWorkspace: React.FC<RequestsWorkspaceProps> = ({
   reviewData,
@@ -19,33 +18,11 @@ const RequestsWorkspace: React.FC<RequestsWorkspaceProps> = ({
   const changeRequests = reviewData.changeRequests ?? [];
   const shotTasks = reviewData.shotTasks ?? [];
 
-  const requestSummaries = useMemo(() => {
-    return changeRequests.map((request) => {
-      const target = normalize(request.targetName);
-      const affectedShots = shotPrompts
-        .filter((shot) => {
-          if (request.type === 'character') {
-            return shot.characters?.some((name) => normalize(name) === target);
-          }
-          if (request.type === 'environment') {
-            return normalize(shot.environment || '') === target;
-          }
-          if (request.type === 'product' || request.type === 'brand') {
-            const productMatch = shot.products?.some((name) => normalize(name) === target);
-            const textMatch = normalize(shot.prompt || '').includes(target) || normalize(shot.description || '').includes(target);
-            return Boolean(productMatch || textMatch);
-          }
-          return false;
-        })
-        .map((shot) => shot.shot);
-
-      return {
-        ...request,
-        affectedShots,
-        tasks: shotTasks.filter((task) => task.requestId === request.id),
-      };
-    });
-  }, [changeRequests, shotPrompts, shotTasks]);
+  const requestSummaries = useMemo(
+    () => summarizeRequests({ ...reviewData, changeRequests, shotTasks }, shotPrompts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [changeRequests, shotPrompts, shotTasks],
+  );
 
   const shotByNumber = useMemo(() => {
     const map = new Map<number, ShotPrompt>();
@@ -54,20 +31,11 @@ const RequestsWorkspace: React.FC<RequestsWorkspaceProps> = ({
   }, [shotPrompts]);
 
   const handleUpdateTaskStatus = (taskId: string, status: ShotTask['status']) => {
-    setReviewData((prev) => ({
-      ...prev,
-      shotTasks: (prev.shotTasks ?? []).map((task) =>
-        task.id === taskId ? { ...task, status, updatedAt: new Date().toISOString() } : task,
-      ),
-    }));
+    setReviewData((prev) => setShotTaskStatus(prev, taskId, status));
   };
 
   const handleExportJson = () => {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      project: { title: storyBible.title || 'Untitled Project' },
-      requests: requestSummaries,
-    };
+    const payload = buildRequestsExport(storyBible.title, requestSummaries);
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -78,38 +46,7 @@ const RequestsWorkspace: React.FC<RequestsWorkspaceProps> = ({
   };
 
   const handleExportPdf = () => {
-    const html = `
-      <html>
-        <head>
-          <title>Director Requests</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 24px; }
-            h1 { margin: 0 0 8px; }
-            .section { margin-top: 20px; }
-            .request { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; }
-            .shots { color: #555; font-size: 12px; }
-          </style>
-        </head>
-        <body>
-          <h1>Director Requests</h1>
-          <p>Project: ${storyBible.title || 'Untitled Project'}</p>
-          <div class="section">
-            ${requestSummaries
-              .map((request) => {
-                const shots = request.affectedShots.length ? `Shots: ${request.affectedShots.join(', ')}` : 'Shots: none';
-                return `
-                  <div class="request">
-                    <strong>${request.type}</strong> · <strong>${request.targetName}</strong> · ${request.action}<br/>
-                    ${request.note ? `<em>${request.note}</em><br/>` : ''}
-                    <div class="shots">${shots}</div>
-                  </div>
-                `;
-              })
-              .join('')}
-          </div>
-        </body>
-      </html>
-    `;
+    const html = buildRequestsReportHtml(storyBible.title, requestSummaries);
     const popup = window.open('', '_blank');
     if (!popup) return;
     popup.document.write(html);
@@ -158,13 +95,7 @@ const RequestsWorkspace: React.FC<RequestsWorkspaceProps> = ({
               )}
               {request.tasks.map((task) => {
                 const shot = shotByNumber.get(task.shotNumber);
-                const missing = shot
-                  ? [
-                      !shot.imageUrl ? 'image' : null,
-                      !shot.sketchUrl ? 'sketch' : null,
-                      !shot.videoUrl ? 'video' : null,
-                    ].filter(Boolean)
-                  : [];
+                const missing = missingShotAssets(shot);
                 return (
                   <div
                     key={task.id}

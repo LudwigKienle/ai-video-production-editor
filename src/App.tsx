@@ -89,7 +89,8 @@ import OutfitWorkspace from './workspaces/OutfitWorkspace';
 import ImportWorkspace from './workspaces/ImportWorkspace';
 import EditWorkspace from './workspaces/EditWorkspace';
 import { normalizeMarkers, type SequenceMarker } from './workspaces/edit-pro/markers';
-import { collectStudioTools, type StudioState, type StudioToolContext } from './mcp/toolModules';
+import { collectStudioTools, subscribeStudioToolModules, type StudioState, type StudioToolContext } from './mcp/toolModules';
+import type { AnalysisExtra } from './mcp/projectExtras';
 
 // MCP tool modules (src/mcp/modules/*Tools.ts) register themselves on import and are
 // published to the "ai-video-studio" MCP server next to the assistant tools.
@@ -7501,8 +7502,31 @@ function App() {
         playheadPosition,
         selectedClipId,
         projectPath,
-        extras: { ...mcpExtras, markers: sequenceMarkers },
+        // Keys: src/mcp/projectExtras.ts (project fields) + module data in mcpExtras (compositions, soundMix …).
+        extras: {
+            ...mcpExtras,
+            markers: sequenceMarkers,
+            storyBible,
+            references,
+            shotPrompts,
+            reviewData,
+            namingTemplates,
+            sceneMap: sceneMapState,
+            designCanvas: designCanvasState,
+            nodeGraph,
+            worldGen: worldGenState,
+            avatars,
+            setDesign: setDesignState,
+            analysis: { videoUrl: analysisVideoUrl, scriptText: analysisScriptText, result: analysisResult },
+            uiMode,
+            isDirector,
+            allowedWorkspaces,
+        },
     };
+    const mcpAnalysisVideoUrlRef = useRef(analysisVideoUrl);
+    mcpAnalysisVideoUrlRef.current = analysisVideoUrl;
+    const [mcpModuleRevision, setMcpModuleRevision] = useState(0);
+    useEffect(() => subscribeStudioToolModules(() => setMcpModuleRevision((value) => value + 1)), []);
     const mcpContextRef = useRef<StudioToolContext>({
         getState: () => mcpStateRef.current as StudioState,
         actions: {
@@ -7514,8 +7538,31 @@ function App() {
             setPlayhead: (seconds) => setPlayheadPosition(Math.max(0, seconds)),
             selectClip: (clipId) => setSelectedClipId(clipId),
             setExtra: (key, value) => {
-                if (key === 'markers') setSequenceMarkers(normalizeMarkers(value));
-                else setMcpExtras((prev) => ({ ...prev, [key]: value }));
+                // Keep the ref current so a second read in the same tool call sees the write.
+                const state = mcpStateRef.current;
+                if (state) state.extras = { ...state.extras, [key]: value };
+                switch (key) {
+                    case 'markers': setSequenceMarkers(normalizeMarkers(value)); break;
+                    case 'storyBible': setStoryBible(value as StoryBible); break;
+                    case 'reviewData': setReviewData(value as ReviewData); break;
+                    case 'namingTemplates': setNamingTemplates(value as NamingTemplate[]); break;
+                    case 'sceneMap': setSceneMapState(value as SceneMapState | null); break;
+                    case 'designCanvas': setDesignCanvasState(value as DesignCanvasState | null); break;
+                    case 'nodeGraph': setNodeGraph(value as NodeGraphState | null); break;
+                    case 'worldGen': setWorldGenState(value as WorldGenerationState | null); break;
+                    case 'avatars': setAvatars(value as AvatarProfile[]); break;
+                    case 'uiMode': setUiMode(value as UIMode); break;
+                    case 'setDesign': setSetDesignState((prev) => ({ ...(prev || buildDefaultSetDesignState()), ...(value as Partial<SetDesignState>) })); break;
+                    case 'analysis': {
+                        const next = value as AnalysisExtra;
+                        if (next.videoUrl !== mcpAnalysisVideoUrlRef.current) setAnalysisVideoFile(null);
+                        setAnalysisVideoUrl(next.videoUrl);
+                        setAnalysisScriptText(next.scriptText);
+                        setAnalysisResult(next.result);
+                        break;
+                    }
+                    default: setMcpExtras((prev) => ({ ...prev, [key]: value }));
+                }
             },
         },
     });
@@ -7533,10 +7580,13 @@ function App() {
         }
         Object.assign(executor, projectAgentExecutor);
         const moduleTools = collectStudioTools(() => mcpContextRef.current);
-        Object.assign(executor, moduleTools.executor);
-        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...moduleTools.declarations], executor);
+        for (const [name, run] of Object.entries(moduleTools.executor)) {
+            // Let state written by the previous tool call commit before the next one reads it.
+            executor[name] = async (args: Record<string, unknown>) => { await nextPaint(); return run(args); };
+        }
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...moduleTools.declarations] as FunctionDeclaration[], executor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [studioToolSignature, projectAgentExecutor]);
+    }, [studioToolSignature, projectAgentExecutor, mcpModuleRevision]);
 
     const [apiKeysRevision, setApiKeysRevision] = useState(0);
     const hasAnyApiKeyConfigured = useMemo(() => hasAnyLocalApiKey(), [

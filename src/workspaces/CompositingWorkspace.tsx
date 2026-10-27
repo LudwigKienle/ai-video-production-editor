@@ -23,6 +23,7 @@ import NatronCompositorPanel from '../components/NatronCompositorPanel';
 import ArtRelightPanel from '../components/ArtRelightPanel';
 import CompositingNodeStudioView from '../components/CompositingNodeStudioView';
 import { type CompositingWorkspaceView } from '../utils/compositingNodeStudio';
+import { useCompositingAiLiveCommands, type CompositingAiLiveProps } from './fusion-shared/useCompositingAiLiveCommands';
 import CompShell from './fusion-pro/CompShell';
 
 interface CompositingWorkspaceProps extends SharedSequenceProps {
@@ -690,6 +691,24 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     setCompositingView(tool.view);
     if (tool.tab) setCompositeTab(tool.tab);
   };
+
+  useCompositingAiLiveCommands({
+    pageMode, setPageMode, tools: FUSION_TOOLS, selectTool, activeToolId: activeTool.id,
+    mediaItems, timelineClips: props.timelineClips, selectedClipId: props.selectedClipId ?? null, readyForGeneration, hasDesktopCorridorKey, onAddToTimeline,
+    setBackgroundMediaId, setBackgroundSource, setBackgroundFile, setOverlayMediaId, setOverlaySource, setOverlayFile,
+    blendMode, setBlendMode, overlayOpacity, setOverlayOpacity, compositeStatus, compositeResult, handleComposite,
+    corridorKeyRepoPath, setCorridorKeyRepoPath, corridorKeyEnvStatus,
+    setCorridorKeySourceMediaId, setCorridorKeySourceKind, setCorridorKeySourceFile, setCorridorKeyAlphaMediaId, setCorridorKeyAlphaKind, setCorridorKeyAlphaFile,
+    corridorKeyOptions, setCorridorKeyOptions, corridorKeyMaxFrames, setCorridorKeyMaxFrames, corridorKeyStatus, corridorKeyResult,
+    handlePrepareCorridorKey, handleRunCorridorKey,
+    openPoseOptions, setOpenPoseOptions, setOpenPoseFile, openPoseStatus, openPoseResult, handleGenerateOpenPose,
+    setMotionVideoUrl, setMotionVideo, setCharacterImage, animateSettings, setAnimateSettings, animateStatus, animateResult, handleAnimateReplace,
+    setReframeVideoMediaId, setReframeVideoSource, setReframeVideoUrl, setReframeVideoFile, reframePrompt, setReframePrompt, reframeAspect, setReframeAspect,
+    reframeGuideFrame, setReframeGuideFrame, reframeUseManualWindow, setReframeUseManualWindow, reframeWindow, setReframeWindow,
+    reframeStatus, reframeResult, handleLumaReframe,
+    klingBridgePrompt, setKlingBridgePrompt, klingBridgeDuration, setKlingBridgeDuration, klingBridgeAspect, setKlingBridgeAspect,
+    klingBridgeStatus, klingBridgeResult, handleKlingBridge,
+  } as unknown as CompositingAiLiveProps);
 
   const left = (
     <div className="fusion-tools">

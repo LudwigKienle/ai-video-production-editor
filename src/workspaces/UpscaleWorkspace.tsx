@@ -14,6 +14,7 @@ import type { CostRate, MediaItem, RecentProject, ReferenceItem, ShotPrompt, Usa
 import { useLibraryAssets, type LibraryAsset } from '../hooks/useLibraryAssets';
 import { estimateGenerationCost, formatUsd } from '../utils/generationPricing';
 import { RUNWAY_RUBY_OUTPUT_FORMATS, hasRunwayApiKey } from '../services/runwayService';
+import { useUpscaleAiLiveCommands } from './upscale-pro/useUpscaleAiLiveCommands';
 import { startTask, type TaskHandle } from '../services/taskCenter';
 import { registerLiveCommands } from '../mcp/liveCommands';
 import { applySettingsArgs } from '../mcp/modules/upscaleTools';
@@ -644,6 +645,13 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
       },
     });
   }, []);
+
+  useUpscaleAiLiveCommands({
+    settingsRef, updateSettings, inputs, jobs, mock, runwayKey: hasRunwayApiKey(), rubyFormats: RUNWAY_RUBY_OUTPUT_FORMATS, libraryAssets,
+    addInput, addLibraryAsset, removeInput, onFps, jobResultsRef, addJobToBin, openJob, openJobFolder,
+    removeJob: (id) => dispatch({ type: 'remove', id }),
+    clearFinished: () => dispatch({ type: 'clearFinished' }),
+  });
 
   // ---------------------------------------------------------------- render
   const jobStatusByInput = useMemo(() => {
