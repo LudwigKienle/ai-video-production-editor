@@ -234,6 +234,7 @@ import { analyzeImageAsset, resolveLookAgentSource, runLookAgentTool } from './s
 import { findCreativeDNASceneOverride, resolveCreativeDNAProfile } from './services/creativeDnaService';
 import { env } from './config/env';
 import type { LibraryAsset } from './hooks/useLibraryAssets';
+import { useSetDesignAppBridge } from './setdesign/useSetDesignAppBridge';
 
 type ProjectSyncStatus = {
     state: 'idle' | 'checking' | 'up-to-date' | 'incoming' | 'error';
@@ -7490,6 +7491,18 @@ function App() {
             for (const task of running.values()) task.complete();
         };
     }, []);
+    // Set design: scene commands shared by the workspace UI and agents (setdesign_* tools, published via collectStudioTools).
+    useSetDesignAppBridge({
+        scene: setDesignState,
+        setScene: setSetDesignState,
+        projectKey: projectPath,
+        addMedia: (item) => setMediaItems(prev => [...prev, item]),
+        applyToShot: handleApplySetDesignSnapshotToShot,
+        getReferences: () => projectAgentStateRef.current?.references || [],
+        getShots: () => projectAgentStateRef.current?.shotPrompts || [],
+        setReferences: (update) => setReferencesWithHistory(update),
+        setActiveWorkspace,
+    });
     // ---- MCP tool context: latest project state + write actions for src/mcp tool modules.
     const mcpStateRef = useRef<StudioState | null>(null);
     const mcpNormalizeRef = useRef(normalizeClipTiming);
