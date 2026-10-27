@@ -80,7 +80,7 @@ import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
 import { registerStudioTools } from './services/localAgentsService';
 import { useSceneMapBridge } from './shotdesigner/useSceneMapBridge';
-import { connectSetDesignSelection } from './shotdesigner/setDesignSelectionSync';
+import { connectSetDesignHistory, connectSetDesignSelection } from './shotdesigner/setDesignSelectionSync';
 import { createProjectAgentExecutor, describeAgentTool, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
 import { onStudioConnectActivity } from './services/studioConnectService';
 import LiveConversation from './components/LiveConversation';
@@ -1088,8 +1088,9 @@ function App() {
         projectName: projectName || storyBible.title,
         openSceneMap: () => setActiveWorkspace('SCENE_MAP'),
     });
-    // One selection for the 2D camera plan and the 3D set.
+    // One selection and one undo history for the 2D camera plan and the 3D set.
     useEffect(() => connectSetDesignSelection(), [projectPath]);
+    useEffect(() => connectSetDesignHistory(), []);
     const activeProfile = profiles.find(profile => profile.id === activeProfileId) || profiles[0] || null;
     const isDirector = activeProfile?.role === 'director';
     const activeRole = activeProfile?.role || 'artist';
