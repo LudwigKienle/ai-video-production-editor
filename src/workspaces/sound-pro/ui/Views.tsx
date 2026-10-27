@@ -65,6 +65,7 @@ const HeaderButtons: React.FC<{ track: TimelineTrack; mix: SoundMix; run: RunCom
       <button type="button" className="snd-tog snd-tog--r" aria-pressed={t.recordArm} title="Aufnahmebereit" onClick={() => run('mixer.toggleRecordArm', { trackId: track.id })}>R</button>
       <button type="button" className="snd-tog snd-tog--s" aria-pressed={Boolean(track.isSolo)} title="Solo" data-automation-id={`sound-head-solo-${track.id}`} onClick={() => run('mixer.toggleSolo', { trackId: track.id })}>S</button>
       <button type="button" className="snd-tog snd-tog--m" aria-pressed={track.isMuted} title="Stumm" data-automation-id={`sound-head-mute-${track.id}`} onClick={() => run('mixer.toggleMute', { trackId: track.id })}>M</button>
+      <button type="button" className="snd-tog snd-tog--l" aria-pressed={track.isLocked} title="Spur sperren" data-automation-id={`sound-head-lock-${track.id}`} onClick={() => run('mixer.toggleLock', { trackId: track.id })}>L</button>
       {automation ? (
         <select className="snd-select" style={{ width: 62 }} value={t.automationMode} data-automation-id={`sound-head-auto-${track.id}`} onChange={(e) => run('automation.setMode', { trackId: track.id, mode: e.target.value as AutomationMode })}>
           {['off', 'read', 'touch', 'latch', 'write'].map((m) => <option key={m} value={m}>{m}</option>)}
@@ -284,6 +285,7 @@ export const StudioView: React.FC<ViewProps> = (p) => {
               </select>
               <button type="button" className="snd-tog snd-tog--s" aria-pressed={Boolean(track.isSolo)} onClick={() => p.run('mixer.toggleSolo', { trackId: track.id })}>S</button>
               <button type="button" className="snd-tog snd-tog--m" aria-pressed={track.isMuted} onClick={() => p.run('mixer.toggleMute', { trackId: track.id })}>M</button>
+              <button type="button" className="snd-tog snd-tog--l" aria-pressed={track.isLocked} title="Spur sperren" data-automation-id={`sound-studio-lock-${track.id}`} onClick={() => p.run('mixer.toggleLock', { trackId: track.id })}>L</button>
             </div>
           )} />
       </div>

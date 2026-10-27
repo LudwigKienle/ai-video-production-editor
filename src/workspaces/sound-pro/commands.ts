@@ -141,6 +141,15 @@ const requireTrack = (state: SoundState, trackId: string): TimelineTrack =>
   state.tracks.find((t) => t.id === trackId) ?? fail(`Spur „${trackId}“ gibt es nicht.`);
 const requireClip = (state: SoundState, clipId: string): TimelineClip =>
   state.clips.find((c) => c.id === clipId) ?? fail(`Clip „${clipId}“ gibt es nicht.`);
+/** Locked tracks refuse clip edits (move, trim, split, delete, gain, fades). */
+const assertUnlocked = (state: SoundState, trackIds: Array<string | undefined>): void => {
+  for (const id of trackIds) {
+    const track = id ? state.tracks.find((t) => t.id === id) : undefined;
+    if (track?.isLocked) fail(`Spur „${track.name ?? track.id}“ ist gesperrt. Erst mit sound_mixer_toggle_lock entsperren.`);
+  }
+};
+const clipTracks = (state: SoundState, clipIds: string[]) => clipIds.map((id) => state.clips.find((c) => c.id === id)?.trackId);
+
 const requireBus = (mix: SoundMix, busId: string) => mix.buses.find((b) => b.id === busId) ?? fail(`Bus „${busId}“ gibt es nicht.`);
 const mediaDuration = (state: SoundState) => (mediaId: string) => {
   const d = state.media.find((m) => m.id === mediaId)?.duration;
@@ -281,6 +290,15 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     run: (st, p) => {
       const track = requireTrack(st, text(p, 'trackId'));
       return { trackUpdates: [{ trackId: track.id, updates: { isSolo: bool(p, 'solo', !track.isSolo) } }] };
+    },
+  },
+  {
+    id: 'mixer.toggleLock', label: 'Spur sperren', group: 'Mixer',
+    description: 'Sperrt die Spur gegen Bearbeitung oder hebt die Sperre auf (gleiches Feld wie im Editor). Gesperrte Spuren lehnen Verschieben, Trimmen, Teilen, Löschen, Clip-Gain und Fades ab.',
+    params: schema({ trackId: TRACK, locked: s('boolean', 'optional: fester Zustand') }, ['trackId']),
+    run: (st, p) => {
+      const track = requireTrack(st, text(p, 'trackId'));
+      return { trackUpdates: [{ trackId: track.id, updates: { isLocked: bool(p, 'locked', !track.isLocked) } }] };
     },
   },
   {
@@ -565,6 +583,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipIds: s('array', 'Clip-IDs', { items: { type: 'string' } }), db: s('number', 'dB') }, ['clipIds', 'db']),
     run: (st, p) => {
       const list = ids(p, 'clipIds');
+      assertUnlocked(st, clipTracks(st, list));
       const volume = dbToGain(num(p, 'db', MIN_DB, MAX_CLIP_GAIN_DB));
       return { clips: st.clips.map((c) => (list.includes(c.id) ? { ...c, volume } : c)) };
     },
@@ -575,6 +594,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipIds: s('array', 'Clip-IDs', { items: { type: 'string' } }), deltaDb: s('number', 'dB') }, ['clipIds', 'deltaDb']),
     run: (st, p) => {
       const list = ids(p, 'clipIds');
+      assertUnlocked(st, clipTracks(st, list));
       const delta = num(p, 'deltaDb', -60, 60);
       return {
         clips: st.clips.map((c) => {
@@ -591,6 +611,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipIds: s('array', 'Clip-IDs', { items: { type: 'string' } }), side: s('string', 'in | out'), duration: s('number', 'Sekunden'), curve: s('string', 'optional') }, ['clipIds', 'side', 'duration']),
     run: (st, p) => {
       const list = ids(p, 'clipIds');
+      assertUnlocked(st, clipTracks(st, list));
       const side = pick(p, 'side', ['in', 'out'] as const);
       const duration = num(p, 'duration', 0, 600);
       const clipsMix = { ...st.mix.clips };
@@ -622,7 +643,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipId: CLIP, duration: s('number', 'Sekunden'), curve: s('string', 'optional') }, ['clipId', 'duration']),
     run: (st, p) => {
       const clipId = text(p, 'clipId');
-      requireClip(st, clipId);
+      assertUnlocked(st, [requireClip(st, clipId).trackId]);
       const curve = pick(p, 'curve', CURVES, 'equal-power');
       const res = crossfadeClips(st.clips, clipId, num(p, 'duration', 0.001, 30), mediaDuration(st));
       if (!res.rightId || res.fade <= 0) fail('Kein direkt anschließender Clip mit genug Material für einen Crossfade.');
@@ -641,6 +662,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     run: (st, p) => {
       const clip = requireClip(st, text(p, 'clipId'));
       const trackId = typeof p.trackId === 'string' ? requireTrack(st, p.trackId).id : clip.trackId;
+      assertUnlocked(st, [clip.trackId, trackId]);
       const mode = pick(p, 'mode', EDIT_MODES, st.mix.ui.editMode);
       return { clips: moveClip(st.clips, clip.id, num(p, 'start', 0, 1e6), mode, st.mix.ui.gridSec, trackId) };
     },
@@ -651,6 +673,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipId: CLIP, edge: s('string', 'start | end'), time: s('number', 'Sekunden'), mode: s('string', 'optional') }, ['clipId', 'edge', 'time']),
     run: (st, p) => {
       const clip = requireClip(st, text(p, 'clipId'));
+      assertUnlocked(st, [clip.trackId]);
       const mode = pick(p, 'mode', EDIT_MODES, st.mix.ui.editMode);
       return { clips: trimClip(st.clips, clip.id, pick(p, 'edge', ['start', 'end'] as const), num(p, 'time', 0, 1e6), mode, st.mix.ui.gridSec, mediaDuration(st)(clip.mediaId)) };
     },
@@ -662,7 +685,8 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     run: (st, p) => {
       const time = optNum(p, 'time', 0, 1e6) ?? st.playhead;
       const list = p.clipIds !== undefined ? ids(p, 'clipIds')
-        : st.clips.filter((c) => c.start < time && c.end > time && (!st.mix.ui.selectedTrackId || c.trackId === st.mix.ui.selectedTrackId)).map((c) => c.id);
+        : st.clips.filter((c) => c.start < time && c.end > time && (!st.mix.ui.selectedTrackId || c.trackId === st.mix.ui.selectedTrackId) && !st.tracks.find((t) => t.id === c.trackId)?.isLocked).map((c) => c.id);
+      assertUnlocked(st, clipTracks(st, list));
       let clips = st.clips;
       let mix = st.mix;
       for (const id of list) {
@@ -684,6 +708,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     params: schema({ clipIds: s('array', 'Clip-IDs', { items: { type: 'string' } }), mode: s('string', 'optional') }, ['clipIds']),
     run: (st, p) => {
       const list = ids(p, 'clipIds');
+      assertUnlocked(st, clipTracks(st, list));
       const mode = pick(p, 'mode', EDIT_MODES, st.mix.ui.editMode);
       const clipsMix = { ...st.mix.clips };
       for (const id of list) delete clipsMix[id];
@@ -701,7 +726,8 @@ export const SOUND_COMMANDS: SoundCommand[] = [
       const sel = st.mix.ui.selection;
       const start = optNum(p, 'start', 0, 1e6) ?? sel?.start ?? fail('Kein Bereich ausgewählt.');
       const end = optNum(p, 'end', 0, 1e6) ?? sel?.end ?? fail('Kein Bereich ausgewählt.');
-      const trackIds = p.trackIds !== undefined ? ids(p, 'trackIds') : st.mix.ui.selectedTrackId ? [st.mix.ui.selectedTrackId] : st.tracks.map((t) => t.id);
+      const trackIds = p.trackIds !== undefined ? ids(p, 'trackIds') : st.mix.ui.selectedTrackId ? [st.mix.ui.selectedTrackId] : st.tracks.filter((t) => !t.isLocked).map((t) => t.id);
+      assertUnlocked(st, trackIds);
       return { clips: deleteRange(st.clips, trackIds, start, end, st.mix.ui.editMode, () => makeId('clip')) };
     },
   },
@@ -710,6 +736,7 @@ export const SOUND_COMMANDS: SoundCommand[] = [
     description: 'Verschiebt Clips um den Nudge-Wert (direction −1 oder +1) oder um deltaSec.',
     params: schema({ clipIds: s('array', 'Clip-IDs', { items: { type: 'string' } }), direction: s('number', '−1 | +1'), deltaSec: s('number', 'optional') }, ['clipIds']),
     run: (st, p) => {
+      assertUnlocked(st, clipTracks(st, ids(p, 'clipIds')));
       const delta = optNum(p, 'deltaSec', -3600, 3600) ?? Math.sign(num(p, 'direction', -1, 1, 1)) * st.mix.ui.nudgeSec;
       return { clips: nudgeClips(st.clips, ids(p, 'clipIds'), delta) };
     },

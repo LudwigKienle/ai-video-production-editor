@@ -91,6 +91,10 @@ const CASES: Record<string, { prepare?: (env: Env) => Promise<Record<string, unk
   sound_mixer_set_pan: { args: () => ({ trackId: 'a2', pan: -0.5 }), check: (e) => assert.equal(e.mix().tracks.a2.pan, -0.5) },
   sound_mixer_toggle_mute: { args: () => ({ trackId: 'a1' }), check: (e) => assert.equal(e.state.timelineTracks[0].isMuted, true) },
   sound_mixer_toggle_solo: { args: () => ({ trackId: 'a2' }), check: (e) => assert.equal(e.state.timelineTracks[1].isSolo, true) },
+  sound_mixer_toggle_lock: {
+    args: () => ({ trackId: 'a1' }),
+    check: (e) => assert.equal(e.state.timelineTracks[0].isLocked, true),
+  },
   sound_mixer_clear_solo: {
     prepare: async (e) => { await e.mcp.call('sound_mixer_toggle_solo', { trackId: 'a1' }); },
     args: () => ({}), check: (e) => assert.ok(e.state.timelineTracks.every((t) => !t.isSolo)),
@@ -257,6 +261,33 @@ test('MCP mix changes are audible in the mixdown (fader + mute)', async () => {
     const wav = decodeWav(written.get(`exports/audio/${name}`)!);
     assert.ok(Math.abs(wav.channels[0][2 * SR] - 0.25) < 1e-3, 'music at −6 dB, dialog muted');
     assert.ok(state.mediaItems.some((m) => m.name === name));
+  } finally {
+    mcp.dispose();
+  }
+});
+
+test('locked tracks refuse clip edits over MCP', async () => {
+  const { mcp, state } = await setup();
+  try {
+    await mcp.call('sound_mixer_toggle_lock', { trackId: 'a1' });
+    for (const [name, args] of [
+      ['sound_clip_move', { clipId: 'c1', start: 4 }],
+      ['sound_clip_trim', { clipId: 'c1', edge: 'end', time: 2.5 }],
+      ['sound_clip_split', { clipIds: ['c1'], time: 2 }],
+      ['sound_clip_delete', { clipIds: ['c1'] }],
+      ['sound_clip_set_gain', { clipIds: ['c1'], db: -3 }],
+      ['sound_clip_set_fade', { clipIds: ['c1'], side: 'in', duration: 0.5 }],
+      ['sound_clip_nudge', { clipIds: ['c1'], deltaSec: 1 }],
+    ] as const) {
+      const r = await mcp.call(name, args as Record<string, unknown>);
+      assert.equal(r.ok, false, name);
+      assert.match(String(r.message), /gesperrt/, name);
+    }
+    assert.equal(state.timelineClips.find((c) => c.id === 'c1')!.start, 1, 'clip untouched');
+    // the other track stays editable, and unlocking works
+    assert.equal((await mcp.call('sound_clip_move', { clipId: 'c2', start: 1, mode: 'slip' })).ok, true);
+    await mcp.call('sound_mixer_toggle_lock', { trackId: 'a1', locked: false });
+    assert.equal((await mcp.call('sound_clip_move', { clipId: 'c1', start: 4, mode: 'slip' })).ok, true);
   } finally {
     mcp.dispose();
   }

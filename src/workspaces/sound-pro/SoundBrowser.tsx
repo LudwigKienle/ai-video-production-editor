@@ -10,7 +10,7 @@ import {
 } from '../../services/replicateService';
 import { generateMusicWithSonauto, hasSonautoApiKey } from '../../services/sonautoService';
 import { fileToBase64, getBase64FromUrl } from '../../utils/helpers';
-import { useLibraryAssets } from '../../hooks/useLibraryAssets';
+import type { LibraryAsset } from '../../hooks/useLibraryAssets';
 import { formatTimecode } from '../../utils/timecode';
 
 /**
@@ -30,6 +30,7 @@ export interface SoundBrowserProps {
   recentProjects?: RecentProject[];
   currentProjectName?: string | null;
   currentProjectPath?: string | null;
+  library: { assets: LibraryAsset[]; isLoading: boolean; error: string | null };
 }
 
 type VoiceProvider = 'elevenlabs' | 'minimax';
@@ -52,11 +53,8 @@ const SoundBrowser: React.FC<SoundBrowserProps> = (props) => {
     apiKeyReady,
     mediaItems,
     selectedClip,
-    references = [],
-    shotPrompts = [],
-    recentProjects = [],
-    currentProjectName,
     currentProjectPath,
+    library,
   } = props;
 
   const [browserTab, setBrowserTab] = useState<BrowserTab>('generate');
@@ -86,14 +84,8 @@ const SoundBrowser: React.FC<SoundBrowserProps> = (props) => {
   const [status, setStatus] = useState<string | null>(null);
   const [generated, setGenerated] = useState<MediaItem[]>([]);
 
-  const { assets: libraryAssets, isLoading: libraryLoading, error: libraryError } = useLibraryAssets({
-    currentProjectName,
-    currentProjectPath,
-    mediaItems,
-    references,
-    shotPrompts,
-    recentProjects,
-  });
+  // loaded once by the Sound page (also serves the MCP tool sound_library_list)
+  const { assets: libraryAssets, isLoading: libraryLoading, error: libraryError } = library;
 
   /* Library + mastering sources */
   const filteredLibraryAudio = useMemo(() => {

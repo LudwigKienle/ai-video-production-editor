@@ -312,7 +312,7 @@ export const SoundTimeline: React.FC<{
                   return (
                     <div
                       key={clip.id}
-                      className={`snd-clip ${selected.has(clip.id) ? 'snd-clip--selected' : ''} ${track.isMuted ? 'snd-clip--muted' : ''}`}
+                      className={`snd-clip ${selected.has(clip.id) ? 'snd-clip--selected' : ''} ${track.isMuted ? 'snd-clip--muted' : ''} ${track.isLocked ? 'snd-clip--locked' : ''}`}
                       style={{ left, width, transform: top ? `translateY(${top}px)` : undefined, zIndex: top ? 8 : undefined }}
                       data-automation-id={`sound-clip-${clip.id}`}
                       onPointerDown={(e) => onClipPointerDown(e, clip, width)}

@@ -120,6 +120,8 @@
 .snd-tog--m[aria-pressed='true'] { background: var(--snd-mute); color: #111; }
 .snd-tog--s[aria-pressed='true'] { background: var(--snd-solo); color: #111; }
 .snd-tog--r[aria-pressed='true'] { background: var(--snd-arm); color: #fff; }
+.snd-tog--l[aria-pressed='true'] { background: #8a94a1; color: #111; }
+.snd-clip--locked { cursor: not-allowed; background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,0.05) 6px 12px); }
 .snd-tog--p[aria-pressed='true'] { background: var(--snd-accent); color: #111; }
 .snd-strip__faderzone { min-height: 110px; display: flex; gap: 3px; justify-content: center; }
 .snd-strip__db { text-align: center; font-variant-numeric: tabular-nums; font-size: 11px; background: #0d0f12; border-radius: 3px; padding: 1px 0; }

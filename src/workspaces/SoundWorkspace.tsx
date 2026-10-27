@@ -9,6 +9,8 @@ import { useSoundPlayback } from './sound-pro/useSoundPlayback';
 import { FairlightView, ProToolsView, StudioView, type ViewProps } from './sound-pro/ui/Views';
 import { formatTime } from './sound-pro/ui/widgets';
 import { registerLiveCommands } from '../mcp/liveCommands';
+import { useLibraryAssets } from '../hooks/useLibraryAssets';
+import '../mcp/modules/soundMediaTools';
 import type { StudioToolContext } from '../mcp/toolModules';
 import { SOUND_EXTRA_KEY, SOUND_TOOLS } from '../mcp/modules/soundTools';
 import './sound-pro/sound.css';
@@ -114,6 +116,25 @@ const SoundWorkspace: React.FC<SoundWorkspaceProps> = (props) => {
     }
   }, [toolContext]);
 
+  /* project + library audio (shared by the browser and the MCP tool sound_library_list) */
+  const library = useLibraryAssets({
+    currentProjectName: props.currentProjectName,
+    currentProjectPath,
+    mediaItems,
+    references: props.references,
+    shotPrompts: props.shotPrompts,
+    recentProjects: props.recentProjects,
+  });
+  const libraryRef = useRef(library);
+  libraryRef.current = library;
+  useEffect(() => registerLiveCommands({
+    'sound.library.list': async () => {
+      // wait briefly for the first load of recent projects
+      for (let i = 0; i < 40 && libraryRef.current.isLoading; i++) await new Promise((r) => setTimeout(r, 100));
+      return { assets: libraryRef.current.assets.filter((a) => a.kind === 'audio' && a.url), loading: libraryRef.current.isLoading, error: libraryRef.current.error };
+    },
+  }), []);
+
   /* transport for MCP (sound_transport_toggle) */
   const transportRef = useRef({ isPlaying, onTogglePlayback });
   transportRef.current = { isPlaying, onTogglePlayback };
@@ -171,6 +192,7 @@ const SoundWorkspace: React.FC<SoundWorkspaceProps> = (props) => {
       recentProjects={props.recentProjects}
       currentProjectName={props.currentProjectName}
       currentProjectPath={currentProjectPath}
+      library={{ assets: library.assets, isLoading: library.isLoading, error: library.error ?? null }}
     />
   );
 
