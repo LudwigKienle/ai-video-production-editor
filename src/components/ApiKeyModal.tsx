@@ -9,6 +9,7 @@ import { UNSPLASH_ACCESS_KEY_STORAGE_KEY } from '../services/unsplashService';
 import { connectMidjourney, disconnectMidjourney, getMidjourneyConcurrency, getMidjourneyStatus, isMidjourneyAgentAvailable, onMidjourneyEvent, setMidjourneyConcurrency, toggleMidjourneyWindow, type MidjourneyStatus } from '../services/midjourneyAgentService';
 import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocalAgent, type LocalAgentInfo } from '../services/localAgentsService';
 import StudioConnectPanel from './StudioConnectPanel';
+import SplashSettingsSection from '../splash/SplashSettingsSection';
 import { MACHGEN_API_KEY_STORAGE_KEY } from '../services/machgenService';
 import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
@@ -717,6 +718,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                                         <button type="button" className="edit-text-btn edit-text-btn--outline" onClick={() => onRestartOnboarding?.()}>Start again</button>
                                     </div>
                                 </div>
+                                <SplashSettingsSection />
                             </div>
                         )}
 

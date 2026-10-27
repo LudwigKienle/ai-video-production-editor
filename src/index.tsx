@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import SplashHost from './splash/SplashHost';
 
 const renderFatalError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -45,18 +45,27 @@ const applyPlatformAttributes = () => {
 
 applyPlatformAttributes();
 
+// The start animation gets its own small root so it shows before the (large) app
+// module has loaded; the app loads and renders in parallel underneath.
+const splashElement = document.createElement('div');
+splashElement.id = 'splash-root';
+document.body.appendChild(splashElement);
+ReactDOM.createRoot(splashElement).render(<SplashHost />);
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   renderFatalError('Could not find root element to mount to');
 } else {
   const root = ReactDOM.createRoot(rootElement);
-  try {
-    root.render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    );
-  } catch (error) {
-    renderFatalError(error);
-  }
+  // Let the splash paint its first frame before the app module is evaluated (about two frames).
+  new Promise<void>((resolve) => { requestAnimationFrame(() => requestAnimationFrame(() => resolve())); setTimeout(resolve, 120); })
+    .then(() => import('./App'))
+    .then(({ default: App }) => {
+      root.render(
+        <React.StrictMode>
+          <App />
+        </React.StrictMode>
+      );
+    })
+    .catch(renderFatalError);
 }
