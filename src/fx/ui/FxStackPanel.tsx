@@ -372,7 +372,8 @@ const FxStackPanel: React.FC<Props> = ({ stack, onChange, extraDefinitions = [],
     const defs = [...listFxDefinitions(), ...extraDefinitions];
     // Prefer the real-time WebGL port when one exists for an OFX plugin.
     const ported = new Set(defs.filter((d) => !d.native && d.ofxIdentifier).map((d) => d.ofxIdentifier));
-    return defs.filter((d) => !(d.native && d.ofxIdentifier && ported.has(d.ofxIdentifier)));
+    // Compositing-only helpers (e.g. the Fusion blur) are offered on the Fusion page only.
+    return defs.filter((d) => !d.scope && !(d.native && d.ofxIdentifier && ported.has(d.ofxIdentifier)));
   }, [extraDefinitions, registryVersion]);
   const lookup = (id: string) => getFxDefinition(id) ?? extraDefinitions.find((d) => d.id === id);
   const filtered = all.filter((d) => `${d.name} ${d.vendor} ${d.description}`.toLowerCase().includes(query.toLowerCase()));

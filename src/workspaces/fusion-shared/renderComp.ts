@@ -4,7 +4,7 @@
  * shared WebGL FX renderer.
  */
 import { getSharedFxRenderer } from '../../fx/renderer';
-import { resolveParams } from '../../fx/registry';
+import { resolveParamsAtTime } from '../../fx/registry';
 import type { CompBlendMode, CompNode, Composition } from './compModel';
 import { evaluationOrder, getNode, paramsAt } from './compModel';
 
@@ -75,7 +75,7 @@ export function renderComposition(comp: Composition, timeSeconds: number, resolv
 
     switch (node.type) {
       case 'media': {
-        const source = active && node.mediaId ? resolveMedia(node.mediaId, timeSeconds - (node.inPoint ?? 0)) : null;
+        const source = active && node.mediaId ? resolveMedia(node.mediaId, timeSeconds - (node.inPoint ?? 0) + num(p.aeSourceOffset, 0)) : null;
         if (source) {
           const size = sourceSize(source);
           if (size.width && size.height) {
@@ -142,7 +142,7 @@ export function renderComposition(comp: Composition, timeSeconds: number, resolv
       case 'fx': {
         const src = input(node, 'input');
         if (!src) break;
-        const stack = (node.fxStack ?? []).map((entry) => ({ ...entry, params: resolveParams(entry) }));
+        const stack = (node.fxStack ?? []).map((entry) => ({ ...entry, params: resolveParamsAtTime(entry, timeSeconds) }));
         const renderer = stack.length ? getSharedFxRenderer() : null;
         if (renderer) {
           try {

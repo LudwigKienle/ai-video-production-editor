@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const { renderTimeline, prepareVideoProxy, resolveSourcePath, ffmpegBinaryPath } = require('./ffmpeg-handler');
 const { registerFxBakeIpc } = require('./fx-bake');
 const { registerOfxIpc } = require('./ofx/registerOfxIpc');
+const { registerMediaBrowseIpc } = require('./media-browse');
 const {
   ensureAudioMasteringEnvironment,
   probeAudioMasteringEnvironment,
@@ -440,6 +441,8 @@ registerFxBakeIpc(ipcMain, { getFfmpegPath: () => ffmpegBinaryPath, resolveSourc
 // Native OpenFX host sidecar (native/ofx-host): scan, proxy renders and bakes.
 const ofxIpc = registerOfxIpc(ipcMain, { getFfmpegPath: () => ffmpegBinaryPath });
 app.on('will-quit', () => ofxIpc.dispose());
+// Read-only folder browsing for the Media (import) page.
+registerMediaBrowseIpc(ipcMain, { getPath: (name) => app.getPath(name) });
 
 ipcMain.handle('project:exportVideo', async (event, { folderPath, project, settings }) => {
   try {

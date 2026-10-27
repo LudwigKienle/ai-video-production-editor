@@ -131,6 +131,8 @@ export type FxDefinition = {
    * (`ofxIdentifier` is the plugin id). Such definitions have no passes.
    */
   native?: 'ofx';
+  /** Restricts where the effect is offered (e.g. 'compositing' = Fusion page only). */
+  scope?: 'compositing';
 };
 
 export type FxPreset = {

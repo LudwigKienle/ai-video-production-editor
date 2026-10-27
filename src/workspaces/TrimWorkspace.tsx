@@ -315,23 +315,28 @@ const TrimWorkspace: React.FC<TrimWorkspaceProps> = (props) => {
 
     /* ─── Trim drags from the detail timeline ─── */
 
+    const previewRef = useRef<{ clips: TimelineClip[]; applied: number } | null>(null);
     const onTrimDrag = useCallback((phase: 'start' | 'move' | 'end' | 'cancel', target: TrimTarget | null, delta: number) => {
-        if (phase === 'start') { dragBase.current = timelineClips; setPreview(null); return; }
+        if (phase === 'start') { dragBase.current = timelineClips; previewRef.current = null; setPreview(null); return; }
         const base = dragBase.current;
         if (!base || !target) return;
         if (phase === 'move') {
-            setPreview(applyTrim(base, target, tool, Math.round(delta * FPS) / FPS, mediaLength));
+            const next = applyTrim(base, target, tool, Math.round(delta * FPS) / FPS, mediaLength);
+            previewRef.current = next;
+            setPreview(next);
             return;
         }
+        const last = previewRef.current;
         dragBase.current = null;
-        setPreview((last) => {
-            if (phase === 'end' && last && Math.abs(last.applied) > 1e-6) {
-                onBatchUpdateClips(last.clips);
-                const next = retarget(last.clips, target);
-                setTimeout(() => { update({ trimTarget: next }); setTrimOffset((value) => value + Math.round(last.applied * FPS)); if (next.kind === 'edit') onPlayheadUpdate(next.time); }, 0);
-            }
-            return null;
-        });
+        previewRef.current = null;
+        setPreview(null);
+        if (phase === 'end' && last && Math.abs(last.applied) > 1e-6) {
+            onBatchUpdateClips(last.clips);
+            const next = retarget(last.clips, target);
+            update({ trimTarget: next });
+            setTrimOffset((value) => value + Math.round(last.applied * FPS));
+            if (next.kind === 'edit') onPlayheadUpdate(next.time);
+        }
     }, [timelineClips, tool, mediaLength, onBatchUpdateClips, update, onPlayheadUpdate]);
 
     /* ─── Shuttle / playback ─── */

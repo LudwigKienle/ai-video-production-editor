@@ -29,6 +29,8 @@ export type PreviewResult = {
   /** True for a single-frame preview of a video. */
   frame: boolean;
   label: string;
+  /** Pixel size of the rendered result, e.g. "2560×1440". */
+  sizeLabel?: string;
 };
 
 export type ViewState = {
@@ -306,7 +308,7 @@ const ComparePreview: React.FC<Props> = ({
 
   const wipe = wipeGeometry(paneSize, view.wipe);
   const sizeLabel = `${source.width}×${source.height}`;
-  const targetLabel = target ? `${target.width}×${target.height}` : '';
+  const targetLabel = afterKind !== 'sim' && preview?.sizeLabel ? preview.sizeLabel : target ? `${target.width}×${target.height}` : '';
 
   return (
     <div

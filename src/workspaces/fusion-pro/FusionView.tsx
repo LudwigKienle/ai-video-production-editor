@@ -103,7 +103,7 @@ const FusionView: React.FC<FusionViewProps> = (props) => {
   const { comp, onChange, time, onTimeChange, mediaItems, resolveMedia, selectedNodeIds, onSelect } = props;
   const graphRef = useRef<NodeGraphHandle | null>(null);
   const initialViewers = (): [ViewerState, ViewerState] => [
-    { nodeId: comp.nodes.find((node) => node.type === 'media')?.id ?? null, channel: 'rgb', checker: false },
+    { nodeId: (comp.nodes.find((node) => node.type === 'media') ?? comp.nodes.find((node) => node.id !== comp.outputNodeId))?.id ?? null, channel: 'rgb', checker: false },
     { nodeId: comp.outputNodeId, channel: 'rgb', checker: false },
   ];
   const [viewers, setViewers] = useState<[ViewerState, ViewerState]>(initialViewers);
@@ -166,6 +166,11 @@ const FusionView: React.FC<FusionViewProps> = (props) => {
         Object.assign(node, freePos({ x: active.x - 20, y: active.y + 60 }));
         next = upstream ? insertNodeAfter(comp, node, upstream) : connect(insertNodeAfter(comp, node, null), node.id, comp.outputNodeId, 'input');
       } else next = insertNodeAfter(comp, node, selected?.id ?? null);
+      // Empty MediaOut: the first chain feeds it (Fusion connects the first tool to the output).
+      if (!def.mask && !getNode(next, comp.outputNodeId)?.inputs.input) {
+        const tip = next.nodes.find((entry) => entry.type === 'merge' && entry.inputs.fg === node.id) ?? node;
+        next = connect(next, tip.id, comp.outputNodeId, 'input');
+      }
       onChange(next);
       onSelect([node.id]);
       if (!viewers[0].nodeId) assignViewer(1, node.id);

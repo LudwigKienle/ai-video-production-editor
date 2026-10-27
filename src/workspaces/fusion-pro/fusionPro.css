@@ -2,6 +2,7 @@
    viewer (cv), parameter editor (pe) and time bar (tb). Own design, dark neutral chrome. */
 
 .fsh-root {
+  overflow: hidden;
   --fx-bg: #141415;
   --fx-panel: #1e1e20;
   --fx-panel-2: #232326;
@@ -53,7 +54,7 @@
 .fsh-media span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
 
 /* ─── Fusion view ─── */
-.fxp-root { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: minmax(150px, 1.05fr) auto auto minmax(150px, 1fr); gap: 2px; background: #0d0d0e; min-height: 0; height: 100%; }
+.fxp-root { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1.05fr) auto auto minmax(0, 1fr); gap: 2px; background: #0d0d0e; min-height: 0; height: 100%; overflow: hidden; }
 .fxp-viewers { grid-column: 1; grid-row: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; min-height: 0; }
 .fxp-viewer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--fx-panel); }
 .fxp-viewer__bar, .fxp-viewer__foot { display: flex; align-items: center; gap: 4px; padding: 2px 6px; background: var(--fx-head); flex: none; }
@@ -69,7 +70,7 @@
 .fxp-tool:hover:not(:disabled) { background: rgb(255 255 255 / 0.08); border-color: var(--fx-line); }
 .fxp-tool--text { flex-direction: row; font-size: 11px; }
 .fxp-nodes { grid-column: 1; grid-row: 4; position: relative; min-height: 0; background: #19191b; }
-.fxp-inspector { grid-column: 2; grid-row: 1 / span 4; display: flex; flex-direction: column; min-height: 0; background: var(--fx-panel); }
+.fxp-inspector { grid-column: 2; grid-row: 1 / span 4; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--fx-panel); }
 .fxp-inspector__head { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: var(--fx-head); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; font-size: 10.5px; color: var(--fx-dim); }
 .fxp-inspector__bypass { display: flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; font-weight: 500; }
 .fxp-inspector__name { margin: 6px 8px 2px; height: 24px; padding: 0 6px; font-weight: 600; }
@@ -191,7 +192,7 @@
 .tb-fps { color: var(--fx-dim); font-size: 10px; white-space: nowrap; }
 
 /* ─── Nuke view ─── */
-.nk-root { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(160px, 1fr) minmax(160px, 1fr) auto; gap: 2px; background: #0d0d0e; min-height: 0; height: 100%; }
+.nk-root { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 2px; background: #0d0d0e; min-height: 0; height: 100%; overflow: hidden; }
 .nk-viewer { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0; background: var(--fx-panel); }
 .nk-viewer__bar, .nk-dag__bar, .nk-bin__bar { display: flex; align-items: center; gap: 4px; padding: 2px 6px; background: #2b2b2e; flex: none; flex-wrap: wrap; }
 .nk-viewer__foot { display: flex; justify-content: space-between; padding: 2px 6px; background: #2b2b2e; color: var(--fx-dim); font-size: 10.5px; }
@@ -217,7 +218,7 @@
 .nk-menu__item small { color: var(--fx-dim); }
 .nk-menu__item--on { background: #c9a03a; color: #111; }
 .nk-menu__item--on small { color: #222; }
-.nk-bin { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; min-height: 0; background: #2b2b2e; }
+.nk-bin { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: #2b2b2e; }
 .nk-bin__count { color: var(--fx-dim); font-size: 10px; }
 .nk-bin__body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 4px; }
 .nk-panel { border: 1px solid #444; border-radius: 2px; background: #323236; }

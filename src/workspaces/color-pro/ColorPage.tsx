@@ -533,7 +533,7 @@ const ColorPage: React.FC<ColorPageProps> = (props) => {
                   <span className="cp-bar__spacer" />
                   <button type="button" className="cp-btn" disabled={!selectedClip || !currentIsGrade} onClick={() => currentNode ? commitStack(resetNode(stack, nodeIndex)) : undefined} data-automation-id="color.primaries.resetNode" title="Node zurücksetzen">Node zurücksetzen</button>
                 </div>
-                <div className="cp-panel__body">{disabledNote ?? nonGradePanel ?? <PrimariesPalette values={nodeValues} onPatch={patchNode} mode={primaryMode} />}</div>
+                <div className="cp-panel__body">{disabledNote ?? (nonGradePanel ? <p className="cp-note">Effekt-Node – die Parameter stehen in der mittleren Palette. Primaries gelten nur für Farb-Nodes.</p> : null) ?? <PrimariesPalette values={nodeValues} onPatch={patchNode} mode={primaryMode} />}</div>
               </div>
               <div className="cp-panel" data-automation-id="color.palette.center">
                 <div className="cp-panel__head">

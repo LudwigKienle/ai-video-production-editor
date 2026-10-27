@@ -45,6 +45,7 @@ const radiusFor = (values: Record<string, unknown>, width: number) => {
 
 export const COMP_BLUR_FX: FxDefinition = {
   id: BLUR_FX_ID,
+  scope: 'compositing',
   name: 'Weichzeichner',
   vendor: 'AVPE',
   version: '1.0',

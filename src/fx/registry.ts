@@ -6,6 +6,7 @@ import { AI_PHOTOREALIZER } from './effects/photorealizer/index.ts';
 import { DEBAND } from './effects/deband/index.ts';
 import { FAKE_DIAGNOSTIC } from './effects/fakeDiagnostic/index.ts';
 import { FILM_EMULATION } from './effects/filmEmulation/index.ts';
+import { PRIMARY_GRADE } from './effects/primaryGrade/index.ts';
 
 const definitions = new Map<string, FxDefinition>();
 
@@ -162,3 +163,4 @@ registerFx(AI_PHOTOREALIZER);
 registerFx(DEBAND);
 registerFx(FAKE_DIAGNOSTIC);
 registerFx(FILM_EMULATION);
+registerFx(PRIMARY_GRADE);

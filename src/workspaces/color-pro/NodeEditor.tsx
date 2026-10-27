@@ -3,7 +3,7 @@
  * the source input (left) to the output (right). Colour nodes are
  * avpe.primary-grade instances; other GPU effects appear as effect nodes.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Plus, Power, RotateCcw, Trash2 } from 'lucide-react';
 import type { FxDefinition, FxInstance, FxStack } from '../../fx/types';
 import { getFxDefinition } from '../../fx/registry';
@@ -51,6 +51,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 const NodeEditor: React.FC<Props> = ({ stack, selected, thumbnail, effects, disabled, onSelect, onAddSerial, onAddEffect, onRemove, onMove, onToggle, onReset, onLabel }) => {
   const [editing, setEditing] = useState<number | null>(null);
+  const selRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { selRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [selected, stack.length]);
   const current = stack[selected];
   const virtual = stack.length === 0;
   return (
@@ -87,9 +89,10 @@ const NodeEditor: React.FC<Props> = ({ stack, selected, thumbnail, effects, disa
             const flags = node ? nodeToolFlags(node) : [];
             return (
               <React.Fragment key={node?.id ?? 'virtual'}>
-                <span style={{ width: 30, height: 1, background: '#8a8a90', flex: 'none' }} />
+                <span style={{ width: 18, height: 1, background: '#8a8a90', flex: 'none' }} />
                 <button
                   type="button"
+                  ref={index === selected ? selRef : undefined}
                   className={`cp-node ${index === selected ? 'cp-node--selected' : ''} ${node && !node.enabled ? 'cp-node--off' : ''} ${virtual ? 'cp-node--virtual' : ''}`}
                   onClick={() => onSelect(index)}
                   onDoubleClick={() => { if (node) setEditing(index); }}
@@ -131,7 +134,7 @@ const NodeEditor: React.FC<Props> = ({ stack, selected, thumbnail, effects, disa
               </React.Fragment>
             );
           })}
-          <span style={{ width: 30, height: 1, background: '#8a8a90', flex: 'none' }} />
+          <span style={{ width: 18, height: 1, background: '#8a8a90', flex: 'none' }} />
           <span className="cp-nodes__io" style={{ background: '#e6d15a' }} title="Ausgabe" />
         </div>
       </div>

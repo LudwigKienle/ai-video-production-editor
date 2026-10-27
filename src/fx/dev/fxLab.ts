@@ -13,6 +13,9 @@ import { PHOTOREALIZER_PARITY } from '../effects/photorealizer/parity.ts';
 import { DEBAND_PARITY } from '../effects/deband/parity.ts';
 import { FAKE_DIAGNOSTIC_PARITY } from '../effects/fakeDiagnostic/parity.ts';
 import { FILM_EMULATION_PARITY } from '../effects/filmEmulation/parity.ts';
+import { renderPrimaryGradeCpu } from '../effects/primaryGrade/cpu.ts';
+import { PARITY_CASES as PRIMARY_GRADE_CASES, parityImage as primaryGradeImage } from '../../workspaces/color-pro/primaryGradeParity.ts';
+import { createGradeNode } from '../../workspaces/color-pro/nodeStack.ts';
 
 const W = 40;
 const H = 24;
@@ -63,7 +66,15 @@ const OPTICS_SUITE: ParitySuite = {
     renderOpticsLabCpu(image, prepareOptics({ width: image.width, height: image.height, frameIndex }, controlsFromParams(params))),
 };
 
-const SUITES: ParitySuite[] = [OPTICS_SUITE, LENS_PHYSICS_PARITY, PHOTOREALIZER_PARITY, DEBAND_PARITY, FAKE_DIAGNOSTIC_PARITY, FILM_EMULATION_PARITY];
+// Color page grade node: cases carry the fully resolved node params (createGradeNode fills defaults).
+const PRIMARY_GRADE_SUITE: ParitySuite = {
+  effectId: 'avpe.primary-grade',
+  image: () => primaryGradeImage(),
+  cases: PRIMARY_GRADE_CASES.map(({ name, params }) => ({ name, params: createGradeNode(params, `parity-${name}`).params as Record<string, number | boolean | string>, frameIndex: 0 })),
+  cpu: (image, params) => renderPrimaryGradeCpu(image, params),
+};
+
+const SUITES: ParitySuite[] = [OPTICS_SUITE, LENS_PHYSICS_PARITY, PHOTOREALIZER_PARITY, DEBAND_PARITY, FAKE_DIAGNOSTIC_PARITY, FILM_EMULATION_PARITY, PRIMARY_GRADE_SUITE];
 
 function runParity(): ParityRow[] {
   const renderer = new FxRenderer();

@@ -189,14 +189,16 @@
 .ups-settings {
   grid-area: settings; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--ups-line); background: var(--ups-panel);
 }
-.ups-settings-scroll { flex: 1; overflow: auto; }
+.ups-settings-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .ups-group { border-bottom: 1px solid var(--ups-line-soft); }
 .ups-group-head {
   width: 100%; display: flex; align-items: center; gap: 6px; padding: 9px 12px; font-weight: 600; font-size: 12px; text-align: left;
 }
 .ups-group-head svg { width: 14px; height: 14px; color: var(--ups-dim); }
 .ups-group-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
-.ups-row { display: flex; align-items: center; gap: 8px; }
+.ups-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ups-row > select { min-width: 0; }
+.ups-card-body > select { width: 100%; min-width: 0; }
 .ups-row > label, .ups-label { color: var(--ups-dim); min-width: 84px; }
 .ups-seg { display: flex; background: var(--ups-well); border: 1px solid var(--ups-line); border-radius: 6px; padding: 2px; gap: 2px; }
 .ups-seg button { flex: 1; height: 24px; border-radius: 4px; color: var(--ups-dim); padding: 0 6px; white-space: nowrap; }

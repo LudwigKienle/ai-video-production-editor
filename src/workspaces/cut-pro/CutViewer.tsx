@@ -16,6 +16,8 @@ import {
 
 /* ─── Media elements ─── */
 
+const HALF_FRAME = 1 / 48;
+
 /** A video/audio/image element that shows `time`, or plays natively when `rate` > 0. */
 export const MediaSurface: React.FC<{
     media: MediaItem | null;
@@ -64,8 +66,9 @@ export const MediaSurface: React.FC<{
         const seek = () => {
             try {
                 const duration = Number.isFinite(element.duration) ? element.duration : Number.POSITIVE_INFINITY;
-                const target = Math.max(0, Math.min(duration - 0.001, time));
-                if (Math.abs(element.currentTime - target) > 0.015) element.currentTime = target;
+                // Aim at the middle of the frame so float rounding never shows the previous frame.
+                const target = Math.max(0, Math.min(duration - 0.001, time + HALF_FRAME));
+                if (Math.abs(element.currentTime - target) > 0.01) element.currentTime = target;
             } catch { /* not seekable yet */ }
         };
         seek();

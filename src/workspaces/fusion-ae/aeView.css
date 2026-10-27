@@ -71,7 +71,7 @@
 /* ── panels layout ─────────────────────────────────────────────────── */
 .aev-main { flex: 1; min-height: 120px; display: flex; gap: 2px; padding: 2px 2px 0; }
 .aev-col { display: flex; flex-direction: column; background: var(--aev-panel); border-radius: 3px; min-height: 0; overflow: hidden; }
-.aev-left { width: 270px; flex: 0 0 auto; }
+.aev-left { width: 310px; flex: 0 0 auto; }
 .aev-right { width: 250px; flex: 0 0 auto; }
 .aev-center { flex: 1; min-width: 0; display: flex; }
 .aev-col-body { flex: 1; min-height: 0; overflow: auto; }
@@ -237,3 +237,4 @@
 .aev-modal-box { width: 380px; padding: 14px; background: #262628; border: 1px solid var(--aev-line-strong); border-radius: 6px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 16px 48px rgb(0 0 0 / 0.6); }
 .aev-modal-title { font-weight: 600; font-size: 12.5px; margin-bottom: 4px; }
 .aev-modal-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.aev-head-sep { border-top: 1px solid var(--aev-gap); }

@@ -34,6 +34,9 @@ interface CompositingWorkspaceProps extends SharedSequenceProps {
   /** Places a result on the shared timeline at the playhead. */
   onAddToTimeline?: (item: MediaItem) => void;
   onSwitchToEdit?: () => void;
+  /** `extras.compositions` of the project (Fusion page store). */
+  compositionsExtra?: unknown;
+  onCompositionsChange?: (store: unknown) => void;
 }
 
 type BlendMode = 'source-over' | 'screen' | 'multiply' | 'overlay' | 'soft-light';
@@ -125,7 +128,11 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
 
   const [corridorKeyRepoPath, setCorridorKeyRepoPath] = useState(() => {
     if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(CORRIDOR_KEY_REPO_STORAGE_KEY) || '';
+    try {
+      return window.localStorage.getItem(CORRIDOR_KEY_REPO_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
   });
   const [corridorKeyEnvStatus, setCorridorKeyEnvStatus] = useState<CorridorKeyStatus | null>(null);
   const [corridorKeySourceFile, setCorridorKeySourceFile] = useState<File | null>(null);
@@ -368,7 +375,11 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
     const folderPath = await window.electron?.project?.selectFolder?.();
     if (!folderPath) return;
     setCorridorKeyRepoPath(folderPath);
-    window.localStorage.setItem(CORRIDOR_KEY_REPO_STORAGE_KEY, folderPath);
+    try {
+      window.localStorage.setItem(CORRIDOR_KEY_REPO_STORAGE_KEY, folderPath);
+    } catch {
+      /* storage unavailable */
+    }
     setCorridorKeyStatus('CorridorKey checkout selected.');
   };
 
@@ -1665,6 +1676,8 @@ const CompositingWorkspace: React.FC<CompositingWorkspaceProps> = (props) => {
         clipMedia={timelineMedia && timelineMedia.type !== 'audio' ? timelineMedia : null}
         clipDuration={timelineClip ? Math.max(0.04, timelineClip.end - timelineClip.start) : null}
         onOpenTools={() => setPageMode('tools')}
+        extrasStore={props.compositionsExtra}
+        onStoreChange={props.onCompositionsChange}
       />
     );
   }

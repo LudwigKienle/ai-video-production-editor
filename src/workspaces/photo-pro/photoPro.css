@@ -120,6 +120,7 @@
 .psx-tab__close { width: 16px; height: 16px; display: grid; place-items: center; border-radius: 2px; color: var(--psx-dim); }
 .psx-tab__close:hover { background: var(--psx-active) !important; color: #fff; }
 .psx-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--psx-canvas); touch-action: none; outline: none; }
+.psx-viewport:focus, .psx-viewport:focus-visible { outline: none !important; }
 .psx-viewport canvas { position: absolute; left: 0; top: 0; display: block; }
 .psx-viewport__overlay { pointer-events: none; }
 .psx-start { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--psx-dim); }

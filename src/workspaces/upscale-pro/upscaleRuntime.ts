@@ -389,7 +389,7 @@ export type RunRequest = {
   isCancelled: () => boolean;
 };
 
-export type RunResult = { item: MediaItem; savedPath?: string; notes: string[] };
+export type RunResult = { item: MediaItem; savedPath?: string; notes: string[]; outputSize: Size | null };
 
 class CancelledError extends Error {
   constructor() { super('Abgebrochen'); }
@@ -536,7 +536,7 @@ export const runUpscaleJob = async (req: RunRequest): Promise<RunResult> => {
     }
   }
   req.onProgress(0.99, 'Fertig');
-  return { item, savedPath, notes };
+  return { item, savedPath, notes, outputSize };
 };
 
 export const isCancelledError = (error: unknown): boolean => error instanceof CancelledError;

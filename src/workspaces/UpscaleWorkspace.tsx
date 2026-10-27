@@ -125,7 +125,13 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   const [view, setViewState] = useState<ViewState>(loadView);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [ioByInput, setIoByInput] = useState<Record<string, Range>>({});
+  const [ioByInput, setIoByInputState] = useState<Record<string, Range>>({});
+  // Mirrored in a ref so back-to-back MCP commands see In/Out changes immediately.
+  const ioRef = useRef<Record<string, Range>>({});
+  const setIoByInput = useCallback((fn: (prev: Record<string, Range>) => Record<string, Range>) => {
+    ioRef.current = fn(ioRef.current);
+    setIoByInputState(ioRef.current);
+  }, []);
   const [previewLength, setPreviewLength] = useState(0);
   const [jobs, dispatch] = useReducer(jobsReducer, []);
   const [previews, setPreviews] = useState<Record<string, PreviewResult>>({});
@@ -137,6 +143,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   const objectUrlsRef = useRef<string[]>([]);
   const jobContextRef = useRef(new Map<string, JobContext>());
   const jobResultsRef = useRef(new Map<string, MediaItem>());
+  const jobSizesRef = useRef(new Map<string, { width: number; height: number } | null>());
   const cancelledRef = useRef(new Set<string>());
   const tasksRef = useRef(new Map<string, TaskHandle>());
   const probesRef = useRef(new Map<string, Promise<QueueInput>>());
@@ -160,7 +167,8 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   const rates = useMemo<CostRate[]>(() => (costRates && costRates.length ? costRates : (UPSCALE_FALLBACK_RATES as unknown as CostRate[])), [costRates]);
 
   // ---------------------------------------------------------------- derived
-  const ioFor = useCallback((input: QueueInput): Range => clampRange(ioByInput[input.id] ?? { start: 0, end: input.duration }, input.duration, input.fps || 24), [ioByInput]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ioFor = useCallback((input: QueueInput): Range => clampRange(ioRef.current[input.id] ?? { start: 0, end: input.duration }, input.duration, input.fps || 24), [ioByInput]);
 
   const planFor = useCallback((input: QueueInput, s: UpscaleSettings, range?: Range | null): PipelinePlan => {
     const io = range ?? (input.kind === 'video' ? ioFor(input) : null);
@@ -323,12 +331,14 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   }, []);
 
   // ---------------------------------------------------------------- settings / view
+  // Kept in a ref as well so MCP commands issued back-to-back see the latest value.
+  const settingsRef = useRef(settings);
   const updateSettings = useCallback((fn: (draft: UpscaleSettings) => void) => {
-    setSettings((prev) => {
-      const draft: UpscaleSettings = JSON.parse(JSON.stringify(prev));
-      fn(draft);
-      return sanitizeSettings(draft);
-    });
+    const draft: UpscaleSettings = JSON.parse(JSON.stringify(settingsRef.current));
+    fn(draft);
+    const next = sanitizeSettings(draft);
+    settingsRef.current = next;
+    setSettings(next);
   }, []);
   const setView = useCallback((patch: Partial<ViewState>) => setViewState((prev) => ({ ...prev, ...patch })), []);
   const setIo = useCallback((range: Range) => {
@@ -362,7 +372,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
     return job;
   }, [planFor, stepCost, previewEstimate, previewLength, mock]);
 
-  const exportInput = useCallback((input: QueueInput, s: UpscaleSettings = settings) => {
+  const exportInput = useCallback((input: QueueInput, s: UpscaleSettings = settingsRef.current) => {
     if (input.status !== 'ready') throw new Error('Eingang ist noch nicht bereit.');
     if (apiKeyReady === false && !mock) throw new Error('API-Keys fehlen.');
     const io = input.kind === 'video' ? ioFor(input) : null;
@@ -378,10 +388,11 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   const renderPreviewFor = useCallback((input: QueueInput, length: number, at: number) => {
     if (input.status !== 'ready') throw new Error('Eingang ist noch nicht bereit.');
     if (apiKeyReady === false && !mock) throw new Error('API-Keys fehlen.');
-    if (input.kind === 'image') return enqueue(input, 'preview', null, settings);
+    const s = settingsRef.current;
+    if (input.kind === 'image') return enqueue(input, 'preview', null, s);
     const io = ioFor(input);
     const span = previewRange(at, length, io, input.fps || 24);
-    return length <= 0 ? enqueue(input, 'preview', null, settings, span.start) : enqueue(input, 'preview', span, settings);
+    return length <= 0 ? enqueue(input, 'preview', null, s, span.start) : enqueue(input, 'preview', span, s);
   }, [apiKeyReady, mock, enqueue, ioFor, settings]);
 
   const renderPreview = useCallback(() => {
@@ -396,7 +407,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
     dispatch({ type: 'cancel', id, at: Date.now() });
   }, []);
 
-  const showResult = useCallback((job: UpscaleJob, item: MediaItem) => {
+  const showResult = useCallback((job: UpscaleJob, item: MediaItem, outputSize?: { width: number; height: number } | null) => {
     if (/\.zip$/i.test(item.name)) { setNotice('EXR-Archiv: liegt im Media-Bin, keine Vorschau im Browser.'); return; }
     const ctx = jobContextRef.current.get(job.id);
     setPreviews((prev) => ({
@@ -409,6 +420,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
         range: job.range,
         frame: ctx?.frameTime !== undefined,
         label: `${job.purpose === 'preview' ? 'Vorschau' : 'Ergebnis'}${job.mock ? ' (Testmodus)' : ''}`,
+        sizeLabel: outputSize ? `${outputSize.width}×${outputSize.height}` : undefined,
       },
     }));
     setActiveId(job.inputId);
@@ -420,7 +432,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   const openJob = useCallback((id: string) => {
     const job = jobs.find((entry) => entry.id === id);
     const item = jobResultsRef.current.get(id);
-    if (job && item) showResult(job, item);
+    if (job && item) showResult(job, item, jobSizesRef.current.get(id));
   }, [jobs, showResult]);
 
   const addJobToBin = useCallback((id: string) => {
@@ -462,16 +474,17 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
         task.update({ progress, message: stepLabel });
       },
     })
-      .then(({ item, savedPath, notes }) => {
+      .then(({ item, savedPath, notes, outputSize }) => {
         if (isCancelled()) return;
         jobResultsRef.current.set(job.id, item);
+        jobSizesRef.current.set(job.id, outputSize);
         dispatch({ type: 'done', id: job.id, resultUrl: item.url, resultMediaId: job.purpose === 'export' ? item.id : undefined, savedPath, at: Date.now() });
         task.complete(notes.join(' ') || 'Fertig');
         if (job.purpose === 'export') {
           onAddGeneratedMedia(item);
           setInBin((prev) => new Set(prev).add(job.id));
         }
-        showResult(job, item);
+        showResult(job, item, outputSize);
         if (notes.length) setNotice(notes.join(' '));
       })
       .catch((error) => {
@@ -503,7 +516,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
   // ---------------------------------------------------------------- MCP live commands
   const liveRef = useRef<Record<string, unknown>>({});
   liveRef.current = {
-    inputs, activeInput, settings, view, time, ioFor, previews, jobs, estimateInput, mediaItems,
+    inputs, activeInput, settings: settingsRef.current, view, time, ioFor, previews, jobs, estimateInput, mediaItems,
     addMediaItem, updateSettings, setView, setTime, setIoByInput, selectInput, exportInput, renderPreviewFor, cancelJob, mock,
   };
   useEffect(() => {
@@ -552,7 +565,7 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
         return {
           inputs: l.inputs.map(({ thumbnail: _thumb, ...rest }) => ({ ...rest, io: rest.kind === 'video' ? l.ioFor(rest) : null })),
           activeInputId: l.activeInput?.id ?? null,
-          settings: l.settings,
+          settings: settingsRef.current,
           view: l.view,
           time: l.time,
           previews: Object.values(l.previews),
@@ -562,14 +575,14 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
       },
       'upscale.estimate': async (args) => {
         const input = await inputFor(args);
-        return summaryOf(input, applySettingsArgs(L().settings, args));
+        return summaryOf(input, applySettingsArgs(settingsRef.current, args));
       },
       'upscale.input.add': async (args) => {
         const input = await inputFor(args);
         return { inputId: input.id, kind: input.kind, width: input.width, height: input.height, duration: input.duration, status: input.status };
       },
       'upscale.settings.set': (args) => {
-        const next = applySettingsArgs(L().settings, args);
+        const next = applySettingsArgs(settingsRef.current, args);
         L().updateSettings((draft) => { Object.assign(draft, next); });
         return { settings: next };
       },
@@ -605,8 +618,10 @@ const UpscaleWorkspace: React.FC<UpscaleWorkspaceProps> = ({
       'upscale.queue.add': async (args) => {
         const input = await inputFor(args);
         const l = L();
-        const s = applySettingsArgs(l.settings, args);
-        l.updateSettings((draft) => { Object.assign(draft, s); });
+        const s = applySettingsArgs(settingsRef.current, args);
+        if (Object.keys(args).some((key) => !['mediaId', 'inputId', 'in', 'out', 'confirm'].includes(key))) {
+          l.updateSettings((draft) => { Object.assign(draft, s); });
+        }
         if (input.kind === 'video' && (typeof args.in === 'number' || typeof args.out === 'number')) {
           const current = l.ioFor(input);
           const next = clampRange({ start: typeof args.in === 'number' ? args.in : current.start, end: typeof args.out === 'number' ? args.out : current.end }, input.duration, input.fps || 24);

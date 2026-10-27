@@ -39,6 +39,8 @@ type ProjectSnapshot = {
   timelineTracks: TimelineTrack[];
   /** Optional sequence markers (pro editor). Older projects simply omit the field. */
   sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
+  /** Page/MCP module data (compositions, sound mix …) keyed by module. Older projects omit it. */
+  moduleExtras?: Record<string, unknown>;
   waveformCache: WaveformCache;
   projectHub?: {
     shotPrompts: ShotPrompt[];
@@ -134,6 +136,8 @@ type ProjectFile = {
   timelineClips: TimelineClip[];
   timelineTracks: TimelineTrack[];
   sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
+  /** Page/MCP module data (compositions, sound mix …) keyed by module. Older projects omit it. */
+  moduleExtras?: Record<string, unknown>;
   waveformCache: WaveformCache;
   projectHub?: ProjectHubRecord;
   reviewData?: ReviewData;
@@ -161,6 +165,8 @@ type ProjectLoadResult = {
   timelineTracks: TimelineTrack[];
   /** Optional sequence markers (pro editor). Older projects simply omit the field. */
   sequenceMarkers?: Array<{ id: string; time: number; name: string; color: string; comment: string; duration: number }>;
+  /** Page/MCP module data (compositions, sound mix …) keyed by module. Older projects omit it. */
+  moduleExtras?: Record<string, unknown>;
   waveformCache: WaveformCache;
   projectHub?: {
     shotPrompts: ShotPrompt[];
@@ -1238,6 +1244,7 @@ export const saveProjectToFolder = async (folderPath: string, snapshot: ProjectS
     timelineClips: snapshot.timelineClips,
     timelineTracks: snapshot.timelineTracks,
     sequenceMarkers: snapshot.sequenceMarkers,
+    moduleExtras: snapshot.moduleExtras && Object.keys(snapshot.moduleExtras).length ? snapshot.moduleExtras : undefined,
     waveformCache: snapshot.waveformCache,
     projectHub,
     reviewData,

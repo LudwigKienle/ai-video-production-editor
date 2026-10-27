@@ -676,7 +676,7 @@ const MediaImportPage: React.FC<MediaImportPageProps> = ({
             { id: 'pictures', label: 'Bilder', path: places.pictures, icon: <ImageIcon className="w-3.5 h-3.5" /> },
             { id: 'volumes', label: 'Laufwerke', path: places.volumes || undefined, icon: <HardDrive className="w-3.5 h-3.5" /> },
         ];
-        return list.filter((entry): entry is { id: string; label: string; path: string; icon: React.ReactNode } => Boolean(entry.path));
+        return list.filter((entry): entry is typeof entry & { path: string } => Boolean(entry.path));
     }, [places]);
     const crumbs = fsPath ? breadcrumbs(fsPath, { home: places?.home, homeLabel: 'Benutzer' }) : [];
     const binNames = Object.keys(liveBins);

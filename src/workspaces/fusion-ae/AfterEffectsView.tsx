@@ -96,7 +96,6 @@ export default function AfterEffectsView(props: FusionViewProps) {
   const [renderMs, setRenderMs] = useState(0);
   const [status, setStatus] = useState<string>('');
   const [solidDialog, setSolidDialog] = useState<{ name: string; color: string } | null>(null);
-  const [rightTab, setRightTab] = useState<'effects' | 'info'>('effects');
   const rootRef = useRef<HTMLDivElement>(null);
   const zoomFn = useRef<((dir: 1 | -1) => void) | null>(null);
 
@@ -638,15 +637,26 @@ export default function AfterEffectsView(props: FusionViewProps) {
 
   // -------------------------------------------------------------- keyboard
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
-    const hit = resolveAeShortcut(e.nativeEvent);
-    if (!hit) return;
-    e.preventDefault();
-    e.stopPropagation();
-    run(hit.command, { additive: hit.additive });
-  };
+  // Document capture: runs before the app's window-level page shortcuts, for
+  // keys aimed at this view (focus inside it, or nothing focused at all).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const root = rootRef.current;
+      if (!root || !target) return;
+      const inside = root.contains(target);
+      if (!inside && target !== document.body && target !== document.documentElement) return;
+      if (target.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) return;
+      if (root.querySelector('.aev-modal')) return;
+      const hit = resolveAeShortcut(e);
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      runRef.current(hit.command, { additive: hit.additive });
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
 
   // -------------------------------------------------------------- menus
 
@@ -688,7 +698,6 @@ export default function AfterEffectsView(props: FusionViewProps) {
       className="aev-root"
       ref={rootRef}
       tabIndex={0}
-      onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         const target = e.target as HTMLElement;
         if (!target.closest('input, textarea, select')) rootRef.current?.focus({ preventScroll: true });
@@ -770,7 +779,10 @@ export default function AfterEffectsView(props: FusionViewProps) {
             onSelectLayers={(ids, additive) => selectLayers(ids, additive ? 'toggle' : 'replace')}
             gesture={gesture}
             onCreateText={(pos) => createText(pos)}
-            onTextCommit={(id, text) => commit(patchParams({ ...compRef.current, nodes: compRef.current.nodes.map((n) => (n.id === id ? { ...n, name: text } : n)) }, id, { text }), 'Text ändern')}
+            onTextCommit={(id, text) => {
+              window.setTimeout(() => rootRef.current?.focus({ preventScroll: true }), 0);
+              commit(patchParams({ ...compRef.current, nodes: compRef.current.nodes.map((n) => (n.id === id ? { ...n, name: text } : n)) }, id, { text }), 'Text ändern');
+            }}
             onCreateMask={(id, rect, shape) => addMask(id, shape, rect)}
             onDropMedia={(mediaId) => {
               const item = mediaItems.find((m) => m.id === mediaId);
@@ -790,22 +802,16 @@ export default function AfterEffectsView(props: FusionViewProps) {
             <span className="aev-panel-title">Vorschau</span>
           </div>
           <PreviewPanel playing={playing} run={run} loop={loop} onLoop={setLoop} />
-          <div className="aev-tabs">
-            <button type="button" className={rightTab === 'effects' ? 'is-on' : ''} data-automation-id="ae.tab.effects" onClick={() => setRightTab('effects')}>
-              Effekte und Vorgaben
-            </button>
-            <button type="button" className={rightTab === 'info' ? 'is-on' : ''} data-automation-id="ae.tab.info" onClick={() => setRightTab('info')}>
-              Info
-            </button>
+          <div className="aev-panel-head">
+            <span className="aev-panel-title">Info</span>
+          </div>
+          <InfoPanel pixel={pixel} layer={primary} comp={comp} time={time} />
+          <div className="aev-panel-head aev-head-sep">
+            <span className="aev-panel-title">Effekte und Vorgaben</span>
           </div>
           <div className="aev-col-body">
-            {rightTab === 'effects' ? <EffectsPresetsPanel onApply={(id) => applyEffect(id, null)} hasSelection={selectedIds.length > 0} /> : <InfoPanel pixel={pixel} layer={primary} comp={comp} time={time} />}
+            <EffectsPresetsPanel onApply={(id) => applyEffect(id, null)} hasSelection={selectedIds.length > 0} />
           </div>
-          {rightTab === 'effects' && (
-            <div className="aev-mini-info">
-              <InfoPanel pixel={pixel} layer={primary} comp={comp} time={time} />
-            </div>
-          )}
         </div>
       </div>
       <div

@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('electron', {
     bakeVideoFrame: (payload) => ipcRenderer.invoke('fx:bakeVideoFrame', payload),
     bakeVideoEnd: (payload) => ipcRenderer.invoke('fx:bakeVideoEnd', payload),
   },
+  mediaBrowse: {
+    listDir: (dirPath) => ipcRenderer.invoke('media:listDir', dirPath),
+    places: () => ipcRenderer.invoke('media:places'),
+  },
   ofx: {
     status: () => ipcRenderer.invoke('ofx:status'),
     scan: (payload) => ipcRenderer.invoke('ofx:scan', payload),

@@ -11,7 +11,7 @@ import type { MediaItem } from '../../types';
 import type { Composition } from '../fusion-shared/compModel';
 import { getNode } from '../fusion-shared/compModel';
 import { clampTime, createCompFromMedia, createEmptyComp, getRenderRange, setRenderRange, type CompositionExt, type CompRange } from '../fusion-shared/compModelExt';
-import { loadStore, saveStore, storageKeyFor, storeFromUnknown, upsertComp, type CompStore } from '../fusion-shared/compPersist';
+import { loadStore, newerStore, saveStore, storageKeyFor, storeFromUnknown, upsertComp, type CompStore } from '../fusion-shared/compPersist';
 import { createHistory, pushHistory, redoHistory, undoHistory, type History } from '../fusion-shared/compHistory';
 import { ensureCompFx } from '../fusion-shared/compFx';
 import { renderComposition } from '../fusion-shared/renderComp';
@@ -72,12 +72,24 @@ export type CompShellProps = {
   clipMedia: MediaItem | null;
   clipDuration: number | null;
   onOpenTools(): void;
+  /** Project copy of the store (`extras.compositions`); the newer of it and localStorage wins on load. */
+  extrasStore?: unknown;
+  /** Mirrors every saved store into the project extras (MCP + project file). */
+  onStoreChange?(store: CompStore): void;
 };
 
-const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, onAddGeneratedMedia, onAddToTimeline, clipMedia, clipDuration, onOpenTools }) => {
+const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, onAddGeneratedMedia, onAddToTimeline, clipMedia, clipDuration, onOpenTools, extrasStore, onStoreChange }) => {
   useEffect(() => ensureCompFx(), []);
   const storageKey = storageKeyFor(currentProjectPath);
-  const [store, setStore] = useState<CompStore>(() => loadStore(storage(), storageKey));
+  const extrasRef = useRef(extrasStore);
+  extrasRef.current = extrasStore;
+  const onStoreChangeRef = useRef(onStoreChange);
+  onStoreChangeRef.current = onStoreChange;
+  const initialStore = (key: string): CompStore => {
+    const local = loadStore(storage(), key);
+    return newerStore(storeFromUnknown(extrasRef.current), local.comps.length || local.savedAt ? local : null);
+  };
+  const [store, setStore] = useState<CompStore>(() => initialStore(storageKey));
   const [hist, setHist] = useState<History<CompositionExt> | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -94,14 +106,18 @@ const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, o
   useEffect(() => {
     if (loadedKey.current === storageKey) return;
     loadedKey.current = storageKey;
-    setStore(loadStore(storage(), storageKey));
+    setStore(initialStore(storageKey));
     setSelection([]);
     setTime(0);
   }, [storageKey]);
 
   // Persist (debounced).
   useEffect(() => {
-    const timer = window.setTimeout(() => saveStore(storage(), storageKey, { ...store, savedAt: store.savedAt ?? Date.now() }), 300);
+    const timer = window.setTimeout(() => {
+      const saved = { ...store, savedAt: store.savedAt ?? Date.now() };
+      saveStore(storage(), storageKey, saved);
+      if (saved.comps.length || store.savedAt) onStoreChangeRef.current?.(saved);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [store, storageKey]);
 
@@ -113,7 +129,9 @@ const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, o
   const activeId = comp?.id ?? null;
   useEffect(() => {
     setHist(comp ? createHistory(comp) : null);
-    setSelection([]);
+    // Start with MediaIn selected so the first tool goes into the clip's pipe.
+    const mediaIn = comp?.nodes.find((node) => node.type === 'media');
+    setSelection(mediaIn ? [mediaIn.id] : []);
     setPlaying(false);
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -299,8 +317,8 @@ const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, o
   );
 
   // ------------------------------------------------------------ shell shortcuts (capture: before App's timeline keys)
-  const keyState = useRef({ undo, redo, comp, setPlaying });
-  keyState.current = { undo, redo, comp, setPlaying };
+  const keyState = useRef({ undo, redo, comp, setPlaying, view: store.view });
+  keyState.current = { undo, redo, comp, setPlaying, view: store.view };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return;
@@ -311,7 +329,7 @@ const CompShell: React.FC<CompShellProps> = ({ mediaItems, currentProjectPath, o
       let handled = true;
       if (mod && key === 'z' && event.shiftKey) k.redo();
       else if (mod && key === 'z') k.undo();
-      else if (mod && key === 'y') k.redo();
+      else if (mod && key === 'y' && k.view !== 'ae') k.redo(); // AE: ⌘Y = New › Solid
       else if (!mod && !event.shiftKey && event.code === 'Space') k.setPlaying((value) => !value);
       else if (!mod && (key === '1' || key === '2')) handled = true; // views use 1/2 for viewers; keep App from switching pages
       else handled = false;

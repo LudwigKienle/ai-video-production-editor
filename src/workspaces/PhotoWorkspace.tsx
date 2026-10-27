@@ -40,7 +40,7 @@ import {
   makeTextLayer, nextLayerName,
 } from './photo-pro/layers.ts';
 import type { DocAction, Layer, PhotoDoc, RasterLayer, TextLayer } from './photo-pro/layers.ts';
-import { canRedo, canUndo, commit, createHistory, currentState, dropOldest, jumpTo, redo, undo } from './photo-pro/history.ts';
+import { canRedo, canUndo, commit, createHistory, currentState, dropOldest, jumpTo, redo, replaceCurrent, undo } from './photo-pro/history.ts';
 import type { History } from './photo-pro/history.ts';
 import { TOOL_INFO, groupOfTool, isPaintTool, isSelectionTool, toolForShortcut } from './photo-pro/tools.ts';
 import type { ToolId } from './photo-pro/tools.ts';
@@ -293,6 +293,18 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
   }, []);
 
   const dispatch = useCallback((action: DocAction, label: string, opts?: { coalesceKey?: string }) => {
+    if (action.type === 'select') {
+      // Selecting a layer is not a history step (like the reference editor).
+      const id = activeIdRef.current;
+      if (!id) return;
+      setSessions((prev) => prev.map((s) => {
+        if (s.id !== id) return s;
+        const cur = currentState(s.history);
+        const next = docReducer(cur, action);
+        return next === cur ? s : { ...s, history: replaceCurrent(s.history, next) };
+      }));
+      return;
+    }
     applyDoc((d) => docReducer(d, action), label, opts);
   }, [applyDoc]);
 
@@ -728,7 +740,8 @@ const PhotoWorkspace: React.FC<PhotoWorkspaceProps> = ({ onAddGeneratedMedia, se
   }, []);
 
   const proxy = view ? proxyScale(view.zoom, dpr) : 1;
-  useEffect(() => { schedule({ composite: true }); }, [shownDoc, fxVersion, proxy, hiddenIds, schedule]);
+  const hasView = Boolean(view);
+  useEffect(() => { schedule({ composite: true }); }, [shownDoc, fxVersion, proxy, hiddenIds, hasView, schedule]);
   useEffect(() => { schedule({ display: true }); }, [view, vpSize.w, vpSize.h, showGrid, schedule]);
   useEffect(() => { schedule({ overlay: true }); }, [tool, crop, quickMask, textEdit, brush.size, schedule]);
 

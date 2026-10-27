@@ -88,6 +88,11 @@ import OutfitWorkspace from './workspaces/OutfitWorkspace';
 import ImportWorkspace from './workspaces/ImportWorkspace';
 import EditWorkspace from './workspaces/EditWorkspace';
 import { normalizeMarkers, type SequenceMarker } from './workspaces/edit-pro/markers';
+import { collectStudioTools, type StudioState, type StudioToolContext } from './mcp/toolModules';
+
+// MCP tool modules (src/mcp/modules/*Tools.ts) register themselves on import and are
+// published to the "ai-video-studio" MCP server next to the assistant tools.
+import.meta.glob('./mcp/modules/*Tools.ts', { eager: true });
 import AssetLibraryWorkspace from './workspaces/AssetLibraryWorkspace';
 import DesignWorkspace from './workspaces/DesignWorkspace';
 import ImageGenerationWorkspace from './workspaces/ImageGenerationWorkspace';
@@ -941,6 +946,8 @@ function App() {
     ] = useHistoryState<TimelineClip[]>([]);
     const [timelineTracks, setTimelineTracks] = useState<TimelineTrack[]>(INITIAL_TRACKS);
     const [sequenceMarkers, setSequenceMarkers] = useState<SequenceMarker[]>([]);
+    /** Module data published to MCP and saved with the project (compositions, soundMix …). */
+    const [mcpExtras, setMcpExtras] = useState<Record<string, unknown>>({});
     const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
     const [activeTrackId, setActiveTrackId] = useState<string | null>(INITIAL_TRACKS[0]?.id || null);
     const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -3061,6 +3068,10 @@ function App() {
             ensureTargeted('audio');
             setTimelineTracks(loadedTracks);
             setSequenceMarkers(normalizeMarkers((project as { sequenceMarkers?: unknown }).sequenceMarkers));
+            {
+                const raw = (project as { moduleExtras?: unknown }).moduleExtras;
+                setMcpExtras(raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {});
+            }
             setActiveTrackId(loadedTracks[0]?.id || null);
             setWaveformCache(project.waveformCache || {});
             setNodeGraph(project.nodeGraph || null);
@@ -3298,6 +3309,7 @@ function App() {
                     timelineClips,
                     timelineTracks,
                     sequenceMarkers,
+                    moduleExtras: mcpExtras,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3414,6 +3426,7 @@ function App() {
                     timelineClips,
                     timelineTracks,
                     sequenceMarkers,
+                    moduleExtras: mcpExtras,
                     waveformCache,
                     nodeGraph,
                     designCanvas: designCanvasState,
@@ -3476,6 +3489,7 @@ function App() {
         timelineClips,
         timelineTracks,
         sequenceMarkers,
+        mcpExtras,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -3534,6 +3548,7 @@ function App() {
         timelineClips,
         timelineTracks,
         sequenceMarkers,
+        mcpExtras,
         waveformCache,
         nodeGraph,
         designCanvasState,
@@ -7459,6 +7474,37 @@ function App() {
             for (const task of running.values()) task.complete();
         };
     }, []);
+    // ---- MCP tool context: latest project state + write actions for src/mcp tool modules.
+    const mcpStateRef = useRef<StudioState | null>(null);
+    const mcpNormalizeRef = useRef(normalizeClipTiming);
+    mcpNormalizeRef.current = normalizeClipTiming;
+    mcpStateRef.current = {
+        activeWorkspace,
+        timelineClips,
+        timelineTracks,
+        mediaItems,
+        playheadPosition,
+        selectedClipId,
+        projectPath,
+        extras: { ...mcpExtras, markers: sequenceMarkers },
+    };
+    const mcpContextRef = useRef<StudioToolContext>({
+        getState: () => mcpStateRef.current as StudioState,
+        actions: {
+            setActiveWorkspace: (workspace) => setActiveWorkspace(workspace),
+            updateClip: (clip) => setTimelineClips((prev) => prev.map((entry) => (entry.id === clip.id ? mcpNormalizeRef.current(clip) : entry))),
+            setTimelineClips: (clips) => setTimelineClips(clips.map((clip) => mcpNormalizeRef.current(clip))),
+            setTimelineTracks: (tracks) => setTimelineTracks(tracks),
+            addMediaItem: (item) => setMediaItems((prev) => (prev.some((entry) => entry.id === item.id) ? prev : [...prev, item])),
+            setPlayhead: (seconds) => setPlayheadPosition(Math.max(0, seconds)),
+            selectClip: (clipId) => setSelectedClipId(clipId),
+            setExtra: (key, value) => {
+                if (key === 'markers') setSequenceMarkers(normalizeMarkers(value));
+                else setMcpExtras((prev) => ({ ...prev, [key]: value }));
+            },
+        },
+    });
+
     const studioToolSignature = assistantTools.map((tool) => tool.name).join('|');
     useEffect(() => {
         const executor: Record<string, Function> = {};
@@ -7471,7 +7517,9 @@ function App() {
             };
         }
         Object.assign(executor, projectAgentExecutor);
-        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS], executor);
+        const moduleTools = collectStudioTools(() => mcpContextRef.current);
+        Object.assign(executor, moduleTools.executor);
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...moduleTools.declarations], executor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [studioToolSignature, projectAgentExecutor]);
 
@@ -8885,6 +8933,8 @@ function App() {
                     seedVideoUrl={compositingSeedVideo}
                     onConsumeSeed={() => setCompositingSeedVideo(null)}
                     currentProjectPath={projectPath}
+                    compositionsExtra={mcpExtras.compositions}
+                    onCompositionsChange={(store) => setMcpExtras(prev => ({ ...prev, compositions: store }))}
                 />
             );
             case 'ANALYSIS': return (

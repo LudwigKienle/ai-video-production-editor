@@ -382,3 +382,9 @@ test('ui state sanitising', () => {
   assert.equal(ui.showGrid, false);
   assert.equal(sanitizeUi(null).tool, 'selection');
 });
+
+test('keyframe refs round-trip exact (non-integer frame times)', async () => {
+  const { keyRefId: id, parseKeyRef: parse } = await import('./aeOps.ts');
+  const t = 50 / 24;
+  assert.equal(parse(id({ nodeId: 'n', prop: 'position', time: t }))!.time, t);
+});

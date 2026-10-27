@@ -219,6 +219,8 @@ export default function AeViewer(props: Props) {
       return;
     }
     if (tool === 'text') {
+      // Keep the browser from moving focus to the panel after the inline editor mounted.
+      e.preventDefault();
       const position = { x: pt.x - comp.width / 2, y: pt.y - comp.height / 2 };
       const id = props.onCreateText(position);
       if (id) setTextEdit({ layerId: id, x: client.x, y: client.y, value: '' });
@@ -468,7 +470,9 @@ export default function AeViewer(props: Props) {
         {textEdit && (
           <input
             className="aev-text-edit"
-            autoFocus
+            ref={(el) => {
+              if (el && document.activeElement !== el) window.setTimeout(() => el.focus(), 0);
+            }}
             placeholder="Text eingeben, Eingabe bestätigt"
             style={{ left: textEdit.x - (wrapRef.current?.getBoundingClientRect().left ?? 0), top: textEdit.y - (wrapRef.current?.getBoundingClientRect().top ?? 0) }}
             value={textEdit.value}

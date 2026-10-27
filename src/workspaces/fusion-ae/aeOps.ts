@@ -717,7 +717,7 @@ export function addKeyframeAt(node: CompNode, prop: AePropId, t: number): CompNo
 }
 
 export type KeyRef = { nodeId: string; prop: AePropId; time: number };
-export const keyRefId = (ref: KeyRef) => `${ref.nodeId}|${ref.prop}|${ref.time.toFixed(5)}`;
+export const keyRefId = (ref: KeyRef) => `${ref.nodeId}|${ref.prop}|${String(ref.time)}`;
 export function parseKeyRef(id: string): KeyRef | null {
   const [nodeId, prop, time] = id.split('|');
   const t = Number(time);
@@ -1018,6 +1018,8 @@ export const AE_COMMANDS: AeCommand[] = [
   { id: 'time.end', label: 'Zum Ende', menu: 'Vorschau', shortcut: 'Ende' },
   { id: 'time.prevKeyframe', label: 'Vorheriger Keyframe', menu: 'Animation', shortcut: 'J' },
   { id: 'time.nextKeyframe', label: 'Nächster Keyframe', menu: 'Animation', shortcut: 'K' },
+  { id: 'layer.newSolid', label: 'Neu › Farbfläche …', menu: 'Ebene', shortcut: '⌘ Y' },
+  { id: 'layer.newText', label: 'Neu › Text', menu: 'Ebene', shortcut: '⌥⇧⌘ T' },
   { id: 'time.layerIn', label: 'Zum In-Point der Ebene', menu: 'Ebene', shortcut: 'I' },
   { id: 'time.layerOut', label: 'Zum Out-Point der Ebene', menu: 'Ebene', shortcut: 'O' },
   { id: 'workArea.start', label: 'Arbeitsbereich-Anfang setzen', menu: 'Komposition', shortcut: 'B' },
@@ -1026,8 +1028,6 @@ export const AE_COMMANDS: AeCommand[] = [
   { id: 'layer.outToTime', label: 'Out-Point zur aktuellen Zeit verschieben', menu: 'Ebene', shortcut: ']' },
   { id: 'layer.trimIn', label: 'In-Point auf aktuelle Zeit trimmen', menu: 'Ebene', shortcut: '⌥ [' },
   { id: 'layer.trimOut', label: 'Out-Point auf aktuelle Zeit trimmen', menu: 'Ebene', shortcut: '⌥ ]' },
-  { id: 'layer.newSolid', label: 'Neu › Farbfläche …', menu: 'Ebene', shortcut: '⌘ Y' },
-  { id: 'layer.newText', label: 'Neu › Text', menu: 'Ebene', shortcut: '⌥⇧⌘ T' },
   { id: 'layer.duplicate', label: 'Duplizieren', menu: 'Ebene', shortcut: '⌘ D' },
   { id: 'layer.split', label: 'Ebene teilen', menu: 'Ebene', shortcut: '⇧⌘ D' },
   { id: 'layer.forward', label: 'Ebene nach vorne', menu: 'Ebene', shortcut: '⌘ ]' },
