@@ -79,6 +79,9 @@ import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
 import { registerStudioTools } from './services/localAgentsService';
+import { useSceneMapBridge } from './shotdesigner/useSceneMapBridge';
+import './mcp/modules/sceneMapTools';
+import { collectStudioTools } from './mcp/toolModules';
 import { createProjectAgentExecutor, describeAgentTool, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
 import { onStudioConnectActivity } from './services/studioConnectService';
 import LiveConversation from './components/LiveConversation';
@@ -1061,6 +1064,19 @@ function App() {
         lastHistoryDomainRef.current = 'shots';
         setShotPromptsWithHistory(nextShotPrompts);
     }, [setShotPromptsWithHistory]);
+    // Scene Map (Kameraplan) ↔ project state for UI and MCP tools (scene_map_*).
+    useSceneMapBridge({
+        setDesign: setDesignState,
+        setSetDesign: setSetDesignState,
+        shotPrompts,
+        setShotPrompts: (next) => setShotPrompts(next),
+        references,
+        sceneMap: sceneMapState,
+        setSceneMap: setSceneMapState,
+        projectPath,
+        projectName: projectName || storyBible.title,
+        openSceneMap: () => setActiveWorkspace('SCENE_MAP'),
+    });
     const activeProfile = profiles.find(profile => profile.id === activeProfileId) || profiles[0] || null;
     const isDirector = activeProfile?.role === 'director';
     const activeRole = activeProfile?.role || 'artist';
@@ -7464,7 +7480,10 @@ function App() {
             };
         }
         Object.assign(executor, projectAgentExecutor);
-        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS], executor);
+        // Tool modules (src/mcp/modules/*): Scene Map tools use their own bridge, the context is a stub here.
+        const moduleTools = collectStudioTools(() => ({ getState: () => ({ activeWorkspace: 'SCENE_MAP', timelineClips: [], timelineTracks: [], mediaItems: [], playheadPosition: 0, selectedClipId: null, projectPath: null, extras: {} }), actions: {} as never }));
+        Object.assign(executor, moduleTools.executor);
+        return registerStudioTools([...assistantTools, ...PROJECT_AGENT_TOOL_DECLARATIONS, ...moduleTools.declarations], executor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [studioToolSignature, projectAgentExecutor]);
 
@@ -8830,6 +8849,10 @@ function App() {
                     onChange={setSceneMapState}
                     references={references}
                     shotPrompts={shotPrompts}
+                    setDesign={setDesignState}
+                    onSetDesignChange={setSetDesignState}
+                    onShotPromptsChange={(next) => setShotPrompts(next)}
+                    projectName={projectName || storyBible.title}
                 />
             );
             case 'WORLD_GEN': return (
