@@ -1,4 +1,4 @@
-// The Sound workspace's electron/sound/mixdown.js comes from another branch. This test plants a
+// electron/sound/mixdown.js belongs to the Sound workspace. This test plants a
 // stub under that module id so the static require in ffmpeg-handler.js picks it up.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -30,6 +30,11 @@ test('ffmpeg-handler statically loads electron/sound/mixdown when present', () =
         delete require.cache[handlerPath];
     }
     const plain = require('./ffmpeg-handler');
-    assert.equal(plain.getSoundMixdownForTests(), null, 'without the module the hook is off');
+    if (require('fs').existsSync(fakeId)) {
+        // Sound workspace merged: the real module is loaded.
+        assert.equal(typeof plain.getSoundMixdownForTests()?.mixdownAudio, 'function', 'real mixdown module is used');
+    } else {
+        assert.equal(plain.getSoundMixdownForTests(), null, 'without the module the hook is off');
+    }
     delete require.cache[handlerPath];
 });

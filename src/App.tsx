@@ -79,6 +79,7 @@ import OnboardingModal from './components/OnboardingModal';
 import FloatingActionButton from './components/FloatingActionButton';
 import AIAssistant from './components/AIAssistant';
 import { registerStudioTools } from './services/localAgentsService';
+import { useSceneMapBridge } from './shotdesigner/useSceneMapBridge';
 import { createProjectAgentExecutor, describeAgentTool, loadImageAsJpeg, PROJECT_AGENT_TOOL_DECLARATIONS, type ProjectAgentState } from './services/projectAgentTools';
 import { onStudioConnectActivity } from './services/studioConnectService';
 import LiveConversation from './components/LiveConversation';
@@ -948,6 +949,7 @@ function App() {
     const [sequenceMarkers, setSequenceMarkers] = useState<SequenceMarker[]>([]);
     /** Module data published to MCP and saved with the project (compositions, soundMix …). */
     const [mcpExtras, setMcpExtras] = useState<Record<string, unknown>>({});
+    const handleSoundMixChange = useCallback((mix: unknown) => setMcpExtras(prev => ({ ...prev, soundMix: mix })), []);
     const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
     const [activeTrackId, setActiveTrackId] = useState<string | null>(INITIAL_TRACKS[0]?.id || null);
     const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -1070,6 +1072,19 @@ function App() {
         lastHistoryDomainRef.current = 'shots';
         setShotPromptsWithHistory(nextShotPrompts);
     }, [setShotPromptsWithHistory]);
+    // Scene Map (Kameraplan) ↔ project state for UI and MCP tools (scene_map_*).
+    useSceneMapBridge({
+        setDesign: setDesignState,
+        setSetDesign: setSetDesignState,
+        shotPrompts,
+        setShotPrompts: (next) => setShotPrompts(next),
+        references,
+        sceneMap: sceneMapState,
+        setSceneMap: setSceneMapState,
+        projectPath,
+        projectName: projectName || storyBible.title,
+        openSceneMap: () => setActiveWorkspace('SCENE_MAP'),
+    });
     const activeProfile = profiles.find(profile => profile.id === activeProfileId) || profiles[0] || null;
     const isDirector = activeProfile?.role === 'director';
     const activeRole = activeProfile?.role || 'artist';
@@ -8841,6 +8856,8 @@ function App() {
             case 'SOUND': return (
                 <SoundWorkspace
                     {...commonProps}
+                    soundMix={mcpExtras.soundMix}
+                    onSoundMixChange={handleSoundMixChange}
                     apiKeyReady={apiKeyReady}
                     onAddGeneratedMedia={(item) => setMediaItems(prev => [...prev, item])}
                     onAddToTimeline={(item) => {
@@ -8887,6 +8904,10 @@ function App() {
                     onChange={setSceneMapState}
                     references={references}
                     shotPrompts={shotPrompts}
+                    setDesign={setDesignState}
+                    onSetDesignChange={setSetDesignState}
+                    onShotPromptsChange={(next) => setShotPrompts(next)}
+                    projectName={projectName || storyBible.title}
                 />
             );
             case 'WORLD_GEN': return (
@@ -8996,7 +9017,7 @@ function App() {
                     onOpenSettings={() => setShowSettings(true)}
                 />
             );
-            case 'EXPORT': return <ExportWorkspace mediaItems={mediaItems} timelineClips={timelineClips} timelineTracks={timelineTracks} projectPath={projectPath} />;
+            case 'EXPORT': return <ExportWorkspace mediaItems={mediaItems} timelineClips={timelineClips} timelineTracks={timelineTracks} projectPath={projectPath} soundMix={mcpExtras.soundMix} />;
             default: return <ScriptWorkspace />;
         }
     };

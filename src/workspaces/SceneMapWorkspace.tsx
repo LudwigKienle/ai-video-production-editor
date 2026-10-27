@@ -17,12 +17,20 @@ import {
     DEFAULT_GRID_SIZE,
 } from '../data/sceneMapTypes';
 import SceneMap3DView from '../components/SceneMap3DView';
+import type { SetDesignState } from '../types';
+import ScenePlanEditor, { useSceneMapSession } from '../shotdesigner/ui/ScenePlanEditor';
+import { updateSession } from '../shotdesigner/session.ts';
 
 interface SceneMapWorkspaceProps {
     sceneMap: SceneMapState | null;
     onChange: (next: SceneMapState) => void;
     references?: ReferenceItem[];
     shotPrompts?: ShotPrompt[];
+    /** Shared set (also the 3D set design) – drives the Kameraplan view. */
+    setDesign?: SetDesignState | null;
+    onSetDesignChange?: (next: SetDesignState) => void;
+    onShotPromptsChange?: (next: ShotPrompt[]) => void;
+    projectName?: string;
 }
 
 const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
@@ -30,11 +38,19 @@ const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
     onChange,
     references = [],
     shotPrompts = [],
+    setDesign = null,
+    onSetDesignChange,
+    onShotPromptsChange,
+    projectName,
 }) => {
     const state = sceneMap || createDefaultSceneMapState();
     const activeScene = state.scenes.find((s) => s.id === state.activeSceneId) || state.scenes[0];
     const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
-    const [view3d, setView3d] = useState(false);
+    // View lives in the shared Scene Map session so MCP (scene_map_open) can switch it too.
+    const sceneMapSession = useSceneMapSession();
+    const view3d = sceneMapSession.view === '3d';
+    const viewPlan = sceneMapSession.view === 'plan' && !!onSetDesignChange;
+    const setView3d = (on: boolean) => updateSession({ view: on ? '3d' : 'overview' });
     const [isDragging, setIsDragging] = useState(false);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
@@ -249,12 +265,27 @@ const SceneMapWorkspace: React.FC<SceneMapWorkspaceProps> = ({
                 </button>
                 <div className="scene-tabs__spacer" />
                 <div className="toolbar-segmented" role="radiogroup" aria-label="View">
-                    <button type="button" role="radio" aria-checked={!view3d} className={`toolbar-segmented__item ${!view3d ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(false)}>2D plan</button>
-                    <button type="button" role="radio" aria-checked={view3d} className={`toolbar-segmented__item ${view3d ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(true)}>3D blockout</button>
+                    {onSetDesignChange && <button type="button" role="radio" aria-checked={viewPlan} data-automation-id="scene-map-view-plan" className={`toolbar-segmented__item ${viewPlan ? 'toolbar-segmented__item--active' : ''}`} onClick={() => updateSession({ view: 'plan' })}>Kameraplan</button>}
+                    <button type="button" role="radio" aria-checked={!view3d && !viewPlan} data-automation-id="scene-map-view-overview" className={`toolbar-segmented__item ${!view3d && !viewPlan ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(false)}>2D plan</button>
+                    <button type="button" role="radio" aria-checked={view3d} data-automation-id="scene-map-view-3d" className={`toolbar-segmented__item ${view3d ? 'toolbar-segmented__item--active' : ''}`} onClick={() => setView3d(true)}>3D blockout</button>
                 </div>
             </div>
 
-            <div className="scene-map-content">
+            {viewPlan && onSetDesignChange && (
+                <div style={{ flex: 1, minHeight: 0 }}>
+                    <ScenePlanEditor
+                        setDesign={setDesign}
+                        onSetDesignChange={onSetDesignChange}
+                        shotPrompts={shotPrompts}
+                        onShotPromptsChange={onShotPromptsChange}
+                        references={references}
+                        sceneMap={state}
+                        projectName={projectName}
+                    />
+                </div>
+            )}
+
+            <div className="scene-map-content" style={viewPlan ? { display: 'none' } : undefined}>
                 {/* Left Sidebar: Element Palette */}
                 <div className="element-palette">
                     <h3>Elements</h3>
