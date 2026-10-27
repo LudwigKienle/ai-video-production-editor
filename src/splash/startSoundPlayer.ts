@@ -33,6 +33,27 @@ export function prepareStartSound(sampleRate: number): Promise<Float32Array> {
 
 export type StartSoundHandle = { played: boolean; reason?: string; stop: () => void };
 
+type WarmAudio = { ctx: AudioContext; samples: Promise<Float32Array> };
+let warm: WarmAudio | null = null;
+
+/**
+ * Call as soon as it is clear the start sound will play (before the first
+ * animation frame): opens the audio context and synthesises the samples, so
+ * playback can start on the animation's first frame instead of joining late.
+ */
+export function warmStartSound(): void {
+  if (warm) return;
+  try {
+    const g = globalThis as unknown as { AudioContext?: AudioCtxCtor; webkitAudioContext?: AudioCtxCtor };
+    const Ctor = g.AudioContext ?? g.webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor({ latencyHint: 'interactive' });
+    warm = { ctx, samples: prepareStartSound(ctx.sampleRate) };
+  } catch {
+    warm = null;
+  }
+}
+
 const SILENT = (reason: string): StartSoundHandle => ({ played: false, reason, stop: () => undefined });
 
 /**
@@ -45,7 +66,8 @@ export async function playStartSound(options: { volume?: number; startedAt?: num
     const g = globalThis as unknown as { AudioContext?: AudioCtxCtor; webkitAudioContext?: AudioCtxCtor };
     const Ctor = g.AudioContext ?? g.webkitAudioContext;
     if (!Ctor) return SILENT('no Web Audio');
-    const ctx = new Ctor({ latencyHint: 'interactive' });
+    const ctx = warm?.ctx ?? new Ctor({ latencyHint: 'interactive' });
+    warm = null;
     if (ctx.state === 'suspended') {
       await Promise.race([ctx.resume().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 250))]);
     }

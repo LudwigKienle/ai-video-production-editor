@@ -9,7 +9,7 @@ import { registerLiveCommands } from '../mcp/liveCommands.ts';
 import SplashOverlay from './SplashOverlay.tsx';
 import { SPLASH_VARIANTS, splashDuration, type SplashVariant } from './renderSplashFrame.ts';
 import { SPLASH_BACKGROUNDS, loadSplashSettings, markSplashPlayed, resolveSplashBackground, splashAlreadyPlayed, type SplashBackground } from './splashSettings.ts';
-import { playStartSound } from './startSoundPlayer.ts';
+import { playStartSound, warmStartSound } from './startSoundPlayer.ts';
 
 type Run = { id: number; variant: SplashVariant; sound: boolean; volume: number; reducedMotion?: boolean; background: 'dark' | 'light' };
 
@@ -23,6 +23,8 @@ const decideBootRun = (): Run | null => {
   } else {
     markSplashPlayed();
     bootRun = { id: 1, variant: settings.variant, sound: settings.sound, volume: settings.volume, background: resolveSplashBackground(settings.background) };
+    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (settings.sound && !reduced) warmStartSound();
   }
   return bootRun;
 };
