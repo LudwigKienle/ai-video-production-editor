@@ -82,6 +82,9 @@ test('playhead, edit points, ripple delete, lift and extract', async () => {
     try {
         assert.equal((await mcp.call('timeline_set_playhead', { time: '00:00:01:00' })).playhead, 1);
         assert.equal((await mcp.call('timeline_set_playhead', { time: '+12' })).playhead, 1.5);
+        // Plain number strings are seconds (agents), not typed frames.
+        assert.equal((await mcp.call('timeline_set_playhead', { time: '4' })).playhead, 4);
+        assert.equal((await mcp.call('timeline_set_playhead', { time: '2.5' })).playhead, 2.5);
         assert.equal((await mcp.call('timeline_goto_edit_point', { direction: 'next' })).playhead, 4);
         assert.equal((await mcp.call('timeline_goto_edit_point', { direction: 'previous' })).playhead, 0);
 
@@ -182,6 +185,19 @@ test('list and select clips by id or by time', async () => {
         assert.equal(state.selectedClipId, 'c1');
         assert.equal((await mcp.call('timeline_select_clip', { clipId: 'nope' })).ok, false);
         assert.equal((await mcp.call('timeline_select_clip', { time: 50 })).ok, false);
+    } finally {
+        mcp.dispose();
+    }
+});
+
+test('plain number strings are seconds for markers', async () => {
+    const { ctx } = createTestContext({ timelineTracks: tracks, timelineClips: [clip('c1', 'v1', 0, 30)] });
+    const mcp = await createMcpHarness(ctx);
+    try {
+        const plain = await mcp.call('timeline_marker_add', { time: '16', name: 'Plain seconds' });
+        assert.equal((plain.marker as { time: number }).time, 16, '"16" means 16 seconds, not 16 frames');
+        const decimal = await mcp.call('timeline_marker_add', { time: '5.5', name: 'Decimal' });
+        assert.equal((decimal.marker as { time: number }).time, 5.5);
     } finally {
         mcp.dispose();
     }

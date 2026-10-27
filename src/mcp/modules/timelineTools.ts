@@ -46,11 +46,15 @@ const markersOf = (ctx: StudioToolContext): SequenceMarker[] => normalizeMarkers
 const saveMarkers = (ctx: StudioToolContext, markers: SequenceMarker[]) => ctx.actions.setExtra('markers', markers);
 const sequenceEnd = (ctx: StudioToolContext) => ctx.getState().timelineClips.reduce((max, clip) => Math.max(max, clip.end), 0);
 
-/** Seconds from a number or a timecode string ("00:00:05:12", "+12" frames …). */
+/** Seconds from a number, a plain number string ("16", "5.5" = seconds) or a timecode ("00:00:05:12", "+12" frames …). */
 const timeArg = (args: Record<string, unknown>, key: string, ctx: StudioToolContext, fallback?: number): number => {
     const value = args[key];
     if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value);
     if (typeof value === 'string' && value.trim()) {
+        // Agents send "16" or "5.5" meaning seconds. The timecode field would read bare digits as
+        // typed frames ("16" = 16 frames, "5.5" = 5 s 5 frames), so plain numbers are seconds here.
+        const plain = /^\s*(\d+(?:[.,]\d+)?)\s*$/.exec(value);
+        if (plain) return Math.max(0, Math.round(Number(plain[1].replace(',', '.')) * TIMELINE_FPS) / TIMELINE_FPS);
         const parsed = parseTimecodeInput(value, TIMELINE_FPS, ctx.getState().playheadPosition);
         if (parsed === null) throw new Error(`Cannot read time "${value}" (use seconds or hh:mm:ss:ff).`);
         return parsed;
@@ -286,7 +290,7 @@ export const TIMELINE_TOOL_MODULE: StudioToolModule = {
         /* ── Playhead / edit points ── */
         {
             name: 'timeline_set_playhead',
-            description: 'Set the playhead like typing into the timecode field: seconds, "00:00:05:12", "512", "+12" (frames), "-1:00", "2.5s".',
+            description: 'Set the playhead: seconds (16 or "16", "2.5"), timecode "00:00:05:12", relative "+12" / "-12" frames or "-1:00", or "2.5s".',
             parameters: { type: 'object', properties: { time: { type: 'string' } }, required: ['time'] },
             handler: (args, ctx) => {
                 const time = Math.min(Math.max(0, sequenceEnd(ctx)), timeArg(args, 'time', ctx));
