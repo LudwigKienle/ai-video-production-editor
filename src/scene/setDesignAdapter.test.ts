@@ -129,3 +129,27 @@ test('with a shared committer (3D command bus) the Scene Map writes stored docum
     session.resetSession();
   }
 });
+
+test('shared selection with the 3D side flows both ways', async () => {
+  const session = await import('../shotdesigner/session.ts');
+  session.resetSession();
+  let selected: string[] = ['cam-3d'];
+  const listeners = new Set<() => void>();
+  const writes: string[][] = [];
+  session.setSceneMapSelectionSync({
+    read: () => selected,
+    write: (ids) => { writes.push(ids); selected = ids; },
+    subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+  });
+  try {
+    assert.deepEqual(session.getSession().selection, ['cam-3d'], '3D selection is picked up');
+    session.updateSession({ selection: ['p-1'] });
+    assert.deepEqual(writes.at(-1), ['p-1'], '2D selection is written to 3D');
+    selected = ['wall-1'];
+    listeners.forEach((fn) => fn());
+    assert.deepEqual(session.getSession().selection, ['wall-1'], '3D change reaches 2D');
+    assert.equal(writes.length, 1, 'no echo back to 3D');
+  } finally {
+    session.resetSession();
+  }
+});

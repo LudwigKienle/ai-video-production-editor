@@ -77,10 +77,49 @@ const emit = () => listeners.forEach((l) => { try { l(); } catch { /* listener e
 export const getSession = () => session;
 export const subscribeSession = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 export const updateSession = (patch: Partial<SceneMapSession>) => {
+  const selectionChanged = patch.selection !== undefined && patch.selection !== session.selection;
   session = { ...session, ...patch };
+  if (selectionChanged && selectionSync && !syncingSelection) {
+    try { selectionSync.write(session.selection); } catch { /* the 3D side may not know a 2D-only id */ }
+  }
   emit();
 };
-export const resetSession = () => { session = { ...DEFAULT_SESSION }; past.length = 0; future.length = 0; lastApplied = null; lastBase = undefined; emit(); };
+
+/**
+ * Optional shared selection with the 3D set design (after the merge), e.g.
+ *   setSceneMapSelectionSync({
+ *     read: () => setDesignBus.getUi().selectedIds,
+ *     // select.set throws on unknown ids: keep only objects that exist in the set.
+ *     write: (ids) => {
+ *       const scene = setDesignBus.getScene();
+ *       const known = new Set([...scene.assets, ...(scene.cameras || []), ...scene.lights].map((o) => o.id));
+ *       setDesignBus.run('select.set', { objects: ids.filter((id) => known.has(id)), mode: 'replace' });
+ *     },
+ *     subscribe: (fn) => setDesignBus.subscribe(fn),
+ *   });
+ * Camera, person and asset ids are the same in 2D and 3D, so no mapping is needed.
+ */
+export type SceneMapSelectionSync = { read: () => string[]; write: (ids: string[]) => void; subscribe: (listener: () => void) => () => void };
+let selectionSync: SceneMapSelectionSync | null = null;
+let selectionUnsub: (() => void) | null = null;
+let syncingSelection = false;
+export const setSceneMapSelectionSync = (next: SceneMapSelectionSync | null) => {
+  selectionUnsub?.();
+  selectionUnsub = null;
+  selectionSync = next;
+  if (!next) return;
+  const pull = () => {
+    let ids: string[] = [];
+    try { ids = next.read() || []; } catch { return; }
+    if (ids.length === session.selection.length && ids.every((id, i) => id === session.selection[i])) return;
+    syncingSelection = true;
+    try { updateSession({ selection: [...ids], selectedKeyId: null }); } finally { syncingSelection = false; }
+  };
+  selectionUnsub = next.subscribe(pull);
+  pull();
+};
+export const resetSession = () => {
+  setSceneMapSelectionSync(null); session = { ...DEFAULT_SESSION }; past.length = 0; future.length = 0; lastApplied = null; lastBase = undefined; emit(); };
 
 export const bindSceneMapBridge = (next: SceneMapBridge | null) => { bridge = next; };
 export const getBridge = () => bridge;
