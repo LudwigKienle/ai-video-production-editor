@@ -44,6 +44,7 @@ const MODELS = {
     SEEDANCE_25_T2V: 'bytedance/seedance-2.5/text-to-video',
     SEEDANCE_25_I2V: 'bytedance/seedance-2.5/image-to-video',
     SEEDANCE_25_REFERENCE: 'bytedance/seedance-2.5/reference-to-video',
+    MINIMAX_H3_REFERENCE: 'minimax/h3/reference-to-video',
     SEEDREAM_V5_PRO_T2I: 'bytedance/seedream/v5/pro/text-to-image',
     SEEDREAM_V5_PRO_EDIT: 'bytedance/seedream/v5/pro/edit',
     KREA_2_LARGE_T2I: 'krea/v2/large/text-to-image',
@@ -2278,6 +2279,39 @@ export const generateVideoWithFalSeedance25Reference = async (
     if (audios.length > 0) input.audio_urls = audios.map((audio) => toDataUri(audio));
     const output = await runFalQueue(MODELS.SEEDANCE_25_REFERENCE, input, { pollIntervalMs: 5000, maxChecks: 360 });
     return finalizeFalSeedance25Video(output, MODELS.SEEDANCE_25_REFERENCE, prompt, duration, 'Seedance 2.5 reference-to-video', 'fal-seedance-25-ref');
+};
+
+export type FalMinimaxH3Resolution = '480P' | '768P' | '2K' | '4K';
+export type FalMinimaxH3AspectRatio = 'adaptive' | '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
+
+/**
+ * MiniMax H3 (Hailuo 3) reference-to-video: up to 9 reference images, which the
+ * prompt names as "Image 1", "Image 2" … in order. `promptExpansion: 'disabled'`
+ * keeps the prompt verbatim (Burst Frame). 480P/768P are native; 2K/4K upscale a 768P base.
+ */
+export const generateVideoWithFalMinimaxH3Reference = async (
+    prompt: string,
+    opts: {
+        images: Array<{ base64: string; mimeType: string }>;
+        duration?: number;
+        aspectRatio?: FalMinimaxH3AspectRatio;
+        resolution?: FalMinimaxH3Resolution;
+        promptExpansion?: 'disabled' | 'fast' | 'balanced' | 'quality';
+    }
+): Promise<MediaItem> => {
+    const images = (opts.images || []).slice(0, 9);
+    if (images.length === 0) throw new Error('MiniMax H3 reference-to-video needs at least one reference image.');
+    const duration = Math.max(1, Math.round(opts.duration || 5));
+    const input: Record<string, any> = {
+        prompt,
+        duration,
+        resolution: opts.resolution || '768P',
+        aspect_ratio: opts.aspectRatio || 'adaptive',
+        prompt_expansion_mode: opts.promptExpansion || 'balanced',
+        reference_image_urls: images.map((image) => toDataUri(image)),
+    };
+    const output = await runFalQueue(MODELS.MINIMAX_H3_REFERENCE, input, { pollIntervalMs: 5000, maxChecks: 360 });
+    return finalizeFalSeedance25Video(output, MODELS.MINIMAX_H3_REFERENCE, prompt, String(duration), 'MiniMax H3 reference-to-video', 'fal-minimax-h3-ref');
 };
 
 // ---------------------------------------------------------------------------

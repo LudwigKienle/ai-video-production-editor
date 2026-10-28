@@ -1596,6 +1596,19 @@ export type ShotPrompt = {
   filmingContinuityRefinementPasses?: number;
   continuityReview?: ShotContinuityReview;
   analysisNotes?: string[];
+  /**
+   * Burst Frame (Phil Langer) set from the Storyboard: when present, Filming uses this prompt
+   * verbatim for the shot (20 static setups, hard cuts, 5 s, audio off).
+   */
+  burstFrame?: {
+    prompt: string;
+    aspectRatio?: string;
+    updatedAt?: string;
+    /** 'references': no start frame, the moment is composed from the reference images. */
+    source?: 'start-frame' | 'references';
+    /** Reference images sent with the start frame (models that take several images); names are locked in the prompt. */
+    references?: Array<{ id: string; name: string; imageUrl: string; kind?: string; source: 'concept' | 'upload' | 'shot' }>;
+  };
 };
 
 export type RecentProject = {

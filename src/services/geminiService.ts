@@ -1306,6 +1306,21 @@ export const relightImageWithGemini3Pro = async (
     );
 };
 
+/** Like analyzeImage, with several images in order (e.g. start frame first, then references). */
+export const analyzeImages = async (prompt: string, images: Array<{ base64: string, mimeType: string }>): Promise<string> => {
+    const ai = getAiClient();
+    const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
+        model: GEMINI_TEXT_MODEL_FLASH,
+        contents: {
+            parts: [
+                { text: prompt },
+                ...images.map((image) => ({ inlineData: { data: image.base64, mimeType: image.mimeType } })),
+            ],
+        },
+    }));
+    return response.text || '';
+};
+
 export const analyzeImage = async (prompt: string, image: { base64: string, mimeType: string }): Promise<string> => {
     const ai = getAiClient();
     const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({

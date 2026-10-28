@@ -29,7 +29,21 @@ export type BurstFrameInput = {
   lighting?: BurstLighting;
   /** Shorter wording for models with tight prompt limits. */
   compact?: boolean;
+  /** Reference images sent along with the start frame (cast, locations, props): their names are locked in the prompt. */
+  references?: Array<{ name: string; kind?: string }>;
+  /**
+   * 'start-frame' (default): the start frame defines the frozen moment.
+   * 'references': there is no start frame; the moment is composed from the reference images
+   * (e.g. the characters inside the location) and described in `continuity`.
+   */
+  source?: 'start-frame' | 'references';
 };
+
+/** Video models that can render a burst from reference images alone (no start frame). */
+export const BURST_REFERENCE_VIDEO_MODELS = ['seedance-2.5-omni-fal', 'seedance-2.0-omni-fal', 'minimax-h3-reference-fal', 'pixverse-c1-reference-fal'];
+
+const referenceList = (refs: BurstFrameInput['references']) =>
+  (refs || []).filter((ref) => ref.name.trim()).map((ref) => (ref.kind ? `${ref.name.trim()} (${ref.kind})` : ref.name.trim()));
 
 const LOCKED = 'still, locked frame';
 
@@ -135,13 +149,19 @@ export function buildBurstFramePrompt(input: BurstFrameInput): string {
     input.lighting === 'time-of-day'
       ? 'only camera angle, focal distance, focus plane, and the lighting changes in shots 18–20 may change'
       : 'only camera angle, focal distance, and focus plane may change; one continuous light state throughout';
-  const continuity = input.continuity.trim() || 'the subject, pose, wardrobe, props, and environment layout of the start frame';
+  const continuity = input.continuity.trim() || (input.source === 'references'
+    ? 'characters, wardrobe, props, and environment exactly as in the reference images, composed into one frozen moment'
+    : 'the subject, pose, wardrobe, props, and environment layout of the start frame');
   const style = input.style.trim() || 'Naturalistic light and texture exactly as in the start frame, photorealistic.';
+  const refs = referenceList(input.references);
+  const fromRefs = input.source === 'references' && refs.length > 0;
+  const sourceLabel = fromRefs ? 'the reference images' : 'the start frame';
 
   if (input.compact) {
     return [
-      'Create a 5-second BURST FRAME sequence from the start frame.',
+      fromRefs ? 'Create a 5-second BURST FRAME sequence of one frozen moment built from the reference images.' : 'Create a 5-second BURST FRAME sequence from the start frame.',
       `CONTINUITY LOCK: keep exactly ${continuity}. Same subject, set, light direction, palette, texture, and aspect ratio; add, remove, or move nothing.`,
+      ...(refs.length ? [`REFERENCES: the attached reference images show ${refs.join(', ')}; match their identity and design exactly in every shot${fromRefs ? ', placed together as described in the continuity lock' : ''}.`] : []),
       `STYLE: ${style}`,
       'RULES: 20 distinct static shots in 5 seconds, approximately 0.25 seconds each; instantaneous hard cuts; no transition frames. No continuous camera move, orbit, zoom, pan, tilt, or dolly. No subject motion, lip movement, blinking, pose interpolation, or cloth motion. No morphing, cross-dissolves, double exposure, or blended viewpoints.',
       'SHOTS:',
@@ -151,10 +171,19 @@ export function buildBurstFramePrompt(input: BurstFrameInput): string {
   }
 
   return [
-    'Create a 5-second cinematic BURST FRAME sequence from the supplied start frame.',
+    fromRefs
+      ? 'Create a 5-second cinematic BURST FRAME sequence of one frozen moment, built from the supplied reference images.'
+      : 'Create a 5-second cinematic BURST FRAME sequence from the supplied start frame.',
     '',
     'CONTINUITY LOCK',
-    `Preserve exactly the same ${continuity}. Preserve the exact spatial relationships, materials, light direction, color palette, texture detail, and aspect ratio of the source image. This is one unchanged subject in one coherent location, photographed from different camera positions. Do not add, remove, redesign, or relocate anything.`,
+    fromRefs
+      ? `Preserve exactly the same ${continuity}. Compose these elements once into a single coherent moment and keep it frozen: the same spatial relationships, materials, light direction, color palette and texture detail in every shot. This is one unchanged scene in one coherent location, photographed from different camera positions. Do not add, remove, redesign, or relocate anything.`
+      : `Preserve exactly the same ${continuity}. Preserve the exact spatial relationships, materials, light direction, color palette, texture detail, and aspect ratio of the source image. This is one unchanged subject in one coherent location, photographed from different camera positions. Do not add, remove, redesign, or relocate anything.`,
+    ...(refs.length ? [
+      '',
+      'REFERENCE LOCK',
+      `The attached reference images define identity and design: ${refs.join('; ')}. Match each of them exactly in every shot: face, hair, wardrobe, materials, shapes and markings. ${fromRefs ? 'The continuity lock defines pose, placement and the frozen moment; the location reference defines the set.' : 'The start frame alone defines pose, placement, framing and the frozen moment.'}`,
+    ] : []),
     '',
     'VISUAL STYLE LOCK',
     style,
@@ -205,6 +234,19 @@ Return strict JSON, no markdown:
   "shots": ["20 camera setups adapted to this subject and environment, each one atomic, each changes one main camera or framing variable, left/right from the camera's viewpoint, close-ups only on visible features, no subject action, no numbering"]
 }`;
 
+/** Analysis instruction when reference images follow the start frame (image 1 = start frame), or stand alone. */
+export function burstAnalysisInstruction(referenceNames: string[] = [], options: { withStartFrame?: boolean; sceneNote?: string } = {}): string {
+  if (!referenceNames.length) return BURST_ANALYSIS_INSTRUCTION;
+  if (options.withStartFrame === false) {
+    const list = referenceNames.map((name, i) => `image ${i + 1} = ${name}`).join(', ');
+    return `${BURST_ANALYSIS_INSTRUCTION.replace('Look at the attached start frame and describe only what is visible or safely inferable.', 'There is no start frame. The attached images are concept references (' + list + '): compose them into ONE plausible frozen moment, the characters placed inside the location, and describe only what the references show or what is safely inferable.')}
+In "continuity", name every reference and say where each character stands or sits in the location, pose, wardrobe and props, so the moment is fully defined.${options.sceneNote ? `\nScene context: ${options.sceneNote}` : ''}`;
+  }
+  const list = referenceNames.map((name, i) => `image ${i + 2} = ${name}`).join(', ');
+  return `${BURST_ANALYSIS_INSTRUCTION}
+Image 1 is the start frame. The following images are reference images (${list}). Name these references in "continuity" where they appear in the start frame, and use the references only to describe identity and design precisely; pose, framing and moment come from the start frame.`;
+}
+
 export type BurstAnalysis = {
   subjectKind?: BurstSubjectKind;
   continuity: string;
@@ -247,4 +289,30 @@ export function nearestAspectRatio(width: number, height: number, options: strin
     }
   }
   return best;
+}
+
+/** Aspect ratios a burst may be pinned to. */
+export const BURST_ASPECT_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
+
+/**
+ * Burst prompt from tool/UI arguments: a finished `prompt` wins, otherwise it is
+ * built from continuity/style (+ subjectKind, lighting, shots, compact).
+ */
+export function burstPromptFromArgs(args: Record<string, unknown>): { prompt: string; aspectRatio?: string } {
+  const prompt = typeof args.prompt === 'string' && args.prompt.trim()
+    ? args.prompt.trim()
+    : buildBurstFramePrompt({
+      continuity: String(args.continuity ?? ''),
+      style: String(args.style ?? ''),
+      subjectKind: (args.subjectKind as BurstSubjectKind) || 'person',
+      lighting: (args.lighting as BurstLighting) || 'continuous',
+      shots: Array.isArray(args.shots) ? (args.shots as unknown[]).map(String) : undefined,
+      compact: args.compact === true,
+      references: Array.isArray(args.referenceRefs)
+        ? (args.referenceRefs as Array<{ name: string; kind?: string }>).map((ref) => ({ name: String(ref.name), kind: ref.kind }))
+        : Array.isArray(args.referenceNames) ? (args.referenceNames as unknown[]).map((name) => ({ name: String(name) })) : undefined,
+      source: args.source === 'references' ? 'references' : 'start-frame',
+    });
+  const aspectRatio = typeof args.aspectRatio === 'string' && BURST_ASPECT_RATIOS.includes(args.aspectRatio) ? args.aspectRatio : undefined;
+  return { prompt, aspectRatio };
 }
