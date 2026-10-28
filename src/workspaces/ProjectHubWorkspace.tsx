@@ -1,5 +1,9 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import BurstFrameShotModal, { shotStartFrame, type BurstSave } from '../components/BurstFrameShotModal';
+import { conceptReferenceToBurst, sceneConceptReferences, type BurstReference } from '../services/burstReferences';
+import { BURST_ASPECT_RATIOS, BURST_FRAME_SETTINGS, BURST_REFERENCE_VIDEO_MODELS, burstPromptFromArgs, checkBurstFramePrompt } from '../services/burstFrame';
+import { registerLiveCommands } from '../mcp/liveCommands';
 import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
 import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
 import { establishingShotOf, nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
@@ -45,7 +49,7 @@ import {
 import { generateSpeechWithElevenLabs, fetchElevenLabsVoices, ElevenLabsVoice } from '../services/elevenLabsService';
 import { generateImageWithZTurbo, generateImageWithZImage, generateImageWithFlux, generateImageWithFluxKlein, generateImageWithFlux2Turbo, generateImageWithSeedream, generateImageWithSeedreamReferences, generateImageWithWan27ImagePro, generateImageWithQwenImage, generateImageWithGptImage15, generateOpenPose, generateVideoWithSeedance, generateVideoWithWanI2V, generateVideoWithKling, generateVideoWithKlingMotionControl, generateVideoWithLtx, generateVideoWithLtx23Fast, generateVideoWithLtx23Pro, generateVideoWithLtxAudioToVideo, generateVideoWithPVideo, inpaintWithNanoBanana, inpaintWithFlux2Pro, inpaintWithZTurboInpaint, editImageWithQwen, editImageWithQwenMultiAngle, editImageWithFireRed, relightImageWithReplicate, generateImageWithNanoBananaPro, generateImageWithGemini3ProReplicateOnly } from '../services/replicateService';
 import { generateImageWithGrok, generateVideoWithGrok } from '../services/xaiService';
-import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalQwenImage21, editImageWithFalQwenImage21, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
+import { editImageWithFalGptImage2, editImageWithFalNanoBanana2, editImageWithFalQwenMultiAngle, editImageWithFalGrokImagine, editImageWithFalWanV27Pro, generateImageWithFalGptImage2, generateImageWithFalGrokImagine, generateImageWithFalNanoBanana2, generateImageWithFalQwenImageMax, generateImageWithFalQwenImage21, editImageWithFalQwenImage21, generateImageWithFalSeedreamV5Lite, generateImageWithFalSeedreamV5Pro, editImageWithFalSeedreamV5Pro, generateImageWithFalKrea2, generateImageWithFalIdeogramV4, generateImageWithFalWanV27Pro, generateVideoWithFalKlingO3, generateVideoWithFalKlingV3Image, generateVideoWithFalKlingV3Text, generateVideoWithFalCreatifyAurora, generateVideoWithFalGrokImagineI2V, generateVideoWithFalPixverseC1Reference, generateVideoWithFalSeedanceImage, generateVideoWithFalSeedanceReference, generateVideoWithFalSeedance25Image, generateVideoWithFalSeedance25Reference, generateVideoWithFalSeedance25Text, generateVideoWithFalMinimaxH3Reference, type FalMinimaxH3AspectRatio, generateVideoWithFalWanV27Image, generateVideoWithFalWanV27Text, generateImageWithFalKrea3, editImageWithFalKrea3, generateImageWithFalFlux3, editImageWithFalFlux3, toFlux3Options, editImageWithFalGptImage25, generate3dWithFalHunyuan3dV3, generate3dWithFalRodinV25, generate3dWithFalTrellis2 } from '../services/falAiService';
 import { getMidjourneyConcurrency, generateImagesWithMidjourney, type MidjourneyReference } from '../services/midjourneyAgentService';
 import type { StyleReference, CharacterAgeVariant } from '../types';
 import { getLocalModel, runLocalModel, sizeForAspect } from '../services/localModelService';
@@ -471,6 +475,7 @@ type FilmingVideoModel =
     | 'seedance-2.5-t2v-fal'
     | 'seedance-2.5-i2v-fal'
     | 'seedance-2.5-omni-fal'
+    | 'minimax-h3-reference-fal'
     | 'wan-2.2-i2v-fast'
     | 'wan-2.7-t2v-fal'
     | 'wan-2.7-i2v-fal'
@@ -926,6 +931,7 @@ const FILMING_VIDEO_MODELS: FilmingVideoModel[] = [
     'seedance-2.5-t2v-fal',
     'seedance-2.5-i2v-fal',
     'seedance-2.5-omni-fal',
+    'minimax-h3-reference-fal',
     'wan-2.2-i2v-fast',
     'wan-2.7-t2v-fal',
     'wan-2.7-i2v-fal',
@@ -957,6 +963,7 @@ const FILMING_VIDEO_MODEL_OPTIONS: Array<{ id: FilmingVideoModel; label: string;
     { id: 'seedance-2.0-omni-fal', label: 'Seedance 2.0 Omni (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Native multi-reference video with optional audio/video refs' },
     { id: 'seedance-2.5-i2v-fal', label: 'Seedance 2.5 I2V (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Newest ByteDance model: 4-30s single shot, synced audio, up to 1080p', badge: '⭐ Recommended' },
     { id: 'seedance-2.5-omni-fal', label: 'Seedance 2.5 Omni (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Up to 30 image refs plus video and audio cues, 4-30s' },
+    { id: 'minimax-h3-reference-fal', label: 'MiniMax H3 Reference (FAL)', provider: 'FAL', goodFor: 'Hailuo 3 from up to 9 reference images (cast, location, props), no start frame needed; 768P native, up to 4K' },
     { id: 'seedance-2.5-t2v-fal', label: 'Seedance 2.5 T2V (FAL)', provider: 'FAL', icon: logoBytedance, goodFor: 'Text-only shots with native audio, 4-30s' },
     { id: 'wan-2.2-i2v-fast', label: 'Wan 2.2 I2V Fast', provider: 'Bytedance', icon: logoBytedance, goodFor: 'Fast image-to-video at low cost', badge: '💰 Cheapest' },
     { id: 'wan-2.7-t2v-fal', label: 'WAN 2.7 (FAL) T2V', provider: 'FAL', icon: logoBytedance, goodFor: 'Cinematic text-to-video with optional driving audio' },
@@ -3874,6 +3881,7 @@ const ShotTile: React.FC<{
                     {!busy && !hasVideo && image && mode === 'filming' && <span className="pk-chip">Frame ready</span>}
                     {!busy && !hasVideo && !image && mode === 'filming' && <span className="pk-chip pk-chip--warn">No frame</span>}
                     {!busy && mode === 'storyboard' && score !== null && <span className="pk-chip" title="Cinematography score">{score}%</span>}
+                    {shot.burstFrame && <span className="pk-chip pk-chip--accent" title="Burst Frame: Filming uses the 20-shot burst prompt (5 s, no audio)">Burst</span>}
                 </span>
             </span>
             <span className="shot-tile__text">
@@ -4121,6 +4129,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     });
     const lastAppliedRequestedPhaseRef = useRef<ProductionPhase | null>(null);
     const [storyboardFocusShot, setStoryboardFocusShot] = useState<number | null>(null);
+    /** Shot shown in the Burst Frame dialog (Storyboard → "Burst Frame"). */
+    const [burstShotNumber, setBurstShotNumber] = useState<number | null>(null);
     const [hubSceneNumber, setHubSceneNumber] = useState<number | null>(() => (typeof storedUiPrefs.selectedSceneNumber === 'number' ? storedUiPrefs.selectedSceneNumber : null));
     const [styleRefsOpen, setStyleRefsOpen] = useState(false);
     const [filmingFocusShot, setFilmingFocusShot] = useState<number | null>(null);
@@ -12282,6 +12292,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return { supported: true, options: Array.from({ length: 27 }, (_, index) => index + 4), fallback: 10 };
             case 'pixverse-c1-reference-fal':
                 return { supported: true, options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], fallback: 5 };
+            case 'minimax-h3-reference-fal':
+                return { supported: true, options: [5, 6, 8, 10], fallback: 5 };
             default:
                 return { supported: false, options: [5], fallback: 5 };
         }
@@ -12346,20 +12358,38 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return `Element guidance: integrate these visual anchors consistently: ${all.join(', ')}.`;
     };
 
+    /** Store (or clear) the Burst Frame prompt of a shot; Filming uses it verbatim. */
+    const saveShotBurstFrame = useCallback((shotNumber: number, burst: BurstSave | null) => {
+        setShotPrompts((prev) => prev.map((entry) => (entry.shot === shotNumber
+            ? { ...entry, burstFrame: burst ? { prompt: burst.prompt, aspectRatio: burst.aspectRatio, source: burst.source, references: burst.references, updatedAt: new Date().toISOString() } : undefined }
+            : entry)));
+    }, [setShotPrompts]);
+
     const handleGenerateShotVideo = async (shotNumber: number) => {
         const shot = shotPrompts.find(s => s.shot === shotNumber);
-        const referenceImageUrl = shot?.startFrameUrl || shot?.imageUrl;
+        const burstReferences = shot?.burstFrame?.prompt?.trim() ? (shot.burstFrame.references || []).filter((ref) => ref.imageUrl) : [];
+        // A references-only burst has no start frame: the reference images carry the scene.
+        const referenceImageUrl = shot?.burstFrame?.source === 'references' && burstReferences.length ? undefined : (shot?.startFrameUrl || shot?.imageUrl);
+        const burstFromReferences = !referenceImageUrl && burstReferences.length > 0;
         const needsStoryboardFrame = !(isTextOnlyVideoModel || videoModel === 'ltx-audio-to-video');
-        if (!shot || (needsStoryboardFrame && !referenceImageUrl)) return;
+        if (!shot) return;
+        if (burstFromReferences && !BURST_REFERENCE_VIDEO_MODELS.includes(videoModel)) {
+            const message = `Burst Frame for shot ${shot.shot} has no start frame: pick a model that films from references (Seedance 2.5 Omni, MiniMax H3 Reference, PixVerse C1 Reference).`;
+            setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, analysisNotes: [...(s.analysisNotes || []).filter((note) => !note.startsWith('Burst Frame')), message] } : s));
+            throw new Error(message);
+        }
+        if (needsStoryboardFrame && !referenceImageUrl && !burstFromReferences) return;
 
         setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, isFilming: true } : s));
+        // Burst Frame (Storyboard button): the prompt carries its own 20-shot list and is used verbatim, 5 s, no audio.
+        const burstPrompt = shot.burstFrame?.prompt?.trim() || '';
 
         try {
-            const shouldReviewFilmingContinuity = useGeminiContextMemory && isGeminiEmbedding2Configured();
+            const shouldReviewFilmingContinuity = !burstPrompt && useGeminiContextMemory && isGeminiEmbedding2Configured();
             const shouldAutoRefineFilmingContinuity = shouldReviewFilmingContinuity && useFilmingContinuityAutoRefine;
             const previousShot = previousShotMap.get(shotNumber) || null;
 
-            let motionPrompt = shot.filmingContinuityRefinedPrompt?.trim() || shot.motionPrompt?.trim();
+            let motionPrompt = burstPrompt || shot.filmingContinuityRefinedPrompt?.trim() || shot.motionPrompt?.trim();
             if (!motionPrompt) {
                 motionPrompt = await generateMotionPromptForShot(
                     storyBible.script,
@@ -12387,7 +12417,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             const klingBindings = isKlingFalVideoModel
                 ? await buildKlingBindingsForShot(shot)
                 : { referenceImages: undefined, elements: undefined };
-            const normalizedDurationSeconds = resolveVideoDurationSeconds(videoModel, Number(videoDurationSeconds) || 5);
+            const normalizedDurationSeconds = resolveVideoDurationSeconds(videoModel, burstPrompt ? 5 : Number(videoDurationSeconds) || 5);
             const klingNegative = klingNegativePrompt.trim();
             const normalizedKlingCfg = Number.isFinite(klingCfgScale) ? klingCfgScale : 0.5;
             const veoElementsHint = videoModel.startsWith('veo-') ? buildVeoElementsHintForShot(shot) : '';
@@ -12420,12 +12450,14 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 hasReferences: Boolean(referenceImageUrl),
                 durationSeconds: resolveVideoDurationSeconds(videoModel, Number(videoDurationSeconds) || 5),
             });
+            if (burstPrompt) motionPrompt = burstPrompt; // no persona, aspect, continuity or per-model reshaping
             const originalMotionPrompt = motionPrompt;
-            setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, motionPrompt } : s));
+            if (!burstPrompt) setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, motionPrompt } : s));
 
+            const burstContextReferences: NonNullable<ShotPrompt["contextReferences"]> = burstReferences.map((ref) => ({ id: ref.id, name: ref.kind ? `${ref.name} (${ref.kind})` : ref.name, purpose: 'Burst Frame reference', imageUrl: ref.imageUrl }));
             const runtimeContextReferences = Array.from(
                 new Map(
-                    [...(shot.contextReferences || []), ...filmingContextImageSuggestions]
+                    [...burstContextReferences, ...(shot.contextReferences || []), ...filmingContextImageSuggestions]
                         .filter((ref) => Boolean(ref.imageUrl))
                         .map((ref) => [`${ref.imageUrl}|${ref.name}`, ref])
                 ).values()
@@ -12462,8 +12494,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             );
             const referencePayload = referenceImageUrl ? await getBase64FromUrl(referenceImageUrl) : undefined;
             const endFramePayload = shot.endFrameUrl ? await getBase64FromUrl(shot.endFrameUrl) : undefined;
-            const voiceoverPayload = shot.voiceoverUrl ? await getBase64FromUrl(shot.voiceoverUrl) : undefined;
-            const contextReferenceImages = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal') || videoModel === 'pixverse-c1-reference-fal'
+            const voiceoverPayload = !burstPrompt && shot.voiceoverUrl ? await getBase64FromUrl(shot.voiceoverUrl) : undefined;
+            const contextReferenceImages = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal') || videoModel === 'pixverse-c1-reference-fal' || videoModel === 'minimax-h3-reference-fal'
                 ? Array.from(
                     new Map(
                         runtimeContextReferences
@@ -12472,7 +12504,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     ).values()
                 )
                 : [];
-            const seedanceOmniImagePayloads = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal')
+            const seedanceOmniImagePayloads = (videoModel === 'seedance-2.0-omni-fal' || videoModel === 'seedance-2.5-omni-fal' || videoModel === 'minimax-h3-reference-fal')
                 ? await Promise.all(
                     [
                         ...(referenceImageUrl ? [{ url: referenceImageUrl, name: 'Start frame' }] : []),
@@ -12564,7 +12596,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     return generateVideoWithFalKlingV3Text(candidateMotionPrompt, {
                         duration: normalizedDurationSeconds,
                         aspectRatio: klingAspectRatio,
-                        generateAudio: klingGenerateAudio,
+                        generateAudio: !burstPrompt && (klingGenerateAudio),
                         negativePrompt: klingNegative || undefined,
                         cfgScale: normalizedKlingCfg,
                         voiceIds: klingVoiceIds.length > 0 ? klingVoiceIds : undefined,
@@ -12595,7 +12627,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
                         resolution: '720p',
-                        generateAudio: true,
+                        generateAudio: !burstPrompt && (true),
                     });
                 }
                 if (activeVideoModel === 'seedance-2.0-omni-fal') {
@@ -12609,7 +12641,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
                         resolution: '720p',
-                        generateAudio: Boolean(voiceoverPayload),
+                        generateAudio: !burstPrompt && (Boolean(voiceoverPayload)),
                     });
                 }
                 if (activeVideoModel === 'seedance-2.5-i2v-fal') {
@@ -12620,7 +12652,22 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         endImage: endFramePayload,
                         duration: normalizedDurationSeconds,
                         resolution: '720p',
-                        generateAudio: true,
+                        generateAudio: !burstPrompt && (true),
+                    });
+                }
+                if (activeVideoModel === 'minimax-h3-reference-fal') {
+                    // H3 names references "Image 1", "Image 2" … in the order they are sent.
+                    const imageNames = [
+                        ...(referenceImageUrl ? ['start frame (pose, framing, moment)'] : []),
+                        ...contextReferenceImages.map((ref, index) => ref.name || `Reference ${index + 1}`),
+                    ].slice(0, 9);
+                    const imageMap = imageNames.map((name, index) => `Image ${index + 1} = ${name}`).join('; ');
+                    return generateVideoWithFalMinimaxH3Reference(`${candidateMotionPrompt}\n\nREFERENCE IMAGES: ${imageMap}.`, {
+                        images: seedanceOmniImagePayloads.slice(0, 9),
+                        duration: normalizedDurationSeconds,
+                        aspectRatio: (shot.burstFrame?.aspectRatio as FalMinimaxH3AspectRatio | undefined) || 'adaptive',
+                        resolution: '768P',
+                        promptExpansion: burstPrompt ? 'disabled' : 'balanced',
                     });
                 }
                 if (activeVideoModel === 'seedance-2.5-omni-fal') {
@@ -12634,7 +12681,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
                         resolution: '720p',
-                        generateAudio: Boolean(voiceoverPayload),
+                        generateAudio: !burstPrompt && (Boolean(voiceoverPayload)),
                     });
                 }
                 if (activeVideoModel === 'seedance-2.5-t2v-fal') {
@@ -12642,7 +12689,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
                         resolution: '720p',
-                        generateAudio: true,
+                        generateAudio: !burstPrompt && (true),
                     });
                 }
                 if (activeVideoModel === 'pixverse-c1-reference-fal') {
@@ -12653,7 +12700,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         duration: normalizedDurationSeconds,
                         aspectRatio: '16:9',
                         resolution: '720p',
-                        generateAudio: false,
+                        generateAudio: !burstPrompt && (false),
                     });
                 }
                 if (activeVideoModel === 'wan-2.2-i2v-fast') {
@@ -12698,7 +12745,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         resolution: ltxResolution,
                         fps: ltxFps,
                         cameraMotion: ltxCameraMotion,
-                        generateAudio: ltxGenerateAudio,
+                        generateAudio: !burstPrompt && (ltxGenerateAudio),
                     });
                 }
                 if (activeVideoModel === 'p-video') {
@@ -12754,7 +12801,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     return generateVideoWithFalKlingO3(candidateMotionPrompt, referencePayload, {
                         endImage: endFramePayload,
                         duration: normalizedDurationSeconds,
-                        generateAudio: klingGenerateAudio,
+                        generateAudio: !burstPrompt && (klingGenerateAudio),
                         aspectRatio: klingAspectRatio,
                         multiPrompt: klingMultiPrompt.length > 0 ? klingMultiPrompt : undefined,
                         shotType: klingShotType === 'static' ? 'static' : 'dynamic',
@@ -12771,7 +12818,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         endImage: endFramePayload,
                         duration: normalizedDurationSeconds,
                         aspectRatio: klingAspectRatio,
-                        generateAudio: klingGenerateAudio,
+                        generateAudio: !burstPrompt && (klingGenerateAudio),
                         negativePrompt: klingNegative || undefined,
                         cfgScale: normalizedKlingCfg,
                         voiceIds: klingVoiceIds.length > 0 ? klingVoiceIds : undefined,
@@ -12794,7 +12841,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         endImage: endFramePayload,
                         duration: normalizedDurationSeconds,
                         aspectRatio: pickCatalogAspect(catalogEntry, resolveFilmingDeliveryAspectRatio() || resolveShotEffectiveAspectRatio(shot)),
-                        audio: true,
+                        audio: !burstPrompt,
                         negativePrompt: klingNegative || undefined,
                     });
                 }
@@ -12994,6 +13041,61 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     };
 
     // Director Mode Handlers
+    // MCP (project_burst_frame_* tools): read / set / clear a shot's Burst Frame while the Project Space is open.
+    const burstLiveRef = useRef({ shotPrompts, references, save: saveShotBurstFrame, film: handleGenerateShotVideo, open: setBurstShotNumber });
+    burstLiveRef.current = { shotPrompts, references, save: saveShotBurstFrame, film: handleGenerateShotVideo, open: setBurstShotNumber };
+    useEffect(() => registerLiveCommands({
+        'project.burst.get': (args) => {
+            const list = burstLiveRef.current.shotPrompts;
+            const wanted = typeof args.shot === 'number' ? list.filter((entry) => entry.shot === args.shot) : list;
+            return {
+                shots: wanted.map((entry) => ({
+                    shot: entry.shot,
+                    label: entry.shotLabel || `Shot ${entry.shot}`,
+                    hasFrame: Boolean(shotStartFrame(entry)),
+                    sceneReferences: sceneConceptReferences(entry, list, burstLiveRef.current.references).map((ref) => ref.name),
+                    burst: entry.burstFrame ? { source: entry.burstFrame.source ?? 'start-frame', references: (entry.burstFrame.references || []).map((ref) => ref.name), aspectRatio: entry.burstFrame.aspectRatio ?? null, updatedAt: entry.burstFrame.updatedAt ?? null, promptChars: entry.burstFrame.prompt.length, check: checkBurstFramePrompt(entry.burstFrame.prompt) } : null,
+                })),
+            };
+        },
+        'project.burst.set': (args) => {
+            const shotNumber = Number(args.shot);
+            const target = burstLiveRef.current.shotPrompts.find((entry) => entry.shot === shotNumber);
+            if (!target) throw new Error(`Shot ${String(args.shot)} not found (see project_list_shots).`);
+            if (args.clear === true) {
+                burstLiveRef.current.save(shotNumber, null);
+                return { shot: shotNumber, burst: null };
+            }
+            const projectRefs = burstLiveRef.current.references;
+            let refs: BurstReference[];
+            if (Array.isArray(args.references)) {
+                refs = (args.references as unknown[]).map((key) => {
+                    const wanted = String(key).trim().toLowerCase();
+                    const ref = projectRefs.find((entry) => entry.id === key || entry.name.trim().toLowerCase() === wanted);
+                    const burst = ref ? conceptReferenceToBurst(ref) : null;
+                    if (!burst) throw new Error(`Reference "${String(key)}" not found or has no image (see project_list_references).`);
+                    return burst;
+                });
+            } else {
+                refs = sceneConceptReferences(target, burstLiveRef.current.shotPrompts, projectRefs);
+            }
+            const source = args.source === 'references' ? 'references' as const : 'start-frame' as const;
+            if (source === 'references' && refs.length === 0) throw new Error('source "references" needs at least one reference image.');
+            if (source === 'start-frame' && !shotStartFrame(target) && refs.length === 0) throw new Error(`Shot ${shotNumber} has no frame: pass source "references" with references.`);
+            const { prompt, aspectRatio } = burstPromptFromArgs({ ...args, referenceNames: undefined, references: undefined });
+            const finalPrompt = typeof args.prompt === 'string' && args.prompt.trim()
+                ? prompt
+                : burstPromptFromArgs({ ...args, source, referenceRefs: refs }).prompt;
+            burstLiveRef.current.save(shotNumber, { prompt: finalPrompt, aspectRatio, references: refs, source });
+            if (args.showDialog === true) burstLiveRef.current.open(shotNumber);
+            return { shot: shotNumber, source, hasFrame: Boolean(shotStartFrame(target)), references: refs.map((ref) => ref.name), promptChars: finalPrompt.length, check: checkBurstFramePrompt(finalPrompt), aspectRatio: aspectRatio ?? null };
+        },
+        'project.burst.dialog': (args) => {
+            burstLiveRef.current.open(typeof args.shot === 'number' ? args.shot : burstLiveRef.current.shotPrompts[0]?.shot ?? null);
+            return { open: true };
+        },
+    }), []);
+
     const handleRunDirector = async (runOptions?: { background?: boolean; onProgress?: (message: string) => void }) => {
         const background = Boolean(runOptions && typeof runOptions === 'object' && 'background' in runOptions && runOptions.background);
         const report = (message: string | false) => {
@@ -17679,6 +17781,25 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                         {/* Storyboard Phase */}
                         {activePhase === 'storyboard' && (
                             <div className="space-y-6">
+                                {burstShotNumber !== null && (
+                                    <BurstFrameShotModal
+                                        shots={shotPrompts}
+                                        shotNumber={burstShotNumber}
+                                        references={references}
+                                        videoModelTakesReferences={BURST_REFERENCE_VIDEO_MODELS.includes(videoModel)}
+                                        onPickReferenceModel={() => setVideoModel('seedance-2.5-omni-fal')}
+                                        onSelectShot={(next) => { setBurstShotNumber(next); setStoryboardFocusShot(next); }}
+                                        aspectOptions={BURST_ASPECT_RATIOS}
+                                        videoModelLabel={FILMING_VIDEO_MODEL_OPTIONS.find((option) => option.id === videoModel)?.label}
+                                        videoModelTakesStartFrame={!isTextOnlyVideoModel}
+                                        analysisReady={apiKeyReady}
+                                        canFilm={canGenerateFilming}
+                                        onSave={saveShotBurstFrame}
+                                        onFilm={(shotNumber) => { void handleGenerateShotVideo(shotNumber); }}
+                                        onPickImageModel={() => setVideoModel('seedance-2.5-i2v-fal')}
+                                        onClose={() => setBurstShotNumber(null)}
+                                    />
+                                )}
                                 <div className="phase-bar phase-bar--stack">
                                     <div className="phase-bar__row">
 <div className="phase-bar__title">
@@ -17731,6 +17852,17 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                 </button>
                                             );
                                         })()}
+                                        {shotPrompts.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setBurstShotNumber(focusedStoryboardShot?.shot ?? storyboardVisibleShots[0]?.shot ?? shotPrompts[0].shot)}
+                                                className="app-button app-secondary"
+                                                title={`Burst Frame: the selected shot's frame becomes ${BURST_FRAME_SETTINGS.shotCount} static setups with hard cuts in ${BURST_FRAME_SETTINGS.durationSeconds} s (no audio). Filming then uses this prompt.`}
+                                                data-automation-id="storyboard.burst-frame"
+                                            >
+                                                <ClapperboardIcon className="w-4 h-4" /> Burst Frame{focusedStoryboardShot?.burstFrame ? ' ✓' : ''}
+                                            </button>
+                                        )}
                                         {canUseSceneWall && allowedPhaseIds.includes('scene_wall') && (
                                             <button onClick={() => setActivePhase('scene_wall')} className="app-button app-tertiary" title="Reels, scene cards, parking and ordering for long scripts">
                                                 Scene Wall

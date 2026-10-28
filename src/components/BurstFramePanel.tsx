@@ -4,10 +4,11 @@
  * through the video workspace, so every model with a start frame works.
  */
 import React, { useMemo, useState } from 'react';
-import { analyzeImage } from '../services/geminiService';
+import { analyzeImage, analyzeImages } from '../services/geminiService';
 import {
   BURST_ANALYSIS_INSTRUCTION,
   BURST_FRAME_SETTINGS,
+  burstAnalysisInstruction,
   buildBurstFramePrompt,
   burstShots,
   checkBurstFramePrompt,
@@ -17,6 +18,7 @@ import {
   type BurstSubjectKind,
 } from '../services/burstFrame';
 import { fileToBase64, getBase64FromUrl } from '../utils/helpers';
+import type { BurstReference } from '../services/burstReferences';
 
 type Props = {
   startImage: { file?: File | null; url?: string | null };
@@ -26,9 +28,29 @@ type Props = {
   modelLabel?: string;
   modelSupportsImage: boolean;
   analysisReady: boolean;
-  onApply: (result: { prompt: string; aspectRatio?: string }) => void;
+  onApply: (result: { prompt: string; aspectRatio?: string; references?: BurstReference[]; source?: 'start-frame' | 'references' }) => void;
   onPickImageModel: () => void;
+  /** Hint shown when there is no start image (defaults to the video page's Start Frame field). */
+  missingStartHint?: string;
+  /** Reference images sent with the start frame; omit to hide the section. */
+  references?: BurstReference[];
+  onReferencesChange?: (references: BurstReference[]) => void;
+  /** Concept references that can be added (e.g. all project references with an image). */
+  availableReferences?: BurstReference[];
+  /** Note shown under the references (e.g. which models receive them). */
+  referencesNote?: string;
+  /** Allow a burst built from the references alone (no start frame). */
+  allowReferencesOnly?: boolean;
+  /** Whether the current video model takes several reference images without a start frame. */
+  modelSupportsReferences?: boolean;
+  onPickReferenceModel?: () => void;
+  /** Scene text for the references-only analysis (slugline, action). */
+  sceneNote?: string;
+  /** Source stored with an existing burst. */
+  initialSource?: 'start-frame' | 'references';
 };
+
+const MAX_REFERENCES = 8;
 
 const SUBJECTS: Array<[BurstSubjectKind, string]> = [
   ['person', 'Person'],
@@ -46,7 +68,7 @@ const imageSize = (src: string) =>
     img.src = src;
   });
 
-const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, modelLabel, modelSupportsImage, analysisReady, onApply, onPickImageModel }) => {
+const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, modelLabel, modelSupportsImage, analysisReady, onApply, onPickImageModel, missingStartHint, references, onReferencesChange, availableReferences, referencesNote, allowReferencesOnly, modelSupportsReferences, onPickReferenceModel, sceneNote, initialSource }) => {
   const [continuity, setContinuity] = useState('');
   const [style, setStyle] = useState('');
   const [subjectKind, setSubjectKind] = useState<BurstSubjectKind>('person');
@@ -58,6 +80,10 @@ const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, m
   const [message, setMessage] = useState<string | null>(null);
 
   const hasStart = Boolean(startImage.file || startImage.url);
+  const [source, setSource] = useState<'start-frame' | 'references'>(initialSource ?? (hasStart || !allowReferencesOnly ? 'start-frame' : 'references'));
+  const fromRefs = allowReferencesOnly === true && source === 'references';
+  const refCount = references?.length ?? 0;
+  const canAnalyze = fromRefs ? refCount > 0 : hasStart;
   const check = useMemo(() => checkBurstFramePrompt(prompt), [prompt]);
   const looksLikeBurst = /BURST FRAME/i.test(prompt);
   const preview = useMemo(() => burstShots({ shots: shots ?? undefined, subjectKind, lighting }), [shots, subjectKind, lighting]);
@@ -72,11 +98,34 @@ const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, m
     setBusy(true);
     setMessage(null);
     try {
+      if (fromRefs) {
+        const refs = references || [];
+        if (!refs.length) throw new Error('Bitte zuerst Referenzen wählen.');
+        const text = await analyzeImages(
+          burstAnalysisInstruction(refs.map((ref) => (ref.kind ? `${ref.name} (${ref.kind})` : ref.name)), { withStartFrame: false, sceneNote }),
+          await Promise.all(refs.map((ref) => getBase64FromUrl(ref.imageUrl))),
+        );
+        const parsed = parseBurstAnalysis(text);
+        if (!parsed) throw new Error('Die Analyse lieferte kein gültiges Ergebnis. Bitte Felder manuell ausfüllen.');
+        setContinuity(parsed.continuity);
+        setStyle(parsed.style);
+        if (parsed.subjectKind) setSubjectKind(parsed.subjectKind);
+        if (parsed.aspectRatio && aspectOptions.includes(parsed.aspectRatio)) setAspect(parsed.aspectRatio);
+        setShots(parsed.shots ?? null);
+        setMessage(`${refs.length} Referenzen analysiert: ein Moment daraus komponiert${parsed.shots ? ', 20 angepasste Einstellungen übernommen' : ''}.`);
+        return;
+      }
       const source = await startSource();
       if (!source) throw new Error('Bitte zuerst ein Startbild wählen.');
       const size = await imageSize(source.src);
       if (size.width) setAspect(nearestAspectRatio(size.width, size.height, aspectOptions.filter((a) => /^\d+:\d+$/.test(a))));
-      const text = await analyzeImage(BURST_ANALYSIS_INSTRUCTION, { base64: source.base64, mimeType: source.mimeType });
+      const refs = references || [];
+      const text = refs.length
+        ? await analyzeImages(burstAnalysisInstruction(refs.map((ref) => ref.name)), [
+          { base64: source.base64, mimeType: source.mimeType },
+          ...(await Promise.all(refs.map((ref) => getBase64FromUrl(ref.imageUrl)))),
+        ])
+        : await analyzeImage(BURST_ANALYSIS_INSTRUCTION, { base64: source.base64, mimeType: source.mimeType });
       const parsed = parseBurstAnalysis(text);
       if (!parsed) throw new Error('Die Bildanalyse lieferte kein gültiges Ergebnis. Bitte Felder manuell ausfüllen.');
       setContinuity(parsed.continuity);
@@ -93,8 +142,10 @@ const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, m
 
   const apply = () => {
     onApply({
-      prompt: buildBurstFramePrompt({ continuity, style, shots: shots ?? undefined, subjectKind, lighting, compact }),
+      prompt: buildBurstFramePrompt({ continuity, style, shots: shots ?? undefined, subjectKind, lighting, compact, references: references?.map((ref) => ({ name: ref.name, kind: ref.kind })), source: fromRefs ? 'references' : 'start-frame' }),
       aspectRatio: aspect,
+      references,
+      source: fromRefs ? 'references' : 'start-frame',
     });
     setMessage(`Prompt übernommen: ${BURST_FRAME_SETTINGS.durationSeconds} s, ${BURST_FRAME_SETTINGS.shotCount} Shots, Audio aus${aspect ? `, ${aspect}` : ''}.`);
   };
@@ -104,13 +155,27 @@ const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, m
       <div>
         <div className="text-xs uppercase tracking-[0.12em] text-indigo-300">Burst Frame · Phil Langer</div>
         <p className="mt-1 text-sm text-gray-400">
-          Ein Startbild, 20 statische Einstellungen, harte Schnitte alle 0,25 s, 5 s ohne Ton. Motiv und Set bleiben identisch, nur Kamera und Bildausschnitt wechseln.
-          Funktioniert mit jedem Modell, das ein Startbild nimmt.
+          {fromRefs
+            ? 'Ohne Startbild: ein eingefrorener Moment aus den Referenzen (Figuren in der Location), 20 statische Einstellungen, harte Schnitte alle 0,25 s, 5 s ohne Ton. Braucht ein Modell, das mehrere Referenzbilder nimmt.'
+            : 'Ein Startbild, 20 statische Einstellungen, harte Schnitte alle 0,25 s, 5 s ohne Ton. Motiv und Set bleiben identisch, nur Kamera und Bildausschnitt wechseln. Funktioniert mit jedem Modell, das ein Startbild nimmt.'}
         </p>
       </div>
 
-      {!hasStart && <p className="text-xs text-amber-300">Wähle unten bei „Start Frame“ ein Startbild (Upload oder Bibliothek).</p>}
-      {!modelSupportsImage && (
+      {allowReferencesOnly && (
+        <div className="pk-seg" style={{ gridTemplateColumns: '1fr 1fr' }} data-automation-id="burst-frame.source">
+          <button type="button" aria-pressed={!fromRefs} disabled={!hasStart} onClick={() => setSource('start-frame')} title={hasStart ? 'Das Startbild bestimmt den Moment' : 'Dieser Shot hat kein Startbild'}>Startbild{refCount ? ' + Referenzen' : ''}</button>
+          <button type="button" aria-pressed={fromRefs} onClick={() => setSource('references')} title="Ohne Startbild: der Moment wird aus den Referenzen komponiert (Figuren in der Location)">Nur Referenzen</button>
+        </div>
+      )}
+      {!fromRefs && !hasStart && <p className="text-xs text-amber-300">{missingStartHint || 'Wähle unten bei „Start Frame“ ein Startbild (Upload oder Bibliothek).'}</p>}
+      {fromRefs && !refCount && <p className="text-xs text-amber-300">Wähle mindestens eine Referenz (z. B. Location und Figuren).</p>}
+      {fromRefs && modelSupportsReferences === false && (
+        <p className="text-xs text-amber-300">
+          {modelLabel || 'Dieses Modell'} filmt nicht aus Referenzen allein.{' '}
+          {onPickReferenceModel && <button type="button" className="underline" onClick={onPickReferenceModel} data-automation-id="burst-frame.pick-reference-model">Seedance 2.5 Omni wählen</button>}
+        </p>
+      )}
+      {!fromRefs && !modelSupportsImage && (
         <p className="text-xs text-amber-300">
           {modelLabel || 'Dieses Modell'} nimmt kein Startbild.{' '}
           <button type="button" className="underline" onClick={onPickImageModel} data-automation-id="burst-frame.pick-model">
@@ -119,9 +184,51 @@ const BurstFramePanel: React.FC<Props> = ({ startImage, prompt, aspectOptions, m
         </p>
       )}
 
+      {references && onReferencesChange && (
+        <div className="space-y-2" data-automation-id="burst-frame.references">
+          <div className="flex items-center justify-between text-xs text-gray-400">
+            <span>Referenzen ({references.length}/{MAX_REFERENCES}) · Identität und Design bleiben in allen 20 Einstellungen gleich</span>
+            <label className="app-button app-tertiary cursor-pointer text-xs" data-automation-id="burst-frame.references.upload">
+              + Bild
+              <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => {
+                const files = Array.from(event.target.files || []).slice(0, Math.max(0, MAX_REFERENCES - references.length));
+                event.target.value = '';
+                void Promise.all(files.map(async (file, index) => ({
+                  id: `upload-${Date.now()}-${index}`,
+                  name: file.name.replace(/\.[^.]+$/, ''),
+                  imageUrl: `data:${file.type || 'image/png'};base64,${await fileToBase64(file)}`,
+                  source: 'upload' as const,
+                }))).then((added) => onReferencesChange([...references, ...added]));
+              }} />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {references.map((ref) => (
+              <button key={ref.id} type="button" className="group relative h-16 w-16 overflow-hidden rounded-md border border-indigo-400/60" title={`${ref.name}${ref.kind ? ` (${ref.kind})` : ''} – klicken zum Entfernen`} onClick={() => onReferencesChange(references.filter((entry) => entry.id !== ref.id))} data-automation-id={`burst-frame.reference.${ref.id}`}>
+                <img src={ref.imageUrl} alt="" className="h-full w-full object-cover" />
+                <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1 text-[9px] text-white">{ref.name}</span>
+                <span className="absolute right-0.5 top-0.5 hidden rounded bg-black/70 px-1 text-[9px] text-white group-hover:block">✕</span>
+              </button>
+            ))}
+            {references.length === 0 && <span className="text-xs text-gray-500">Keine Referenzen – nur das Startbild.</span>}
+          </div>
+          {availableReferences && availableReferences.some((ref) => !references.some((entry) => entry.id === ref.id)) && references.length < MAX_REFERENCES && (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
+              <span>Hinzufügen:</span>
+              {availableReferences.filter((ref) => !references.some((entry) => entry.id === ref.id)).map((ref) => (
+                <button key={ref.id} type="button" className="rounded-full border border-white/15 px-2 py-0.5 hover:border-indigo-400" onClick={() => onReferencesChange([...references, ref].slice(0, MAX_REFERENCES))} data-automation-id={`burst-frame.reference-add.${ref.id}`}>
+                  + {ref.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {referencesNote && <p className="text-[11px] text-gray-500">{referencesNote}</p>}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="app-button app-secondary text-xs" disabled={!hasStart || busy || !analysisReady} onClick={() => void analyze()} data-automation-id="burst-frame.analyze" title={analysisReady ? 'Analysiert das Startbild mit Gemini' : 'Gemini-Schlüssel fehlt – Felder manuell ausfüllen'}>
-          {busy ? 'Analysiere …' : 'Startbild analysieren'}
+        <button type="button" className="app-button app-secondary text-xs" disabled={!canAnalyze || busy || !analysisReady} onClick={() => void analyze()} data-automation-id="burst-frame.analyze" title={analysisReady ? `Analysiert ${fromRefs ? 'die Referenzen' : refCount ? 'Startbild und Referenzen' : 'das Startbild'} mit Gemini` : 'Gemini-Schlüssel fehlt – Felder manuell ausfüllen'}>
+          {busy ? 'Analysiere …' : fromRefs ? 'Referenzen analysieren' : refCount ? 'Startbild + Referenzen analysieren' : 'Startbild analysieren'}
         </button>
         <button type="button" className="app-button app-primary text-xs" disabled={busy} onClick={apply} data-automation-id="burst-frame.apply">
           Burst-Prompt übernehmen
