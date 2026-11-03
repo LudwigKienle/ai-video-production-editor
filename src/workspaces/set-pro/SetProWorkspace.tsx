@@ -23,6 +23,7 @@ import { resolveKey, STATUS_HINTS } from '../../setdesign/keymap.ts';
 import { findSceneObject, getActiveCamera, LIGHT_TYPES, PRIMITIVES } from '../../setdesign/sceneModel.ts';
 import Viewport3D, { type ViewportHandle } from './Viewport3D.tsx';
 import Outliner from './Outliner.tsx';
+import LibraryBrowserPanel from './LibraryBrowserPanel.tsx';
 import PropertiesEditor, { OUTPUT_PRESETS } from './PropertiesEditor.tsx';
 import { NumberField, ObjectIcon, Panel, Popup, Prop, runCommand, useSetDesign, type PopupItem } from './ui.tsx';
 import './setPro.css';
@@ -211,6 +212,12 @@ const SetProWorkspace: React.FC<Props> = ({ mediaItems, references = [], shotPro
           if (intent.action === 'walk') viewportRef.current?.startWalk();
           if (intent.action === 'rename' && bus.getUi().activeId) setRenamingId(bus.getUi().activeId);
           if (intent.action === 'capture') void capture();
+          if (intent.action === 'parentToActive') {
+            const { selectedIds, activeId } = bus.getUi();
+            const others = selectedIds.filter((id) => id !== activeId);
+            if (!activeId || !others.length) showToast('Kinder auswählen, das künftige Parent zuletzt (Shift+Klick), dann Strg+P.');
+            else run('object.parent', { objects: others, parent: activeId });
+          }
           if (intent.action === 'cameraFromSelection') {
             const id = bus.getUi().activeId;
             const ref = id ? findSceneObject(bus.getScene(), id) : null;
@@ -237,6 +244,17 @@ const SetProWorkspace: React.FC<Props> = ({ mediaItems, references = [], shotPro
     { kind: 'section', label: 'Licht' },
     ...LIGHT_TYPES.map((l) => ({ label: l.label, icon: <ObjectIcon type={l.id} />, onSelect: () => run('object.add_light', { lightType: l.id }), automationId: `setdesign-add-light-${l.id}` })),
     { kind: 'separator' },
+    { kind: 'section', label: 'Bausteine' },
+    { label: 'Leere Gruppe', icon: <ObjectIcon type="group" />, onSelect: () => run('group.create', { objects: [] }), automationId: 'setdesign-add-group' },
+    { label: 'Raum (4 × 3 m, Tür)', icon: <ObjectIcon type="wall" />, onSelect: () => run('build.room', { openings: [{ wall: 'south', type: 'door' }, { wall: 'north', type: 'window' }] }), automationId: 'setdesign-add-room' },
+    { label: 'Treppe', icon: <ObjectIcon type="box" />, onSelect: () => run('build.stairs', {}), automationId: 'setdesign-add-stairs' },
+    ...(['table', 'chair', 'sofa', 'bed', 'shelf', 'door', 'window', 'lamp'] as const).map((type) => ({
+      label: ({ table: 'Tisch', chair: 'Stuhl', sofa: 'Sofa', bed: 'Bett', shelf: 'Regal', door: 'Tür', window: 'Fenster', lamp: 'Stehlampe' } as const)[type],
+      icon: <ObjectIcon type="group" />,
+      onSelect: () => run('build.furniture', { type }),
+      automationId: `setdesign-add-furniture-${type}`,
+    })),
+    { kind: 'separator' },
     { label: '3D-Modell importieren …', icon: <Upload size={14} />, shortcut: 'GLB, OBJ, FBX', onSelect: () => fileInputRef.current?.click(), automationId: 'setdesign-add-import' },
   ];
 
@@ -253,6 +271,12 @@ const SetProWorkspace: React.FC<Props> = ({ mediaItems, references = [], shotPro
       { label: 'Alles einblenden', shortcut: 'Alt+H', onSelect: () => run('object.hide', { unhideAll: true }) },
       { label: 'Position zurücksetzen', shortcut: 'Alt+G', onSelect: () => ui.selectedIds.forEach((id) => run('object.transform', { object: id, location: [0, 0, 0] })), disabled: !ui.selectedIds.length },
       { label: 'Drehung zurücksetzen', shortcut: 'Alt+R', onSelect: () => ui.selectedIds.forEach((id) => run('object.transform', { object: id, rotation: [0, 0, 0] })), disabled: !ui.selectedIds.length },
+      { label: 'Auf den Boden setzen', onSelect: () => run('object.drop_to_floor', { toSurface: true }), disabled: !ui.selectedIds.length, automationId: 'setdesign-menu-drop' },
+      { kind: 'separator' },
+      { label: 'Gruppieren', shortcut: 'Strg+G', onSelect: () => run('group.create'), disabled: !ui.selectedIds.length, automationId: 'setdesign-menu-group' },
+      { label: 'Gruppe auflösen', shortcut: 'Strg+Alt+G', onSelect: () => run('group.ungroup'), disabled: activeObject?.kind !== 'asset' || activeObject.object.kind !== 'group', automationId: 'setdesign-menu-ungroup' },
+      { label: 'Parent: aktives Objekt', shortcut: 'Strg+P', onSelect: () => run('object.parent', { objects: ui.selectedIds.filter((id) => id !== ui.activeId), parent: ui.activeId }), disabled: ui.selectedIds.length < 2 || activeObject?.kind !== 'asset' },
+      { label: 'Parent lösen', shortcut: 'Alt+P', onSelect: () => run('object.parent', { parent: null }), disabled: !ui.selectedIds.length },
       { kind: 'separator' },
       ...(isCamera ? [
         { label: 'Als aktive Kamera setzen', shortcut: 'Strg+Num0', icon: <Video size={14} />, onSelect: () => { run('camera.set_active', { object: activeObject!.object.id }); run('view.camera', { on: true }); } },
@@ -456,6 +480,7 @@ const SetProWorkspace: React.FC<Props> = ({ mediaItems, references = [], shotPro
           </div>
         ))}
       </div>
+      <LibraryBrowserPanel projectPath={currentProjectPath} onToast={showToast} />
       <div className="sdx-left__section">
         <div className="sdx-left__title"><Sparkles size={14} /> KI-Werkzeuge</div>
         <div className="sdx-note">KI-Blockout aus einem Referenzbild (Hunyuan3D, Trellis, Rodin), World-Labs-Welten, Sketchfab-Suche, HDRI und Render-Presets sind im Tab „Klassisch“. Was dort entsteht, erscheint hier im selben Set.</div>

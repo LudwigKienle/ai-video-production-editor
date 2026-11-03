@@ -23,6 +23,8 @@ import { fitCameraFrame, verticalFovDeg, viewOffsetForShift } from '../../setdes
 import { lookAtRotation } from '../../setdesign/coords.ts';
 import { createSetScene, SELECT_COLOR, type SetScene } from '../../setdesign/sceneBuilder.ts';
 import { findSceneObject, getActiveCamera, PRIMITIVES } from '../../setdesign/sceneModel.ts';
+import { topLevelOf } from '../../setdesign/hierarchy.ts';
+import { getModelBounds } from '../../setdesign/modelBoundsCache.ts';
 import {
   describeModal, editNumeric, FREE, nextConstraint, parseNumeric, snapValue, threeAxis, threeMask,
   type BlenderAxis, type Constraint, type ModalKind,
@@ -49,7 +51,8 @@ type Props = {
   children?: React.ReactNode;
 };
 
-type Start = { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3; isAsset: boolean };
+/** World transform at the start of a drag (objects inside groups are converted back to parent-relative). */
+type Start = { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3; isAsset: boolean; local: { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3 } };
 type Modal = {
   kind: ModalKind;
   ids: string[];
@@ -224,25 +227,45 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
     return next;
   };
 
+  /** Editable ids without those whose parent is also moved (children follow their parent). */
+  const movableIds = (ids: string[]) => topLevelOf(sceneRef.current, ids.filter((id) => isEditable(id) && rootOf(id)));
+
+  const worldPositionOf = (root: THREE.Object3D) => { root.updateWorldMatrix(true, false); return new THREE.Vector3().setFromMatrixPosition(root.matrixWorld); };
+
   const captureStarts = (ids: string[]) => {
     const starts = new Map<string, Start>();
     for (const id of ids) {
       const root = rootOf(id);
       if (!root) continue;
-      starts.set(id, { position: root.position.clone(), quaternion: root.quaternion.clone(), scale: root.scale.clone(), isAsset: findSceneObject(sceneRef.current, id)?.kind === 'asset' });
+      root.updateWorldMatrix(true, false);
+      const position = new THREE.Vector3(); const quaternion = new THREE.Quaternion(); const scale = new THREE.Vector3();
+      root.matrixWorld.decompose(position, quaternion, scale);
+      starts.set(id, {
+        position, quaternion, scale,
+        isAsset: findSceneObject(sceneRef.current, id)?.kind === 'asset',
+        local: { position: root.position.clone(), quaternion: root.quaternion.clone(), scale: root.scale.clone() },
+      });
     }
     return starts;
   };
 
-  /** Apply a pivot transform change to objects (median-point pivot, like Blender). */
+  /** Apply a pivot transform change to objects (median-point pivot, like Blender), in world space. */
   const applyDelta = (starts: Map<string, Start>, pivotStart: THREE.Vector3, translation: THREE.Vector3, rotation: THREE.Quaternion, scale: THREE.Vector3) => {
     for (const [id, start] of starts) {
       const root = rootOf(id);
       if (!root) continue;
       const rel = start.position.clone().sub(pivotStart).multiply(scale).applyQuaternion(rotation);
-      root.position.copy(pivotStart).add(rel).add(translation);
-      root.quaternion.copy(rotation).multiply(start.quaternion);
-      if (start.isAsset) root.scale.copy(start.scale).multiply(scale);
+      const position = pivotStart.clone().add(rel).add(translation);
+      const quaternion = rotation.clone().multiply(start.quaternion);
+      const worldScale = start.isAsset ? start.scale.clone().multiply(scale) : start.scale.clone();
+      const world = new THREE.Matrix4().compose(position, quaternion, worldScale);
+      // Back into the parent's frame (identity for top-level objects).
+      if (root.parent && root.parent.type !== 'Scene') {
+        root.parent.updateWorldMatrix(true, false);
+        world.premultiply(root.parent.matrixWorld.clone().invert());
+      }
+      world.decompose(root.position, root.quaternion, root.scale);
+      if (!start.isAsset) root.scale.set(1, 1, 1);
       root.updateMatrixWorld(true);
     }
     invalidate();
@@ -458,7 +481,7 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
       try { setDesignBus.run('object.duplicate', { offset: [0, 0, 0] }); } catch (error) { callbacks.current.onToast((error as Error).message); return; }
       t.set.sync(setDesignBus.getScene());
     }
-    const ids = setDesignBus.getUi().selectedIds.filter((id) => isEditable(id) && rootOf(id));
+    const ids = movableIds(setDesignBus.getUi().selectedIds);
     if (!ids.length) { callbacks.current.onToast('Nichts auswählbar (ausgeblendet oder gesperrt).'); return; }
     if (kind === 'scale' && ids.every((id) => findSceneObject(sceneRef.current, id)?.kind !== 'asset') && ids.length === 1) {
       callbacks.current.onToast('Kameras und Lichter haben keine Skalierung. Brennweite bzw. Größe im Eigenschaften-Editor ändern.');
@@ -489,7 +512,7 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
       for (const [id, start] of m.starts) {
         const root = rootOf(id);
         if (!root) continue;
-        root.position.copy(start.position); root.quaternion.copy(start.quaternion); root.scale.copy(start.scale);
+        root.position.copy(start.local.position); root.quaternion.copy(start.local.quaternion); root.scale.copy(start.local.scale);
       }
       setDesignBus.endInteraction(false);
     }
@@ -643,7 +666,7 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
     // Gizmo drags: one undo step per drag, all selected objects follow the pivot.
     transform.addEventListener('dragging-changed', (event) => {
       if ((event as unknown as { value: boolean }).value) {
-        const ids = setDesignBus.getUi().selectedIds.filter((id) => isEditable(id) && rootOf(id));
+        const ids = movableIds(setDesignBus.getUi().selectedIds);
         gizmoDrag.current = { ids, starts: captureStarts(ids), pivot: { position: pivot.position.clone(), quaternion: pivot.quaternion.clone(), scale: pivot.scale.clone() } };
         setDesignBus.beginInteraction(transform.mode === 'translate' ? 'Verschieben' : transform.mode === 'rotate' ? 'Drehen' : 'Skalieren');
       } else if (gizmoDrag.current) {
@@ -692,6 +715,8 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
     const detachServices = setDesignBus.provideServices({
       bounds: (ids) => set.bounds(ids),
       viewportAspect: () => size.current.w / size.current.h,
+      // Loaded model geometry (the viewport's own entries first, then the shared cache).
+      modelBounds: (asset) => set.localBounds(asset.id) || getModelBounds(asset),
     });
 
     return () => {
@@ -800,16 +825,16 @@ const Viewport3D = forwardRef<ViewportHandle, Props>(({ scene, ui, onToast, onCo
       .filter((object): object is THREE.Group => !!object && object.visible);
 
     // Transform gizmo on the median of the editable selection.
-    const ids = ui.selectedIds.filter((id) => isEditable(id) && t.set.objectFor(id));
+    const ids = topLevelOf(scene, ui.selectedIds.filter((id) => isEditable(id) && t.set.objectFor(id)));
     const onlyNonAssets = ids.every((id) => findSceneObject(scene, id)?.kind !== 'asset');
     const mode = ui.tool === 'rotate' ? 'rotate' : ui.tool === 'scale' ? 'scale' : 'translate';
     if (ui.tool === 'select' || !ids.length || (mode === 'scale' && onlyNonAssets)) t.transform.detach();
     else {
       const center = new THREE.Vector3();
-      for (const id of ids) center.add(t.set.objectFor(id)!.position);
+      for (const id of ids) center.add(worldPositionOf(t.set.objectFor(id)!));
       t.pivot.position.copy(center.divideScalar(ids.length));
       const activeRoot = ui.activeId && ids.includes(ui.activeId) ? t.set.objectFor(ui.activeId) : t.set.objectFor(ids[ids.length - 1]);
-      t.pivot.quaternion.copy(ui.orientation === 'local' && activeRoot ? activeRoot.quaternion : new THREE.Quaternion());
+      t.pivot.quaternion.copy(ui.orientation === 'local' && activeRoot ? activeRoot.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion());
       t.pivot.scale.set(1, 1, 1);
       t.pivot.updateMatrixWorld();
       t.transform.setMode(mode);

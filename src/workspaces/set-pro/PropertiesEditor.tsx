@@ -10,6 +10,7 @@ import type { SetDesignUiState } from '../../setdesign/commands.ts';
 import { describeObject } from '../../setdesign/commands.ts';
 import { describeCamera, horizontalFovDeg, LENS_PRESETS_MM, SENSOR_PRESETS } from '../../setdesign/cameraMath.ts';
 import { findSceneObject, getActiveCamera, type SceneObjectRef } from '../../setdesign/sceneModel.ts';
+import { descendantIds } from '../../setdesign/hierarchy.ts';
 import { kelvinToHex } from '../../setdesign/sceneBuilder.ts';
 import { setDesignBus } from '../../setdesign/bus.ts';
 import { NumberField, ObjectIcon, Panel, Prop, runCommand } from './ui.tsx';
@@ -179,6 +180,27 @@ const ObjectTab: React.FC<{ scene: SetDesignState; objectRef: SceneObjectRef; on
         {objectRef.kind !== 'light' && <label className="sdx-check"><input type="checkbox" checked={locked} onChange={(event) => runCommand('object.update', { object: id, locked: event.target.checked }, onError)} /> Gesperrt</label>}
         {objectRef.kind === 'asset' && objectRef.object.attribution && <div className="sdx-note">{objectRef.object.attribution.author} · {objectRef.object.attribution.license}</div>}
       </Panel>
+      {objectRef.kind === 'asset' && (
+        <Panel title="Beziehungen" automationId="setdesign-props-relations">
+          <Prop label="Parent">
+            <select
+              className="sdx-input"
+              style={{ width: '100%' }}
+              value={objectRef.object.parentId || ''}
+              onChange={(event) => runCommand('object.parent', { objects: [id], parent: event.target.value || null, keepWorld: true }, onError)}
+              data-automation-id="setdesign-object-parent"
+            >
+              <option value="">— keiner —</option>
+              {scene.assets
+                .filter((asset) => asset.id !== id && !descendantIds(scene, id).includes(asset.id))
+                .sort((a, b) => a.name.localeCompare(b.name, 'de'))
+                .map((asset) => <option key={asset.id} value={asset.id}>{asset.kind === 'group' ? '▣ ' : ''}{asset.name}</option>)}
+            </select>
+          </Prop>
+          {objectRef.object.parentId && <div className="sdx-note">Position, Drehung und Maßstab sind relativ zum Parent.</div>}
+          {objectRef.object.kind === 'group' && <button type="button" className="sdx-btn" style={{ width: '100%' }} onClick={() => runCommand('group.ungroup', { objects: [id] }, onError)} data-automation-id="setdesign-object-ungroup">Gruppe auflösen</button>}
+        </Panel>
+      )}
     </>
   );
 };
@@ -312,16 +334,32 @@ const MaterialTab: React.FC<{ objectRef: Extract<SceneObjectRef, { kind: 'asset'
   const asset = objectRef.object;
   const material = asset.material || {};
   const update = (patch: Record<string, unknown>) => runCommand('object.update', { object: asset.id, ...patch }, onError);
+  const maps = Object.entries(material.maps || {}).filter(([, url]) => !!url);
   return (
     <>
-      <Crumb type={asset.kind === 'model' ? 'model' : asset.primitive || 'box'} name={asset.name} />
+      <Crumb type={asset.kind === 'model' ? 'model' : asset.kind === 'group' ? 'group' : asset.primitive || 'box'} name={asset.name} />
       <Panel title="Oberfläche" automationId="setdesign-props-material">
-        {asset.kind === 'model' && <div className="sdx-note">Importierte Modelle behalten ihre eigenen Materialien; diese Werte wirken im Solid-Shading und als Grundfarbe.</div>}
+        {asset.kind === 'group' && <div className="sdx-note">Gruppe: Änderungen gelten für alle Objekte darin.</div>}
+        {asset.kind === 'model' && !material.replaceModelMaterials && <div className="sdx-note">Importierte Modelle behalten ihre eigenen Materialien; diese Werte wirken im Solid-Shading und als Grundfarbe.</div>}
+        {material.name && <Prop label="Material"><span className="sdx-note" style={{ margin: 0 }} data-automation-id="setdesign-material-name">{material.name}</span></Prop>}
         <Prop label="Grundfarbe"><input type="color" value={material.color || '#b4b4b8'} onChange={(event) => update({ color: event.target.value })} style={{ width: '100%', height: 22 }} data-automation-id="setdesign-material-color" /></Prop>
         <Prop label="Rauheit"><NumberField value={material.roughness ?? 0.8} digits={3} step={0.01} min={0} max={1} slider {...edit('Material')} onChange={(v) => update({ roughness: v })} automationId="setdesign-material-roughness" /></Prop>
         <Prop label="Metallisch"><NumberField value={material.metalness ?? 0} digits={3} step={0.01} min={0} max={1} slider {...edit('Material')} onChange={(v) => update({ metalness: v })} /></Prop>
         <Prop label="Deckkraft"><NumberField value={material.opacity ?? 1} digits={3} step={0.01} min={0} max={1} slider {...edit('Material')} onChange={(v) => update({ opacity: v })} /></Prop>
       </Panel>
+      {maps.length > 0 && (
+        <Panel title="Texturen" automationId="setdesign-props-textures">
+          {maps.map(([key, url]) => (
+            <Prop key={key} label={({ baseColor: 'Grundfarbe', normal: 'Normal', roughness: 'Rauheit', metalness: 'Metallisch', ao: 'AO', displacement: 'Verschiebung', emissive: 'Emission' } as Record<string, string>)[key] || key}>
+              <span className="sdx-note" style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }} title={url.startsWith('data:') ? 'eingebettet' : url}>{url.startsWith('data:') ? 'eingebettet' : decodeURIComponent(url.split('/').pop() || url)}</span>
+            </Prop>
+          ))}
+          <Prop label="Kachelung"><span className="sdx-note" style={{ margin: 0 }}>{(material.repeat || [1, 1]).join(' × ')}</span></Prop>
+          <button type="button" className="sdx-btn" style={{ width: '100%' }} onClick={() => runCommand('material.set', { objects: [asset.id], clearMaps: true }, onError)} data-automation-id="setdesign-material-clear-maps">Texturen entfernen</button>
+          <div className="sdx-note">Sichtbar in „Materialvorschau“ und „Gerendert“; Solid und Clay zeigen nur die Grundfarbe.</div>
+        </Panel>
+      )}
+      {material.attribution && <div className="sdx-note">{material.attribution.author} · {material.attribution.license}</div>}
     </>
   );
 };

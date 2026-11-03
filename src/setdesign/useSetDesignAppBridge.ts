@@ -13,6 +13,7 @@ import { SETDESIGN_TOOLS } from '../mcp/modules/setdesignTools.ts';
 import type { StudioState, StudioToolContext } from '../mcp/toolModules.ts';
 import type { CaptureRequest } from './agentTools.ts';
 import { setDesignBus } from './bus.ts';
+import { getModelBounds } from './modelBoundsCache.ts';
 
 type Options = {
   scene: SetDesignState | null;
@@ -46,7 +47,8 @@ export const useSetDesignAppBridge = (options: Options) => {
 
   useEffect(() => { setDesignBus.reset(); }, [options.projectKey]);
 
-  useEffect(() => setDesignBus.provideServices({ getShots: () => ref.current.getShots?.() || [] }), []);
+  // Model bounds measured by sceneBuilder (viewport, frame capture, measureModels) for spatial queries.
+  useEffect(() => setDesignBus.provideServices({ getShots: () => ref.current.getShots?.() || [], modelBounds: getModelBounds }), []);
 
   /** Minimal tool context: set design tools only use these two actions. */
   const context = useMemo<StudioToolContext>(() => ({
@@ -69,6 +71,13 @@ export const useSetDesignAppBridge = (options: Options) => {
         if (!found) throw new Error(`No reference "${key}". Use project_list_references for names.`);
         ref.current.setReferences((prev) => prev.map((item) => (item.id === found.id ? withImageVersion(item, String(imageUrl)) : item)));
         return found.name;
+      }),
+      // Load models whose geometry is unknown so setdesign_query/describe use measured bounds.
+      setDesignBus.provideAction('measureModels', async ({ assets }) => {
+        const { measureModelBounds } = await import('./sceneBuilder.ts');
+        const list = (Array.isArray(assets) ? assets : []) as SetDesignState['assets'];
+        const results = await Promise.allSettled(list.map((asset) => measureModelBounds(asset)));
+        return { measured: results.filter((r) => r.status === 'fulfilled' && r.value).length, failed: results.filter((r) => r.status === 'rejected').length };
       }),
       // The workspace's "Referenzframe" button runs the same code path as the agent tool.
       setDesignBus.provideAction('captureFrame', (args) => executor.setdesign_capture_frame({ returnImage: false, ...args })),

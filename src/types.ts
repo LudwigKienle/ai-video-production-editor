@@ -195,10 +195,43 @@ export type SetDesignTransform = {
 
 export type SetDesignPrimitive = 'box' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'wall' | 'person';
 
+/** PBR texture maps of a set design material (file://, https:// or data: URLs). */
+export type SetDesignMaterialMaps = {
+  baseColor?: string;
+  normal?: string;
+  roughness?: string;
+  metalness?: string;
+  ao?: string;
+  displacement?: string;
+  emissive?: string;
+};
+
+export type SetDesignMaterial = {
+  color?: string;
+  metalness?: number;
+  roughness?: number;
+  opacity?: number;
+  transparent?: boolean;
+  emissive?: string;
+  emissiveIntensity?: number;
+  maps?: SetDesignMaterialMaps;
+  /** Texture tiling [u, v], default [1, 1]. */
+  repeat?: [number, number];
+  displacementScale?: number;
+  /** Material label, e.g. "Poly Haven · brown_planks_09". */
+  name?: string;
+  attribution?: { author: string; license: string; url?: string };
+  /** Models only: this material replaces the model's own materials (set by material.set). */
+  replaceModelMaterials?: boolean;
+};
+
 export type SetDesignAsset = {
   id: string;
   name: string;
-  kind: 'model' | 'primitive';
+  /** 'group' is an empty without geometry (Blender empty/collection) that holds children. */
+  kind: 'model' | 'primitive' | 'group';
+  /** Parent asset id; position/rotation/scale are then relative to the parent. */
+  parentId?: string | null;
   format?: 'glb' | 'gltf' | 'obj' | 'fbx';
   primitive?: SetDesignPrimitive;
   /** Hidden in viewport and renders (outliner eye). */
@@ -219,13 +252,7 @@ export type SetDesignAsset = {
     license: string;
     url?: string;
   };
-  material?: {
-    color?: string;
-    metalness?: number;
-    roughness?: number;
-    opacity?: number;
-    transparent?: boolean;
-  };
+  material?: SetDesignMaterial;
 };
 
 export type SetDesignLight = {
