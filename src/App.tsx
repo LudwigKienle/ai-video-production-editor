@@ -912,6 +912,8 @@ function App() {
     const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
     const [showAbout, setShowAbout] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
+    // The 3D library panel (Set Design) links to the key fields in Settings.
+    useEffect(() => { const open = () => setShowSettings(true); window.addEventListener('avpe:open-settings', open); return () => window.removeEventListener('avpe:open-settings', open); }, []);
     const [showPricing, setShowPricing] = useState(false);
     const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
 

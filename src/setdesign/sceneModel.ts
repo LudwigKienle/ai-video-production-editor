@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import { lensForVerticalFov } from './cameraMath.ts';
 import { lookAtRotation } from './coords.ts';
+import { sanitizeParents } from './hierarchy.ts';
 
 export type SceneObjectKind = 'asset' | 'camera' | 'light';
 
@@ -26,11 +27,17 @@ export type OutlinerItem = {
   id: string;
   name: string;
   kind: SceneObjectKind;
-  /** primitive name, 'model', camera, or light type. */
+  /** primitive name, 'model', 'group', camera, or light type. */
   type: string;
   hidden: boolean;
   locked: boolean;
   active: boolean;
+  /** Parent asset id (null for top-level objects). */
+  parentId: string | null;
+  /** Nesting level in the outliner (0 = top level). */
+  depth: number;
+  /** Number of direct children. */
+  childCount: number;
 };
 
 export const DEFAULT_OUTPUT = { width: 1920, height: 1080 };
@@ -46,6 +53,24 @@ export const PRIMITIVES: Array<{ id: SetDesignPrimitive; label: string; size: Se
   { id: 'wall', label: 'Wand', size: { x: 4, y: 2.6, z: 0.12 }, hint: '4 m breit, 2,60 m hoch, 12 cm stark' },
   { id: 'person', label: 'Stand-in', size: { x: 0.5, y: 1.75, z: 0.3 }, hint: 'Platzhalterfigur, 1,75 m groß' },
 ];
+
+/**
+ * three.js scale that gives a primitive real dimensions [x, y, z] in metres (Blender axes: x width,
+ * y depth, z height). Axes the primitive has no extent on (a plane's height) keep scale 1.
+ */
+export const scaleForDimensions = (primitive: SetDesignPrimitive | undefined, dimensions: SetDesignTransform): SetDesignTransform => {
+  const def = PRIMITIVES.find((entry) => entry.id === primitive) || PRIMITIVES[0];
+  const ratio = (wanted: number, base: number) => (base > 0 && wanted > 0 ? Number((wanted / base).toFixed(6)) : 1);
+  // Blender (x, y, z) is three.js (x, z, y).
+  return { x: ratio(dimensions.x, def.size.x), y: ratio(dimensions.z, def.size.y), z: ratio(dimensions.y, def.size.z) };
+};
+
+/** Real dimensions [x, y, z] (Blender axes, metres) of a primitive with its own scale (no parents). */
+export const primitiveDimensions = (asset: Pick<SetDesignAsset, 'primitive' | 'scale'>): SetDesignTransform => {
+  const def = PRIMITIVES.find((entry) => entry.id === asset.primitive) || PRIMITIVES[0];
+  const r = (value: number) => Number(value.toFixed(4));
+  return { x: r(def.size.x * Math.abs(asset.scale.x)), y: r(def.size.z * Math.abs(asset.scale.z)), z: r(def.size.y * Math.abs(asset.scale.y)) };
+};
 
 export const LIGHT_TYPES: Array<{ id: SetDesignLight['type']; label: string; defaultPower: number }> = [
   { id: 'point', label: 'Punktlicht', defaultPower: 1000 },
@@ -124,7 +149,7 @@ export const normalizeSetDesignState = (raw: SetDesignState | null | undefined):
   const assets = (Array.isArray(raw.assets) ? raw.assets : []).filter(Boolean).map((asset, index) => ({
     ...asset,
     id: asset.id || `asset-${index + 1}`,
-    name: asset.name || (asset.kind === 'primitive' ? PRIMITIVES.find((p) => p.id === asset.primitive)?.label || 'Objekt' : 'Modell'),
+    name: asset.name || (asset.kind === 'primitive' ? PRIMITIVES.find((p) => p.id === asset.primitive)?.label || 'Objekt' : asset.kind === 'group' ? 'Gruppe' : 'Modell'),
     position: vec(asset.position, zero()),
     rotation: vec(asset.rotation, zero()),
     scale: vec(asset.scale, one()),
@@ -152,7 +177,7 @@ export const normalizeSetDesignState = (raw: SetDesignState | null | undefined):
   const activeCameraId = cameras.some((camera) => camera.id === raw.activeCameraId) ? raw.activeCameraId! : cameras[0].id;
   return {
     ...raw,
-    assets,
+    assets: sanitizeParents(assets),
     lights,
     grid: { ...base.grid, ...(raw.grid || {}) },
     camera: view,
@@ -199,17 +224,41 @@ export const uniqueName = (state: SetDesignState, wanted: string) => {
   return `${base}.${Date.now()}`;
 };
 
-export const outlinerItems = (state: SetDesignState): OutlinerItem[] => [
-  ...(state.cameras || []).map((camera) => ({
-    id: camera.id, name: camera.name, kind: 'camera' as const, type: 'camera', hidden: !!camera.hidden, locked: !!camera.locked, active: camera.id === state.activeCameraId,
-  })),
-  ...state.lights.map((light) => ({
-    id: light.id, name: light.name || lightLabel(light.type), kind: 'light' as const, type: light.type === 'directional' ? 'sun' : light.type, hidden: !!light.hidden, locked: false, active: false,
-  })),
-  ...state.assets.map((asset) => ({
-    id: asset.id, name: asset.name, kind: 'asset' as const, type: asset.kind === 'model' ? 'model' : asset.primitive || 'box', hidden: !!asset.hidden, locked: !!asset.locked, active: false,
-  })),
-].sort((a, b) => a.name.localeCompare(b.name, 'de'));
+const assetType = (asset: SetDesignAsset) => (asset.kind === 'model' ? 'model' : asset.kind === 'group' ? 'group' : asset.primitive || 'box');
+
+/** Outliner rows: cameras, lights and top-level objects by name, children nested under their parent. */
+export const outlinerItems = (state: SetDesignState): OutlinerItem[] => {
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'de');
+  const assetIds = new Set(state.assets.map((asset) => asset.id));
+  const children = new Map<string, SetDesignAsset[]>();
+  for (const asset of state.assets) {
+    if (!asset.parentId || !assetIds.has(asset.parentId)) continue;
+    children.set(asset.parentId, [...(children.get(asset.parentId) || []), asset]);
+  }
+  const roots: OutlinerItem[] = [
+    ...(state.cameras || []).map((camera) => ({
+      id: camera.id, name: camera.name, kind: 'camera' as const, type: 'camera', hidden: !!camera.hidden, locked: !!camera.locked, active: camera.id === state.activeCameraId, parentId: null, depth: 0, childCount: 0,
+    })),
+    ...state.lights.map((light) => ({
+      id: light.id, name: light.name || lightLabel(light.type), kind: 'light' as const, type: light.type === 'directional' ? 'sun' : light.type, hidden: !!light.hidden, locked: false, active: false, parentId: null, depth: 0, childCount: 0,
+    })),
+    ...state.assets.filter((asset) => !asset.parentId || !assetIds.has(asset.parentId)).map((asset) => ({
+      id: asset.id, name: asset.name, kind: 'asset' as const, type: assetType(asset), hidden: !!asset.hidden, locked: !!asset.locked, active: false, parentId: null, depth: 0, childCount: (children.get(asset.id) || []).length,
+    })),
+  ].sort(byName);
+  const out: OutlinerItem[] = [];
+  const seen = new Set<string>();
+  const visit = (item: OutlinerItem) => {
+    if (seen.has(item.id)) return;
+    seen.add(item.id);
+    out.push(item);
+    for (const child of [...(children.get(item.id) || [])].sort(byName)) {
+      visit({ id: child.id, name: child.name, kind: 'asset', type: assetType(child), hidden: !!child.hidden, locked: !!child.locked, active: false, parentId: item.id, depth: item.depth + 1, childCount: (children.get(child.id) || []).length });
+    }
+  };
+  roots.forEach(visit);
+  return out;
+};
 
 /** Position/rotation/scale of any object (lights and cameras have unit scale). */
 export const getObjectTransform = (ref: SceneObjectRef) => ({
