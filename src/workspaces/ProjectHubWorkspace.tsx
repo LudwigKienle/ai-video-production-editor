@@ -255,6 +255,8 @@ type OutfitImageModel =
     | 'nano-banana-21-fal'
     | 'seedream-v5-pro-edit-fal'
     | 'gpt-image-2-fal'
+    | 'gpt-image-26-flare-fal'
+    | 'gpt-image-26-sunburst-fal'
     | 'gpt-image-25-flare-fal'
     | 'gpt-image-25-sunburst-fal'
     | 'flux-3-edit-fal'
@@ -281,6 +283,8 @@ const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 
     { id: 'gemini-pro', label: 'Gemini 3 Pro Image', group: 'Cloud' },
     { id: 'nano-banana-2-fal', label: 'Nano Banana 2 Edit (FAL)', group: 'Cloud' },
     { id: 'gpt-image-2-fal', label: 'GPT Image 2 Edit (FAL)', group: 'Cloud' },
+    { id: 'gpt-image-26-flare-fal', label: 'GPT Image 2.6 Flare Edit (FAL)', group: 'Cloud' },
+    { id: 'gpt-image-26-sunburst-fal', label: 'GPT Image 2.6 Sunburst Edit (FAL)', group: 'Cloud' },
     { id: 'gpt-image-25-flare-fal', label: 'GPT Image 2.5 Flare Edit (FAL)', group: 'Cloud' },
     { id: 'gpt-image-25-sunburst-fal', label: 'GPT Image 2.5 Sunburst Edit (FAL)', group: 'Cloud' },
     { id: 'flux-3-edit-fal', label: 'FLUX.3 Edit (FAL)', group: 'Cloud' },
@@ -9895,9 +9899,13 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), 'FAL Seedream 5.0 Pro Edit');
             case 'gpt-image-2-fal':
                 return firstEdit(await editImageWithFalGptImage2(prompt, refs.slice(0, 8), { aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL GPT Image 2 Edit');
+            case 'gpt-image-26-flare-fal':
+            case 'gpt-image-26-sunburst-fal':
             case 'gpt-image-25-flare-fal':
-            case 'gpt-image-25-sunburst-fal':
-                return firstEdit(await editImageWithFalGptImage25(prompt, refs.slice(0, 16), { variant: model === 'gpt-image-25-flare-fal' ? 'flare' : 'sunburst', aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL GPT Image 2.5 Edit');
+            case 'gpt-image-25-sunburst-fal': {
+                const version = model.startsWith('gpt-image-26-') ? '2.6' : '2.5';
+                return firstEdit(await editImageWithFalGptImage25(prompt, refs.slice(0, 16), { variant: model.includes('sunburst') ? 'sunburst' : 'flare', version, aspectRatio: modelAspectRatio, numOutputs: 1 }), `FAL GPT Image ${version} Edit`);
+            }
             case 'flux-3-edit-fal':
                 return firstEdit(await editImageWithFalFlux3(prompt, refs.slice(0, 10), toFlux3Options(modelAspectRatio, imageSize)), 'FAL FLUX.3 Edit');
             case 'krea-3-edit-fal':
