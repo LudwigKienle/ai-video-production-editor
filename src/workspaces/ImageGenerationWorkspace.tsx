@@ -161,6 +161,10 @@ type ImageModelId =
   | 'qwen-21-fal-edit'
   | 'gpt-image-2-fal'
   | 'gpt-image-2-fal-edit'
+  | 'gpt-image-26-flare-fal'
+  | 'gpt-image-26-flare-fal-edit'
+  | 'gpt-image-26-sunburst-fal'
+  | 'gpt-image-26-sunburst-fal-edit'
   | 'gpt-image-25-flare-fal'
   | 'gpt-image-25-flare-fal-edit'
   | 'gpt-image-25-sunburst-fal'
@@ -215,6 +219,10 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'qwen-21-fal-edit', label: 'Qwen Image 2.1 Edit (FAL)', provider: 'FAL', icon: logoQwen, goodFor: 'Edits and combines up to 10 ordered reference images following the prompt' },
   { id: 'gpt-image-2-fal', label: 'GPT Image 2 (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'High-end text rendering, prompt adherence, and detailed photoreal generation' },
   { id: 'gpt-image-2-fal-edit', label: 'GPT Image 2 Edit (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Fine-grained multi-image edits with strong prompt adherence' },
+  { id: 'gpt-image-26-flare-fal', label: 'GPT Image 2.6 Flare (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'OpenAI\'s newest default: plans the image before rendering, sharp typography, natural light, transparent backgrounds' },
+  { id: 'gpt-image-26-flare-fal-edit', label: 'GPT Image 2.6 Flare Edit (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Edits only what you ask, keeps subject, composition and background; up to 16 references with optional mask' },
+  { id: 'gpt-image-26-sunburst-fal', label: 'GPT Image 2.6 Sunburst (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Highest fidelity on intricate detail for hero frames and key art; slower than Flare' },
+  { id: 'gpt-image-26-sunburst-fal-edit', label: 'GPT Image 2.6 Sunburst Edit (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Tightest edit control: subject and composition hold across many revision rounds' },
   { id: 'gpt-image-25-flare-fal', label: 'GPT Image 2.5 Flare (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Fast default: natural lighting, rich textures, layouts and transparent backgrounds, up to 3840px' },
   { id: 'gpt-image-25-flare-fal-edit', label: 'GPT Image 2.5 Flare Edit (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Fast multi-reference edits (up to 16 images) with optional mask' },
   { id: 'gpt-image-25-sunburst-fal', label: 'GPT Image 2.5 Sunburst (FAL)', provider: 'FAL', icon: logoOpenai, goodFor: 'Intricate detail and precision for hero frames and key art' },
@@ -276,6 +284,10 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   'qwen-21-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-2-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-2-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'gpt-image-26-flare-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'gpt-image-26-flare-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'gpt-image-26-sunburst-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'gpt-image-26-sunburst-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-25-flare-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-25-flare-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'gpt-image-25-sunburst-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
@@ -332,6 +344,10 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   'qwen-21-fal-edit': 10,
   'gpt-image-2-fal': 0,
   'gpt-image-2-fal-edit': 8,
+  'gpt-image-26-flare-fal': 0,
+  'gpt-image-26-flare-fal-edit': 16,
+  'gpt-image-26-sunburst-fal': 0,
+  'gpt-image-26-sunburst-fal-edit': 16,
   'gpt-image-25-flare-fal': 0,
   'gpt-image-25-flare-fal-edit': 16,
   'gpt-image-25-sunburst-fal': 0,
@@ -393,6 +409,10 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   'qwen-21-fal-edit': { provider: 'fal', kind: 'edit', model: 'fal-ai/qwen-image-2.1/edit' },
   'gpt-image-2-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2' },
   'gpt-image-2-fal-edit': { provider: 'fal', kind: 'edit', model: 'openai/gpt-image-2/edit' },
+  'gpt-image-26-flare-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2.6/flare/text-to-image' },
+  'gpt-image-26-flare-fal-edit': { provider: 'fal', kind: 'edit', model: 'openai/gpt-image-2.6/flare/edit' },
+  'gpt-image-26-sunburst-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2.6/sunburst/text-to-image' },
+  'gpt-image-26-sunburst-fal-edit': { provider: 'fal', kind: 'edit', model: 'openai/gpt-image-2.6/sunburst/edit' },
   'gpt-image-25-flare-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2.5/flare/text-to-image' },
   'gpt-image-25-flare-fal-edit': { provider: 'fal', kind: 'edit', model: 'openai/gpt-image-2.5/flare/edit' },
   'gpt-image-25-sunburst-fal': { provider: 'fal', kind: 'image', model: 'openai/gpt-image-2.5/sunburst/text-to-image' },
@@ -411,8 +431,8 @@ const SMART_ROUTER_GOAL_PRESETS = [
 
 const SMART_ROUTER_MODEL_CANDIDATES: SmartModelCandidate<ImageModelId>[] = [
   {
-    id: 'gpt-image-25-flare-fal',
-    label: 'GPT Image 2.5 Flare (FAL)',
+    id: 'gpt-image-26-flare-fal',
+    label: 'GPT Image 2.6 Flare (FAL)',
     provider: 'fal',
     quality: 9.7,
     speed: 7.4,
@@ -2683,31 +2703,37 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             item = edited[0];
           }
           break;
+        case 'gpt-image-26-flare-fal':
+        case 'gpt-image-26-sunburst-fal':
         case 'gpt-image-25-flare-fal':
         case 'gpt-image-25-sunburst-fal':
           item = await generateImageWithFalGptImage25(shapedPrompt, {
-            variant: modelId === 'gpt-image-25-sunburst-fal' ? 'sunburst' : 'flare',
+            variant: modelId.includes('sunburst') ? 'sunburst' : 'flare',
+            version: modelId.startsWith('gpt-image-26-') ? '2.6' : '2.5',
             aspectRatio: qwenMaxAspectRatio,
             numOutputs: 1,
             quality: 'high',
             outputFormat: 'png',
           });
           break;
+        case 'gpt-image-26-flare-fal-edit':
+        case 'gpt-image-26-sunburst-fal-edit':
         case 'gpt-image-25-flare-fal-edit':
         case 'gpt-image-25-sunburst-fal-edit':
           if (referenceImages.length === 0) {
-            throw new Error('GPT Image 2.5 Edit (FAL) requires at least one reference image.');
+            throw new Error(`${MODEL_OPTIONS.find((m) => m.id === modelId)?.label || 'GPT Image Edit (FAL)'} requires at least one reference image.`);
           }
           {
             const edited = await editImageWithFalGptImage25(shapedPrompt, referenceImages, {
-              variant: modelId === 'gpt-image-25-sunburst-fal-edit' ? 'sunburst' : 'flare',
+              variant: modelId.includes('sunburst') ? 'sunburst' : 'flare',
+              version: modelId.startsWith('gpt-image-26-') ? '2.6' : '2.5',
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
               quality: 'high',
               outputFormat: 'png',
             });
             if (!edited.length) {
-              throw new Error('GPT Image 2.5 Edit (FAL) returned no images.');
+              throw new Error('GPT Image Edit (FAL) returned no images.');
             }
             item = edited[0];
           }

@@ -17,6 +17,10 @@ const MODELS = {
     GPT_IMAGE_25_FLARE_EDIT: 'openai/gpt-image-2.5/flare/edit',
     GPT_IMAGE_25_SUNBURST_T2I: 'openai/gpt-image-2.5/sunburst/text-to-image',
     GPT_IMAGE_25_SUNBURST_EDIT: 'openai/gpt-image-2.5/sunburst/edit',
+    GPT_IMAGE_26_FLARE_T2I: 'openai/gpt-image-2.6/flare/text-to-image',
+    GPT_IMAGE_26_FLARE_EDIT: 'openai/gpt-image-2.6/flare/edit',
+    GPT_IMAGE_26_SUNBURST_T2I: 'openai/gpt-image-2.6/sunburst/text-to-image',
+    GPT_IMAGE_26_SUNBURST_EDIT: 'openai/gpt-image-2.6/sunburst/edit',
     NANO_BANANA_2_T2I: 'fal-ai/nano-banana-2',
     NANO_BANANA_2_EDIT: 'fal-ai/nano-banana-2/edit',
     NANO_BANANA_21_T2I: 'google/nano-banana-2.1',
@@ -2736,12 +2740,19 @@ export const generate3dWithFalRodinV25 = async (
     return finalizeFalMesh(output, 'rodin-v2.5', MODELS.RODIN_V25_IMAGE_TO_3D, 'Rodin 2.5 image-to-3D', opts?.name || 'rodin_blockout');
 };
 
-/* ─── GPT Image 2.5 (Flare / Sunburst) ─── */
+/* ─── GPT Image 2.5 / 2.6 (Flare / Sunburst) ─── */
 
 export type FalGptImage25Variant = 'flare' | 'sunburst';
 export type FalGptImage25Quality = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type FalGptImageFlareVersion = '2.5' | '2.6';
+// 2.6 only: how long the model plans the image before rendering.
+export type FalGptImage26ReasoningEffort = 'low' | 'medium' | 'high';
 
-const gptImage25Endpoint = (variant: FalGptImage25Variant, mode: 't2i' | 'edit') => {
+const gptImage25Endpoint = (variant: FalGptImage25Variant, mode: 't2i' | 'edit', version: FalGptImageFlareVersion = '2.5') => {
+    if (version === '2.6') {
+        if (variant === 'sunburst') return mode === 'edit' ? MODELS.GPT_IMAGE_26_SUNBURST_EDIT : MODELS.GPT_IMAGE_26_SUNBURST_T2I;
+        return mode === 'edit' ? MODELS.GPT_IMAGE_26_FLARE_EDIT : MODELS.GPT_IMAGE_26_FLARE_T2I;
+    }
     if (variant === 'sunburst') return mode === 'edit' ? MODELS.GPT_IMAGE_25_SUNBURST_EDIT : MODELS.GPT_IMAGE_25_SUNBURST_T2I;
     return mode === 'edit' ? MODELS.GPT_IMAGE_25_FLARE_EDIT : MODELS.GPT_IMAGE_25_FLARE_T2I;
 };
@@ -2750,6 +2761,8 @@ export const generateImageWithFalGptImage25 = async (
     prompt: string,
     opts?: {
         variant?: FalGptImage25Variant;
+        version?: FalGptImageFlareVersion;
+        reasoningEffort?: FalGptImage26ReasoningEffort;
         aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
         numOutputs?: number;
         quality?: FalGptImage25Quality;
@@ -2758,7 +2771,9 @@ export const generateImageWithFalGptImage25 = async (
     }
 ): Promise<MediaItem> => {
     const variant = opts?.variant || 'flare';
-    const endpoint = gptImage25Endpoint(variant, 't2i');
+    const version = opts?.version || '2.5';
+    const tag = version.replace('.', '');
+    const endpoint = gptImage25Endpoint(variant, 't2i', version);
     const input: Record<string, any> = {
         prompt,
         image_size: mapQwenMaxImageSize(opts?.aspectRatio),
@@ -2767,11 +2782,12 @@ export const generateImageWithFalGptImage25 = async (
     };
     if (opts?.background) input.background = opts.background;
     if (opts?.numOutputs) input.num_images = opts.numOutputs;
+    if (version === '2.6' && opts?.reasoningEffort) input.reasoning_effort = opts.reasoningEffort;
 
     const output = await runFalQueue(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
     if (urls.length === 0) {
-        throw new Error(`FAL GPT Image 2.5 ${variant} text-to-image returned no images.`);
+        throw new Error(`FAL GPT Image ${version} ${variant} text-to-image returned no images.`);
     }
 
     recordUsage({
@@ -2780,12 +2796,12 @@ export const generateImageWithFalGptImage25 = async (
         kind: 'image',
         units: 1,
         unitLabel: 'image',
-        note: `FAL GPT Image 2.5 ${variant} text-to-image`,
+        note: `FAL GPT Image ${version} ${variant} text-to-image`,
     });
 
     return {
-        id: `fal-gpt-image-25-${variant}-t2i-${Date.now()}`,
-        name: `fal_gpt_image_25_${variant}_${prompt.slice(0, 16) || 'image'}.png`,
+        id: `fal-gpt-image-${tag}-${variant}-t2i-${Date.now()}`,
+        name: `fal_gpt_image_${tag}_${variant}_${prompt.slice(0, 16) || 'image'}.png`,
         type: 'image',
         url: urls[0],
         source: 'generated',
@@ -2797,6 +2813,8 @@ export const editImageWithFalGptImage25 = async (
     image: { base64: string; mimeType: string } | Array<{ base64: string; mimeType: string }>,
     opts?: {
         variant?: FalGptImage25Variant;
+        version?: FalGptImageFlareVersion;
+        reasoningEffort?: FalGptImage26ReasoningEffort;
         aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
         numOutputs?: number;
         quality?: FalGptImage25Quality;
@@ -2806,11 +2824,13 @@ export const editImageWithFalGptImage25 = async (
     }
 ): Promise<MediaItem[]> => {
     const variant = opts?.variant || 'flare';
-    const endpoint = gptImage25Endpoint(variant, 'edit');
+    const version = opts?.version || '2.5';
+    const tag = version.replace('.', '');
+    const endpoint = gptImage25Endpoint(variant, 'edit', version);
     const images = Array.isArray(image) ? image : [image];
     const imageUrls = images.filter((item) => !!item?.base64).map((item) => toDataUri(item)).slice(0, 16);
     if (imageUrls.length === 0) {
-        throw new Error('FAL GPT Image 2.5 Edit requires at least one reference image.');
+        throw new Error(`FAL GPT Image ${version} Edit requires at least one reference image.`);
     }
 
     const input: Record<string, any> = {
@@ -2823,11 +2843,12 @@ export const editImageWithFalGptImage25 = async (
     if (opts?.background) input.background = opts.background;
     if (opts?.numOutputs) input.num_images = opts.numOutputs;
     if (opts?.mask) input.mask_url = toDataUri(opts.mask);
+    if (version === '2.6' && opts?.reasoningEffort) input.reasoning_effort = opts.reasoningEffort;
 
     const output = await runFalQueue(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
     if (urls.length === 0) {
-        throw new Error(`FAL GPT Image 2.5 ${variant} edit returned no images.`);
+        throw new Error(`FAL GPT Image ${version} ${variant} edit returned no images.`);
     }
 
     recordUsage({
@@ -2836,12 +2857,12 @@ export const editImageWithFalGptImage25 = async (
         kind: 'edit',
         units: 1,
         unitLabel: 'request',
-        note: `FAL GPT Image 2.5 ${variant} edit`,
+        note: `FAL GPT Image ${version} ${variant} edit`,
     });
 
     return urls.map((url, index) => ({
-        id: `fal-gpt-image-25-${variant}-edit-${Date.now()}-${index}`,
-        name: `fal_gpt_image_25_${variant}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
+        id: `fal-gpt-image-${tag}-${variant}-edit-${Date.now()}-${index}`,
+        name: `fal_gpt_image_${tag}_${variant}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
         type: 'image',
         url,
         source: 'generated',
