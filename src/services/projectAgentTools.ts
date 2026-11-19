@@ -6,7 +6,8 @@
  *
  * The merge logic is pure (and unit-tested); `createProjectAgentTools` wires it to App state.
  */
-import type { CharacterOutfit, ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState } from '../types';
+import type { CharacterOutfit, ReferenceItem, ScriptRevision, ShotPrompt, StoryBible, WorldbuildingEnvironment, WorldbuildingFaction, WorldbuildingState, CreatureWorkshop } from '../types';
+import { SHOT_VIDEO_PROMPT_GUIDE, isStructuredShotPrompt, lintShotVideoPrompt, type ShotVideoPromptRequest } from '../utils/shotVideoPrompt.ts';
 import { createDefaultWorldbuildingState } from '../data/worldbuildingTypes.ts';
 import { mergeShotsIntoScenes, shotsReplacedByMerge, splitScriptIntoScenes } from '../utils/directorScenes.ts';
 import {
@@ -83,6 +84,12 @@ export const upsertReference = (references: ReferenceItem[], input: Record<strin
     baseReferenceMode: (['auto', 'neutral', 'outfit'] as const).find((mode) => mode === input.baseReferenceMode),
     characterPerspective: (['auto', 'close_up', 'full_body', 'side', 'profile_full', 'back'] as const).find((value) => value === input.perspective),
     characterBackground: (['auto', 'white', 'black', 'green', 'natural'] as const).find((value) => value === input.background),
+    personalityNotes: asString(input.personalityNotes),
+    characterGoals: asString(input.characterGoals),
+    characterArc: asString(input.characterArc),
+    gestureNotes: asString(input.gestureNotes),
+    voiceNotes: asString(input.voiceNotes),
+    speechStyle: asString(input.speechStyle),
   });
   const image = mediaFrom(input, 'image');
   if (existing) {
@@ -106,7 +113,7 @@ export const upsertReference = (references: ReferenceItem[], input: Record<strin
   return { references: [...references, created], reference: created, created: true };
 };
 
-const SHOT_TEXT_FIELDS = ['prompt', 'description', 'shotLabel', 'sceneSlugline', 'cameraAngle', 'shotTypePresetId', 'lightingPresetId', 'cameraPresetId', 'lensPresetId'] as const;
+const SHOT_TEXT_FIELDS = ['prompt', 'description', 'shotLabel', 'sceneSlugline', 'cameraAngle', 'shotTypePresetId', 'lightingPresetId', 'cameraPresetId', 'lensPresetId', 'motionPrompt', 'voiceoverText'] as const;
 
 /** Merge shot edits by shot number; new numbers become new shots. `replace` swaps the whole list. */
 export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, unknown>>, replace = false) => {
@@ -148,6 +155,12 @@ export const upsertShots = (shots: ShotPrompt[], inputs: Array<Record<string, un
       next.continuityRefinementSummary = undefined;
       next.continuityRefinementPasses = undefined;
       next.continuityReview = undefined;
+    }
+    // A new video prompt replaces the filming-continuity rewrite that would otherwise win at render time.
+    if (next.motionPrompt !== current.motionPrompt && current.filmingContinuityRefinedPrompt) {
+      next.filmingContinuityRefinedPrompt = undefined;
+      next.filmingContinuityRefinementSummary = undefined;
+      next.filmingContinuityRefinementPasses = undefined;
     }
     const image = mediaFrom(input, 'image');
     if (image) next = withImageVersion(next, image);
@@ -237,6 +250,13 @@ export const summarizeReference = (ref: ReferenceItem, full = false) => clean({
   imageUrl: describeMediaUrl(ref.imageUrl),
   imageVersions: full && ref.imageVersions?.length ? ref.imageVersions.length : undefined,
   angleCount: ref.multiAngleUrls?.length || undefined,
+  personalityNotes: full ? ref.personalityNotes : undefined,
+  characterGoals: full ? ref.characterGoals : undefined,
+  characterArc: full ? ref.characterArc : undefined,
+  gestureNotes: full ? ref.gestureNotes : undefined,
+  voiceNotes: full ? ref.voiceNotes : undefined,
+  speechStyle: full ? ref.speechStyle : undefined,
+  characterSheetUrl: ref.characterSheetUrl ? describeMediaUrl(ref.characterSheetUrl) : undefined,
   outfits: ref.outfits?.length ? ref.outfits.map((outfit) => clean({ id: full ? outfit.id : undefined, name: outfit.name, description: full ? outfit.description : undefined, imageUrl: describeMediaUrl(outfit.imageUrl) })) : undefined,
 });
 
@@ -252,6 +272,8 @@ export const summarizeShot = (shot: ShotPrompt, full = false) => clean({
   products: shot.products?.length ? shot.products : undefined,
   cameraAngle: shot.cameraAngle,
   cameraYaw: shot.cameraYaw || undefined,
+  motionPrompt: shot.filmingContinuityRefinedPrompt || shot.motionPrompt ? (full ? shot.filmingContinuityRefinedPrompt || shot.motionPrompt : (shot.filmingContinuityRefinedPrompt || shot.motionPrompt || '').slice(0, 200)) : undefined,
+  voiceoverText: shot.voiceoverText || undefined,
   /** The prompt actually rendered when a continuity pass rewrote it. */
   renderedPrompt: full && shot.continuityRefinedPrompt ? shot.continuityRefinedPrompt : undefined,
   imageUrl: describeMediaUrl(shot.imageUrl),
@@ -294,6 +316,10 @@ const AGENT_TOOL_LABELS: Record<string, string> = {
   project_cancel_job: 'Stopping a job',
   project_review_continuity: 'Reviewing continuity',
   project_generate_reference_angle: 'Rendering a reverse angle',
+  project_generate_character_sheet: 'Rendering a character sheet',
+  project_video_prompt_guide: 'Reading the video prompt guide',
+  project_set_video_prompts: 'Writing video prompts',
+  project_creature_workshop: 'Building a creature',
   project_job_status: 'Checking a job',
   project_generate_shot_videos: 'Filming shots',
   project_generate_reference_image: 'Rendering a reference image',
@@ -324,6 +350,8 @@ const SHOT_SCHEMA = {
     cameraAngle: str('Camera angle, e.g. low_angle, eye_level, overhead.'),
     cameraYaw: num('Camera yaw in degrees (-180..180): picks the location view rendered behind the action; 180 = reverse side of the room (use with project_generate_reference_angle).'),
     cameraPitch: num('Camera pitch in degrees (-60..60).'),
+    motionPrompt: str('Video prompt for filming this shot. Write it with project_video_prompt_guide (blocks, ACTING TASK, Final frame); block-structured prompts are sent to the video model exactly as written.'),
+    voiceoverText: str('The line spoken in this shot (dialogue or voice-over).'),
     resetContinuity: { type: 'boolean', description: 'Drop the continuity-refined prompt and review so the next render uses the prompt as written (prompt edits do this automatically).' },
     visualTriggers: strList('Visual cues that must appear.'),
     imageUrl: str('Storyboard frame to attach: https URL or data URL.'),
@@ -408,6 +436,12 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
         background: str('Characters only: backdrop of the reference image — auto (as the prompt says), white, black, green (screen) or natural (their environment, for cinematic portraits).'),
         imageUrl: str('Reference image: https URL or data URL.'),
         imagePath: str('Reference image: local file path.'),
+        personalityNotes: str('Characters: personality, for the acting tasks in video prompts.'),
+        characterGoals: str('Characters: what they want overall.'),
+        characterArc: str('Characters: how they change.'),
+        gestureNotes: str('Characters: physical habits and ways of moving.'),
+        voiceNotes: str('Characters: voice (pitch, texture, accent).'),
+        speechStyle: str('Characters: how they talk.'),
       },
     },
   },
@@ -593,6 +627,47 @@ export const PROJECT_AGENT_TOOL_DECLARATIONS = [
     parameters: { type: 'object', properties: { referenceName: str('Reference name.'), referenceId: str('Reference id.'), yaw: num('Camera yaw in degrees, -180..180 (180 = reverse).'), note: str('What the new view must show.') }, required: ['yaw'] },
   },
   {
+    name: 'project_video_prompt_guide',
+    description: 'Before writing video prompts: returns the shot video-prompt method (block order, ACTING TASK ladder, Seedance rules, fight rules, checklist) plus, per requested shot, its context: shot text, characters with acting notes, dialogue, location, camera move, duration, aspect, reference image order, the whole scene and the neighbouring shots. Read the whole scene before writing any acting task. Then save prompts with project_set_video_prompts.',
+    parameters: { type: 'object', properties: { shots: { type: 'array', items: { type: 'number' }, description: 'Shot numbers to get context for (max 12). Omit for the guide only.' } } },
+  },
+  {
+    name: 'project_set_video_prompts',
+    description: 'Save video prompts on shots (motionPrompt) and check each against the guide\'s checklist. Returns the issues found per shot; fix high and medium ones and save again. Saved block-structured prompts are filmed exactly as written by project_generate_shot_videos.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompts: { type: 'array', items: { type: 'object', properties: { shot: num('Shot number.'), motionPrompt: str('The full video prompt.'), voiceoverText: str('Optional: the spoken line, if it changed.') }, required: ['shot', 'motionPrompt'] }, description: 'One entry per shot.' },
+      },
+      required: ['prompts'],
+    },
+  },
+  {
+    name: 'project_generate_character_sheet',
+    description: 'Render a three-view reference sheet for a cast member: full-body front with the face hidden, full-body back, and a front close-up, on seamless grey. Uses the base image as identity when there is one. Storyboard frames then use the sheet as this character\'s reference.',
+    parameters: { type: 'object', properties: { referenceName: str('Character name.'), referenceId: str('Character id.'), model: str('Optional: seedream-v55-edit-fal (default), nano-banana-2-fal, gpt-image-2-fal, or "project" for the project reference model.') } },
+  },
+  {
+    name: 'project_creature_workshop',
+    description: 'Build a creature the way a creature shop does: (1) sculpt it in grey clay (shape only), (2) photograph a real face to borrow (an animal or person), (3) shoot a macro swatch of a real material for each body part, (4) combine clay + face + swatches in Seedream 5.5 as a plain flash makeup-test photo. Fields you pass are saved on the character first; then the steps run in order. Use claySheet (front, back, face close-up) when the creature will be animated. Locations should not use this: render them directly with Soul Cinema.',
+    parameters: {
+      type: 'object',
+      properties: {
+        referenceName: str('Character name.'),
+        referenceId: str('Character id.'),
+        concept: str('One line, e.g. "demon king, half bear half wolf, boar tusks, topknot, draped in trophies".'),
+        shapeDetails: str('Sculpted features to lock by name, e.g. "heavy brow, boar tusks, braided beard, prayer beads".'),
+        faceSource: str('Real face to borrow, e.g. "an American black bear" or "a weathered old fisherman".'),
+        bodyCovering: str('Body covering in words, e.g. "grey-brown grizzly fur".'),
+        extraParts: str('Pieces that were never sculpted (armour, props), described.'),
+        photoStyle: { type: 'string', enum: ['makeup-test', 'phone-flash'], description: 'makeup-test (flash on grey paper, default) or phone-flash (snapshot in a dim room).' },
+        materials: { type: 'array', items: { type: 'object', properties: { part: str('Body part, e.g. "shoulder skulls".'), material: str('Real material, e.g. "weathered cattle skull bone".') }, required: ['part', 'material'] }, description: 'One real material per part; replaces the list.' },
+        steps: { type: 'array', items: { type: 'string', enum: ['clay', 'claySheet', 'face', 'materials', 'combine'] }, description: 'Steps to run, in order. Default: claySheet, face, materials, combine. Steps whose result already exists are re-rendered only when listed.' },
+        useAs: { type: 'string', enum: ['sheet', 'main', 'none'], description: 'Where the combined photo goes: sheet (default when the clay is a turnaround), main reference image, or none.' },
+      },
+    },
+  },
+  {
     name: 'project_cancel_job',
     description: 'Stop a background job (or all running jobs without jobId) after the shot it is working on; frames already made stay.',
     parameters: { type: 'object', properties: { jobId: str('Job id; omit to stop every running job.') } },
@@ -689,6 +764,9 @@ export type ProjectAgentAutomation = {
   setStoryboardOptions: (payload: { autoRefine?: boolean }) => void;
   reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; error?: string; review?: { score: number; status: string; summary: string; issues: Array<{ category?: string; severity: string; message: string }>; promptFix?: string; reverseAngle?: { yaw: number; reason?: string }; comparedShot?: number } }>>;
   generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
+  generateCharacterSheet: (payload: { referenceId: string; model?: string }) => Promise<{ url: string }>;
+  runCreatureStep: (payload: { referenceId: string; creature: CreatureWorkshop; step: 'clay' | 'claySheet' | 'face' | 'material' | 'combine'; materialId?: string }) => Promise<Partial<CreatureWorkshop>>;
+  getShotVideoPromptContext: (payload: { shot: number }) => ShotVideoPromptRequest | null;
 };
 
 export type ProjectAgentContext = {
@@ -1145,6 +1223,107 @@ export const createProjectAgentExecutor = (ctx: ProjectAgentContext): Record<str
       return { ok: true, reference: ref.name, yaw, imageUrl: describeMediaUrl(url) };
     },
 
+    project_video_prompt_guide: async (args: Record<string, unknown>) => {
+      const wanted = Array.isArray(args.shots) ? (args.shots as unknown[]).map(Number).filter(Number.isFinite).slice(0, 12) : [];
+      const shots = wanted.length ? await (async () => {
+        const automation = await ctx.automation('filming');
+        return wanted.map((shot) => automation.getShotVideoPromptContext({ shot }) || { shot, error: 'No such shot.' });
+      })() : undefined;
+      return { guide: SHOT_VIDEO_PROMPT_GUIDE, shots };
+    },
+
+    project_set_video_prompts: async (args: Record<string, unknown>) => {
+      const entries = Array.isArray(args.prompts) ? (args.prompts as Array<Record<string, unknown>>) : [];
+      if (!entries.length) throw new Error('Pass prompts: [{ shot, motionPrompt }].');
+      const known = new Set(state().shotPrompts.map((shot) => shot.shot));
+      const inputs = entries
+        .filter((entry) => known.has(Number(entry.shot)) && typeof entry.motionPrompt === 'string' && entry.motionPrompt.trim())
+        .map((entry) => clean({ shot: Number(entry.shot), motionPrompt: String(entry.motionPrompt).trim(), voiceoverText: asString(entry.voiceoverText) }));
+      if (!inputs.length) throw new Error('None of those shot numbers exist (see project_list_shots).');
+      const { shots } = upsertShots(state().shotPrompts, inputs);
+      ctx.setShotPrompts(() => shots);
+      const automation = await ctx.automation('filming').catch(() => null);
+      return {
+        ok: true,
+        saved: inputs.map((input) => {
+          const shot = shots.find((entry) => entry.shot === input.shot)!;
+          const context = automation?.getShotVideoPromptContext({ shot: shot.shot }) || null;
+          const issues = lintShotVideoPrompt(String(input.motionPrompt), {
+            hasDialogue: Boolean(shot.voiceoverText?.trim()),
+            characters: shot.characters?.length,
+            durationSeconds: context?.durationSeconds,
+            isFight: /\b(fight|punch|kick|strike|brawl|duel|kampf|schlägt)\b/i.test(`${shot.description} ${shot.prompt}`),
+          });
+          return { shot: shot.shot, structured: isStructuredShotPrompt(String(input.motionPrompt)), issues: issues.length ? issues : undefined };
+        }),
+        skipped: entries.filter((entry) => !known.has(Number(entry.shot))).map((entry) => entry.shot),
+      };
+    },
+
+    project_generate_character_sheet: async (args: Record<string, unknown>) => {
+      const ref = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName), type: 'character' });
+      if (!ref) throw new Error('No character with that id or name.');
+      const { url } = await (await ctx.automation('concept')).generateCharacterSheet({ referenceId: ref.id, model: asString(args.model) });
+      return { ok: true, reference: ref.name, sheetUrl: describeMediaUrl(url), note: 'Storyboard frames now use this sheet for the character.' };
+    },
+
+    project_creature_workshop: async (args: Record<string, unknown>) => {
+      const ref = findReference(state().references, { id: asString(args.referenceId), name: asString(args.referenceName), type: 'character' });
+      if (!ref) throw new Error('No character with that id or name.');
+      let creature: CreatureWorkshop = { ...(ref.creature || {}) };
+      for (const key of ['concept', 'shapeDetails', 'faceSource', 'bodyCovering', 'extraParts'] as const) {
+        const value = asString(args[key]);
+        if (value !== undefined) creature[key] = value;
+      }
+      if (args.photoStyle === 'makeup-test' || args.photoStyle === 'phone-flash') creature.photoStyle = args.photoStyle;
+      if (Array.isArray(args.materials)) {
+        creature.materials = (args.materials as Array<Record<string, unknown>>).map((item, index) => {
+          const part = asString(item.part) || '';
+          const material = asString(item.material) || '';
+          const previous = creature.materials?.find((m) => m.part === part && m.material === material);
+          return previous || { id: `mat-${Date.now().toString(36)}-${index}`, part, material };
+        });
+      }
+      const save = () => ctx.setReferences((prev) => prev.map((entry) => (entry.id === ref.id ? { ...entry, creature: { ...creature } } : entry)));
+      save();
+      const steps = Array.isArray(args.steps) && args.steps.length ? (args.steps as string[]) : ['claySheet', 'face', 'materials', 'combine'];
+      const automation = await ctx.automation('concept');
+      const done: string[] = [];
+      for (const step of steps) {
+        if (step === 'materials') {
+          for (const material of creature.materials || []) {
+            const updates = await automation.runCreatureStep({ referenceId: ref.id, creature, step: 'material', materialId: material.id });
+            creature = { ...creature, ...updates };
+            save();
+          }
+          done.push(`materials (${(creature.materials || []).length})`);
+          continue;
+        }
+        if (!['clay', 'claySheet', 'face', 'combine'].includes(step)) continue;
+        const updates = await automation.runCreatureStep({ referenceId: ref.id, creature, step: step as 'clay' | 'claySheet' | 'face' | 'combine' });
+        creature = { ...creature, ...updates };
+        save();
+        done.push(step);
+      }
+      const useAs = args.useAs === 'main' || args.useAs === 'none' || args.useAs === 'sheet' ? args.useAs : creature.claySheetUrl ? 'sheet' : 'main';
+      if (creature.finalUrl && useAs !== 'none') {
+        const finalUrl = creature.finalUrl;
+        ctx.setReferences((prev) => prev.map((entry) => (entry.id !== ref.id ? entry : useAs === 'sheet'
+          ? { ...entry, characterSheetUrl: finalUrl, characterSheetVersions: [...(entry.characterSheetVersions || []), finalUrl] }
+          : { ...entry, imageUrl: finalUrl, imageVersions: [...(entry.imageVersions || []).filter((v) => v !== finalUrl), finalUrl], selectedVersionIndex: undefined })));
+      }
+      return {
+        ok: true,
+        reference: ref.name,
+        steps: done,
+        clay: describeMediaUrl(creature.claySheetUrl || creature.clayUrl),
+        face: describeMediaUrl(creature.faceUrl),
+        materials: (creature.materials || []).map((m) => ({ part: m.part, material: m.material, url: describeMediaUrl(m.url) })),
+        result: describeMediaUrl(creature.finalUrl),
+        usedAs: creature.finalUrl ? useAs : undefined,
+      };
+    },
+
     project_renumber_shots: async () => {
       const current = state().shotPrompts;
       const busy = current.filter((shot) => shot.isGenerating || shot.isFilming || shot.isAngleGenerating);
@@ -1245,7 +1424,7 @@ type AgentJob = {
   framesBefore?: Record<number, string | undefined>;
 };
 
-const LONG_TOOLS = new Set(['project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate', 'project_review_continuity']);
+const LONG_TOOLS = new Set(['project_creature_workshop', 'project_generate_shot_images', 'project_generate_shot_videos', 'project_generate_outfits', 'project_plan_outfits', 'project_generate', 'project_review_continuity']);
 
 const jobSize = (tool: string, args: Record<string, unknown>) => {
   if (tool === 'project_generate' || tool === 'project_plan_outfits') return 99;

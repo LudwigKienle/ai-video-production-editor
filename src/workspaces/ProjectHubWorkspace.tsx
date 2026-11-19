@@ -4,7 +4,7 @@ import BurstFrameShotModal, { shotStartFrame, type BurstSave } from '../componen
 import { conceptReferenceToBurst, sceneConceptReferences, type BurstReference } from '../services/burstReferences';
 import { BURST_ASPECT_RATIOS, BURST_FRAME_SETTINGS, BURST_REFERENCE_VIDEO_MODELS, burstPromptFromArgs, checkBurstFramePrompt } from '../services/burstFrame';
 import { registerLiveCommands } from '../mcp/liveCommands';
-import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
+import { MediaItem, StoryBible, ProjectCollaboration, ProjectSyncConfig, ProjectCollaboratorRole, ProjectCollaborativeLock, ReferenceItem, CreatureWorkshop, ShotPrompt, ShotContinuityReview, ReviewFeedback, ScriptLength, CinematographyCritique, ScriptQualityReport, ScriptDoctorImprovement, RecentProject, CharacterOutfit, OutfitGarmentPiece, GarmentCategory, ProjectChatAttachment, ProjectMeetingProvider, ProjectStorageProvider, DirectorTreatment, DirectorSceneSelectionScope, DirectorStoryboardSnapshot, ExtraAsset, AngleMetadata, AnglePresetSelection, SceneWallState, SetDesignAsset } from '../types';
 import { PRODUCTION_FORMATS, getProductionFormat } from '../data/productionFormats';
 import { establishingShotOf, nextInScreenOrder, previousInScreenOrder, screenOrder, shotsBeforeInScreenOrder } from '../utils/shotOrder';
 import { buildVisualContinuityPrompt, toShotContinuityReview, type ContinuityImageRole } from '../utils/visualContinuity';
@@ -61,7 +61,10 @@ import PromptPreview from '../components/PromptPreview';
 import { FAL_VIDEO_CATALOG, getFalVideoCatalogEntry, isFalCatalogVideoModel, pickCatalogAspect } from '../services/falVideoCatalog';
 import { generateCatalogVideo } from '../services/videoCatalogRouter';
 import { startTask } from '../services/taskCenter';
-import { DOP_ENTRY, HIGGSFIELD_IMAGE_MODELS, generateImageWithHiggsfield, higgsfieldHostsVideoModel, isHiggsfieldImageModel } from '../services/higgsfieldService';
+import { DOP_ENTRY, HIGGSFIELD_IMAGE_MODELS, generateImageWithHiggsfield, hasHiggsfieldApiKey, higgsfieldHostsVideoModel, isHiggsfieldImageModel } from '../services/higgsfieldService';
+import { CreatureWorkshopTab, ReferenceSheetTab, type CreatureStep } from '../components/CharacterSheetTabs';
+import { isStructuredShotPrompt, type ShotVideoPromptRequest } from '../utils/shotVideoPrompt';
+import { buildCharacterSheetPrompt, buildClaySculptPrompt, buildClaySheetPrompt, buildCreatureCombinePrompt, buildCreatureFacePrompt, buildMaterialSwatchPrompt, isCreatureReference } from '../utils/characterSheet';
 import { pickImageModel, pickVideoModel } from '../utils/modelAutoSelect';
 import { generateWorldFromImageUrl, generateWorldFromImageViews, generateWorldFromText, getWorldAssetUrls, hasWorldLabsApiKey, MarbleModel } from '../services/worldLabsService';
 import { DEFAULT_WORLD_MODEL_ID, getWorldModelGeneratedBy, getWorldModelLabel, getWorldModelOptionsForProvider, normalizeWorldModelId } from '../services/worldModelProviderRegistry';
@@ -176,6 +179,9 @@ export type ProjectHubStudioAutomationBindings = {
     reviewContinuity: (payload: { shots: number[] }) => Promise<Array<{ shot: number; review?: ShotContinuityReview; error?: string }>>;
     /** One new view of a reference from a camera yaw (180 = reverse side), stored with its angles. */
     generateReferenceAngle: (payload: { referenceId: string; yaw: number; note?: string }) => Promise<{ url: string }>;
+    generateCharacterSheet: (payload: { referenceId: string; model?: string }) => Promise<{ url: string }>;
+    getShotVideoPromptContext: (payload: { shot: number }) => ShotVideoPromptRequest | null;
+    runCreatureStep: (payload: { referenceId: string; creature: CreatureWorkshop; step: 'clay' | 'claySheet' | 'face' | 'material' | 'combine'; materialId?: string }) => Promise<Partial<CreatureWorkshop>>;
 };
 
 export type ProjectHubModelOption = { id: string; label: string; provider: string; goodFor?: string };
@@ -241,6 +247,17 @@ type ConceptEnvironmentSubtab = 'base_ref' | 'angles' | 'time_of_day';
 type ConceptPropSubtab = 'base_ref' | 'angles' | 'state';
 type ConceptBrandingSubtab = 'base_ref' | 'variations';
 type AspectRatioOption = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '21:9' | '2.39:1' | '235:100' | '239:100';
+const SHEET_MODEL_OPTIONS = [
+    { id: 'seedream-v55-edit-fal', label: 'Seedream 5.5 Edit (keeps the base image)' },
+    { id: 'nano-banana-2-fal', label: 'Nano Banana 2 Edit (keeps the base image)' },
+    { id: 'gpt-image-2-fal', label: 'GPT Image 2 Edit (keeps the base image)' },
+    { id: 'project', label: 'Project reference model' },
+];
+const CLAY_MODEL_OPTIONS = [
+    { id: 'seedream-v55-fal', label: 'Seedream 5.5 (anatomy, giants)' },
+    { id: 'soul-2-hf', label: 'Soul 2 (when the face matters)' },
+    { id: 'project', label: 'Project reference model' },
+];
 const seedreamVersionOf = (model: string | null | undefined) => (model || '').startsWith('seedream-v55') ? '5.5' as const : '5.0-pro' as const;
 
 const ASPECT_RATIO_VALUES: AspectRatioOption[] = ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9', '2.39:1', '235:100', '239:100'];
@@ -2209,6 +2226,12 @@ const CharacterSheetModal: React.FC<{
     angleModel: AngleImageModel;
     onAngleModelChange: (model: AngleImageModel) => void;
     angleSameLabel: string;
+    sheetModel: string;
+    onSheetModelChange: (model: string) => void;
+    onGenerateSheet: (characterId: string) => void;
+    clayModel: string;
+    onClayModelChange: (model: string) => void;
+    onCreatureStep: (characterId: string, step: CreatureStep, opts?: { materialId?: string }) => void;
 }> = ({
     character,
     onClose,
@@ -2227,8 +2250,15 @@ const CharacterSheetModal: React.FC<{
     angleModel,
     onAngleModelChange,
     angleSameLabel,
+    sheetModel,
+    onSheetModelChange,
+    onGenerateSheet,
+    clayModel,
+    onClayModelChange,
+    onCreatureStep,
 }) => {
-        const [activeTab, setActiveTab] = useState<'bio' | 'look' | 'wardrobe' | 'angles' | 'versions'>('bio');
+        const [activeTab, setActiveTab] = useState<'bio' | 'look' | 'sheet' | 'creature' | 'wardrobe' | 'angles' | 'versions'>('bio');
+        const showCreatureTab = isCreatureReference(character) || Boolean(character.creature);
         const [outfitCount, setOutfitCount] = useState(4);
         const [lockInput, setLockInput] = useState('');
         const [selectedAngles, setSelectedAngles] = useState<AnglePreset[]>(
@@ -2492,7 +2522,7 @@ const CharacterSheetModal: React.FC<{
                         </div>
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <div className="flex border-b border-gray-800 bg-gray-900/60">
-                                {(['bio', 'look', 'wardrobe', 'angles', 'versions'] as const).map(tab => (
+                                {(['bio', 'look', 'sheet', 'creature', 'wardrobe', 'angles', 'versions'] as const).filter((tab) => tab !== 'creature' || showCreatureTab).map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -2500,6 +2530,8 @@ const CharacterSheetModal: React.FC<{
                                     >
                                         {tab === 'bio' && 'Bio'}
                                         {tab === 'look' && 'Look'}
+                                        {tab === 'sheet' && 'Sheet'}
+                                        {tab === 'creature' && 'Creature'}
                                         {tab === 'wardrobe' && 'Wardrobe'}
                                         {tab === 'angles' && 'Angles'}
                                         {tab === 'versions' && 'Versions'}
@@ -3314,6 +3346,32 @@ const CharacterSheetModal: React.FC<{
                                             <div className="text-sm text-gray-500">No angles generated yet.</div>
                                         )}
                                     </div>
+                                )}
+                                {activeTab === 'sheet' && (
+                                    <ReferenceSheetTab
+                                        character={character}
+                                        model={sheetModel}
+                                        modelOptions={SHEET_MODEL_OPTIONS}
+                                        onModelChange={onSheetModelChange}
+                                        onGenerate={() => onGenerateSheet(character.id)}
+                                        onUpdate={update}
+                                        onViewFull={onViewFull}
+                                    />
+                                )}
+                                {activeTab === 'creature' && (
+                                    <CreatureWorkshopTab
+                                        character={character}
+                                        clayModel={clayModel}
+                                        clayModelOptions={CLAY_MODEL_OPTIONS}
+                                        onClayModelChange={onClayModelChange}
+                                        hasHiggsfield={hasHiggsfieldApiKey()}
+                                        onRunStep={(step, opts) => onCreatureStep(character.id, step, opts)}
+                                        onUpdateCreature={(updates) => update({ creature: { ...(character.creature || {}), ...updates } })}
+                                        onUseResult={(url, asSheet) => update(asSheet
+                                            ? { characterSheetUrl: url, characterSheetVersions: [...(character.characterSheetVersions || []), url] }
+                                            : { imageUrl: url, imageVersions: [...(character.imageVersions || []).filter((v) => v !== url), url], selectedVersionIndex: undefined })}
+                                        onViewFull={onViewFull}
+                                    />
                                 )}
                                 {activeTab === 'versions' && (
                                     <div className="space-y-4">
@@ -6472,7 +6530,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         (alignedShot.characters || []).forEach((name) => {
             const ref = references.find((r) => r.type === 'character' && r.imageUrl && matchesRefName(r.name, name));
             if (!ref) return;
-            add(ref.imageUrl, ref.name, 'character');
+            // A three-view sheet carries identity, outfit and proportions better than a single image.
+            add(ref.characterSheetUrl || ref.imageUrl, ref.characterSheetUrl ? `${ref.name} · reference sheet` : ref.name, 'character');
             const outfit = ref.outfits?.find((item) => item.id === outfitSelections?.[ref.id]);
             if (outfit?.imageUrl) add(outfit.imageUrl, `${ref.name} · ${outfit.name}`, 'outfit');
         });
@@ -6690,6 +6749,49 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         const lowerPersona = personaPrompt.toLowerCase();
         if (lowerPrompt.includes(lowerPersona)) return prompt;
         return `${prompt}. Style notes: ${personaPrompt}.`;
+    };
+    /** Everything a shot's video prompt needs for the acting ladder and continuity (see utils/shotVideoPrompt). */
+    const buildShotVideoPromptContext = (shot: ShotPrompt): ShotVideoPromptRequest => {
+        const castRefs = (shot.characters || [])
+            .map((name) => references.find((ref) => ref.type === 'character' && matchesRefName(ref.name, name)))
+            .filter((ref): ref is ReferenceItem => Boolean(ref));
+        const speaker = shot.voiceCharacterId ? references.find((ref) => ref.id === shot.voiceCharacterId)?.name : undefined;
+        const describeShot = (entry: ShotPrompt) => {
+            const line = entry.voiceoverText?.trim();
+            const who = entry.voiceCharacterId ? references.find((ref) => ref.id === entry.voiceCharacterId)?.name : undefined;
+            return `${entry.shot === shot.shot ? '▶ ' : ''}${entry.shotLabel || `Shot ${entry.shot}`}: ${(entry.description || entry.prompt || '').trim()}${line ? ` — ${who ? `${who}: ` : ''}"${line}"` : ''}`;
+        };
+        const ordered = screenOrder(shotPrompts);
+        const sameScene = ordered.filter((entry) => (shot.sceneNumber !== undefined && entry.sceneNumber === shot.sceneNumber)
+            || (shot.sceneNumber === undefined && shot.sceneSlugline && entry.sceneSlugline === shot.sceneSlugline));
+        const previous = previousInScreenOrder(shotPrompts, shot.shot);
+        const next = nextInScreenOrder(shotPrompts, shot.shot);
+        const usesReferences = /omni|-ref|reference/i.test(videoModel);
+        const short = (text?: string, max = 280) => (text || '').replace(/\s+/g, ' ').trim().slice(0, max);
+        return {
+            shotNumber: shot.shot,
+            description: [shot.description, shot.continuityRefinedPrompt].filter(Boolean).join('\n'),
+            modelLabel: videoModel,
+            durationSeconds: resolveVideoDurationSeconds(videoModel, Number(videoDurationSeconds) || 5),
+            aspectRatio: resolveFilmingDeliveryAspectRatio() || resolveShotEffectiveAspectRatio(shot),
+            mode: usesReferences ? 'reference-to-video' : shot.imageUrl ? 'image-to-video' : 'text-to-video',
+            references: usesReferences ? resolveShotReferenceImages(shot, shot, shot.outfitSelections).map((item) => `${item.label} (${item.kind})`) : undefined,
+            characters: castRefs.map((ref) => ({
+                name: ref.name,
+                look: short(ref.prompt || ref.description),
+                personality: short(ref.personalityNotes, 200),
+                goals: short([ref.characterGoals, ref.characterArc].filter(Boolean).join('; '), 240),
+                gestures: short(ref.gestureNotes, 200),
+                voice: short(ref.voiceNotes, 160),
+                speechStyle: short(ref.speechStyle, 160),
+            })),
+            environment: shot.environment,
+            dialogue: shot.voiceoverText?.trim() ? [{ speaker, line: shot.voiceoverText.trim() }] : undefined,
+            cameraMovement: getCameraMovementPreset(shot.cameraMovementPreset)?.prompt,
+            sceneShots: sameScene.length > 1 ? sameScene.map(describeShot) : undefined,
+            previousShot: previous ? describeShot(previous) : undefined,
+            nextShot: next ? describeShot(next) : undefined,
+        };
     };
     const buildShotMotionPromptContext = (shot: ShotPrompt) => {
         const refinedPrompt = shot.continuityRefinedPrompt?.trim();
@@ -10306,6 +10408,120 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
         return { finalImage, angleUrls, angleMeta };
     };
 
+    const [sheetImageModel, setSheetImageModel] = useState<string>(() => localStorage.getItem('character_sheet_model_v1') || 'seedream-v55-edit-fal');
+    const [clayImageModel, setClayImageModel] = useState<string>(() => localStorage.getItem('creature_clay_model_v1') || 'seedream-v55-fal');
+    useEffect(() => { try { localStorage.setItem('character_sheet_model_v1', sheetImageModel); } catch { /* ignore */ } }, [sheetImageModel]);
+    useEffect(() => { try { localStorage.setItem('creature_clay_model_v1', clayImageModel); } catch { /* ignore */ } }, [clayImageModel]);
+
+    const patchReference = (id: string, updates: Partial<ReferenceItem> | ((ref: ReferenceItem) => Partial<ReferenceItem>)) =>
+        setReferences((prev) => prev.map((ref) => (ref.id === id ? { ...ref, ...(typeof updates === 'function' ? updates(ref) : updates) } : ref)));
+
+    /** Three-view sheet: full-body front (face hidden), full-body back, front close-up. Returns the stored URL. */
+    const renderCharacterSheet = async (reference: ReferenceItem, modelChoice: string = sheetImageModel): Promise<string> => {
+        const firstOutfit = reference.outfits?.[0];
+        const prompt = buildCharacterSheetPrompt({
+            name: reference.name,
+            identity: [reference.prompt || reference.description, reference.consistencyNotes].filter(Boolean).join('. '),
+            outfit: resolveBaseReferenceMode(reference) === 'outfit' ? (firstOutfit?.description || firstOutfit?.prompt || '') : '',
+            locks: reference.consistencyLocks,
+            hasBaseImage: Boolean(reference.imageUrl),
+        });
+        const model = (modelChoice === 'project' ? referenceImageModel : modelChoice) as ReferenceImageModel;
+        const image = await generateReferenceImage(prompt, '16:9', reference.imageUrl || undefined, model, { keepBaseAsIdentity: true });
+        return stabilizeReferenceImageUrl(reference, image.url);
+    };
+
+    const handleGenerateCharacterSheet = async (characterId: string) => {
+        const reference = references.find((ref) => ref.id === characterId);
+        if (!reference) return;
+        patchReference(characterId, { isGeneratingSheet: true });
+        try {
+            const url = await renderCharacterSheet(reference);
+            patchReference(characterId, (ref) => ({ isGeneratingSheet: false, characterSheetUrl: url, characterSheetVersions: [...(ref.characterSheetVersions || []), url] }));
+        } catch (error) {
+            patchReference(characterId, { isGeneratingSheet: false });
+            handleError(error);
+        }
+    };
+
+    /**
+     * One creature-workshop step on an explicit creature state (so an agent can chain
+     * steps without waiting for React state). Returns the fields that changed.
+     */
+    const runCreatureStep = async (
+        reference: ReferenceItem,
+        creature: NonNullable<ReferenceItem['creature']>,
+        step: CreatureStep,
+        opts?: { materialId?: string },
+    ): Promise<Partial<NonNullable<ReferenceItem['creature']>>> => {
+        const concept = (creature.concept || reference.prompt || reference.description || reference.name).trim();
+        // Soul 2 is the real-photo model; without a Higgsfield key Seedream 5.5 stands in.
+        const photoModel = (hasHiggsfieldApiKey() ? 'soul-2-hf' : 'seedream-v55-fal') as ReferenceImageModel;
+        const clayModel = (clayImageModel === 'project'
+            ? referenceImageModel
+            : clayImageModel === 'soul-2-hf' && !hasHiggsfieldApiKey() ? 'seedream-v55-fal' : clayImageModel) as ReferenceImageModel;
+        if (step === 'clay' || step === 'claySheet') {
+            const prompt = step === 'clay' ? buildClaySculptPrompt(concept, creature.shapeDetails) : buildClaySheetPrompt(concept, creature.shapeDetails);
+            const image = await generateReferenceImage(prompt, step === 'clay' ? '3:4' : '16:9', undefined, clayModel);
+            const url = await stabilizeReferenceImageUrl(reference, image.url);
+            return step === 'clay' ? { clayUrl: url } : { claySheetUrl: url };
+        }
+        if (step === 'face') {
+            const prompt = buildCreatureFacePrompt(creature.faceSource || `a real animal whose face suits ${concept}`, concept);
+            const image = await generateReferenceImage(prompt, '1:1', undefined, photoModel);
+            return { faceUrl: await stabilizeReferenceImageUrl(reference, image.url) };
+        }
+        if (step === 'material') {
+            const material = (creature.materials || []).find((item) => item.id === opts?.materialId);
+            if (!material) throw new Error('No such material on this creature.');
+            const image = await generateReferenceImage(buildMaterialSwatchPrompt(material.material || material.part), '1:1', undefined, photoModel);
+            const url = await stabilizeReferenceImageUrl(reference, image.url);
+            return { materials: (creature.materials || []).map((item) => (item.id === material.id ? { ...item, url } : item)) };
+        }
+        const shapeUrl = creature.claySheetUrl || creature.clayUrl;
+        if (!shapeUrl) throw new Error(`Sculpt or upload the clay for ${reference.name} first.`);
+        const hasFace = Boolean(creature.faceUrl);
+        // Seedream takes at most 10 images: clay, face, then as many swatches as fit.
+        const materials = (creature.materials || []).filter((item) => item.url).slice(0, hasFace ? 8 : 9);
+        const urls = [shapeUrl, ...(hasFace ? [creature.faceUrl!] : []), ...materials.map((item) => item.url!)];
+        const refs = await Promise.all(urls.map((url) => getBase64FromUrl(url)));
+        const prompt = buildCreatureCombinePrompt({
+            concept,
+            shapeDetails: creature.shapeDetails,
+            claySheet: Boolean(creature.claySheetUrl),
+            hasFace,
+            faceSource: creature.faceSource,
+            bodyCovering: creature.bodyCovering,
+            materials,
+            extraParts: creature.extraParts,
+            photoStyle: creature.photoStyle,
+        });
+        const [image] = await editImageWithFalSeedreamV5Pro(prompt, refs, { version: '5.5', aspectRatio: creature.claySheetUrl ? '16:9' : '3:4', numOutputs: 1, outputFormat: 'png' });
+        if (!image) throw new Error('Seedream 5.5 returned no image.');
+        return { finalUrl: await stabilizeReferenceImageUrl(reference, image.url) };
+    };
+
+    const handleCreatureStep = async (characterId: string, step: CreatureStep, opts?: { materialId?: string }) => {
+        const reference = references.find((ref) => ref.id === characterId);
+        if (!reference) return;
+        patchReference(characterId, { creatureBusyStep: step === 'material' ? `material:${opts?.materialId}` : step });
+        try {
+            const updates = await runCreatureStep(reference, reference.creature || {}, step, opts);
+            patchReference(characterId, (ref) => ({
+                creature: {
+                    ...(ref.creature || {}),
+                    ...updates,
+                    // Keep text edits made while the step ran; take only the new swatch URL.
+                    ...(updates.materials ? { materials: (ref.creature?.materials || []).map((item) => ({ ...item, url: updates.materials!.find((m) => m.id === item.id)?.url ?? item.url })) } : {}),
+                },
+            }));
+        } catch (error) {
+            handleError(error);
+        } finally {
+            patchReference(characterId, { creatureBusyStep: null });
+        }
+    };
+
     const handleGenerateCharacterAngles = async (
         characterId: string,
         options?: { angles?: AnglePreset[]; replaceAngleIds?: string[] }
@@ -11993,11 +12209,16 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 shot.shot,
                 `${buildShotMotionPromptContext(shot)}\n\n${promptStyleGuide(videoModel, 'video')}`,
                 buildShotStylePrompt(shot),
-                buildFilmingAspectRatioGuidance(shot)
+                buildFilmingAspectRatioGuidance(shot),
+                buildShotVideoPromptContext(shot),
             );
             const movementPreset = getCameraMovementPreset(shot.cameraMovementPreset);
-            let finalPrompt = applyCameraMovementToPrompt(motionPrompt.trim(), movementPreset?.prompt || '');
-            finalPrompt = applyFilmingAspectRatioToPrompt(finalPrompt, shot);
+            // A block-structured prompt already carries camera and framing.
+            let finalPrompt = motionPrompt.trim();
+            if (!isStructuredShotPrompt(finalPrompt)) {
+                finalPrompt = applyCameraMovementToPrompt(finalPrompt, movementPreset?.prompt || '');
+                finalPrompt = applyFilmingAspectRatioToPrompt(finalPrompt, shot);
+            }
             setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? {
                 ...s,
                 motionPrompt: finalPrompt,
@@ -12417,21 +12638,29 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     shot.shot,
                     `${buildShotMotionPromptContext(shot)}\n\n${promptStyleGuide(videoModel, 'video')}`,
                     buildShotStylePrompt(shot),
-                    buildFilmingAspectRatioGuidance(shot)
+                    buildFilmingAspectRatioGuidance(shot),
+                    buildShotVideoPromptContext(shot),
                 );
                 motionPrompt = motionPrompt.trim();
                 const autoMotionPrompt = motionPrompt;
                 setShotPrompts((prev) => prev.map((s) => s.shot === shotNumber ? { ...s, motionPrompt: autoMotionPrompt } : s));
             }
             const movementPreset = getCameraMovementPreset(shot.cameraMovementPreset);
-            if (movementPreset?.prompt) {
+            // Block-structured prompts (acting task, final frame) go out as written: no appended
+            // clauses, no per-model reshuffling, and no write-back that would stack additions.
+            const structuredPrompt = !burstPrompt && isStructuredShotPrompt(motionPrompt);
+            if (movementPreset?.prompt && !structuredPrompt) {
                 motionPrompt = applyCameraMovementToPrompt(motionPrompt, movementPreset.prompt);
             }
             if (shot.endFrameUrl) {
-                motionPrompt = `${motionPrompt}. End frame reference provided; match the final frame composition.`;
+                motionPrompt = structuredPrompt
+                    ? `${motionPrompt}\nThe end frame reference image is the final frame; match its composition.`
+                    : `${motionPrompt}. End frame reference provided; match the final frame composition.`;
             }
-            motionPrompt = applyPersonaToPrompt(motionPrompt, shot);
-            motionPrompt = applyFilmingAspectRatioToPrompt(motionPrompt, shot);
+            if (!structuredPrompt) {
+                motionPrompt = applyPersonaToPrompt(motionPrompt, shot);
+                motionPrompt = applyFilmingAspectRatioToPrompt(motionPrompt, shot);
+            }
 
             const klingMultiPrompt = parseKlingMultiPrompt(klingMultiPromptText);
             const klingVoiceIds = parseCsvList(klingVoiceIdsText);
@@ -12461,11 +12690,11 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 ...filmingContextImageSuggestions.map((ref) => ref.name).filter(Boolean),
                 ...filmingContextVideoSuggestions.map((ref) => ref.name).filter(Boolean),
             ])).slice(0, 4);
-            if (filmingContinuityAnchors.length > 0) {
+            if (filmingContinuityAnchors.length > 0 && !structuredPrompt) {
                 motionPrompt = `${motionPrompt}. Continuity anchors: preserve ${filmingContinuityAnchors.join(', ')} across the shot.`;
             }
             // Kling wants short action + separate camera sentences, Veo cinematography-first with audio, Seedance numbered shots…
-            motionPrompt = adaptPromptForModel(videoModel, motionPrompt, {
+            if (!structuredPrompt) motionPrompt = adaptPromptForModel(videoModel, motionPrompt, {
                 kind: 'video',
                 aspectRatio: resolveFilmingDeliveryAspectRatio() || resolveShotEffectiveAspectRatio(shot),
                 hasReferences: Boolean(referenceImageUrl),
@@ -12473,7 +12702,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             });
             if (burstPrompt) motionPrompt = burstPrompt; // no persona, aspect, continuity or per-model reshaping
             const originalMotionPrompt = motionPrompt;
-            if (!burstPrompt) setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, motionPrompt } : s));
+            if (!burstPrompt && !structuredPrompt) setShotPrompts(prev => prev.map(s => s.shot === shotNumber ? { ...s, motionPrompt } : s));
 
             const burstContextReferences: NonNullable<ShotPrompt["contextReferences"]> = burstReferences.map((ref) => ({ id: ref.id, name: ref.kind ? `${ref.name} (${ref.kind})` : ref.name, purpose: 'Burst Frame reference', imageUrl: ref.imageUrl }));
             const runtimeContextReferences = Array.from(
@@ -13455,8 +13684,8 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
     }, [shotPrompts]);
     const storyboardOptionsRef = useRef({ autoRefine: useStoryboardContinuityAutoRefine });
     storyboardOptionsRef.current = { autoRefine: useStoryboardContinuityAutoRefine };
-    const continuityAgentRef = useRef({ reviewShotFrameVisually, generateReferenceAngleForYaw, references });
-    continuityAgentRef.current = { reviewShotFrameVisually, generateReferenceAngleForYaw, references };
+    const continuityAgentRef = useRef({ reviewShotFrameVisually, generateReferenceAngleForYaw, references, renderCharacterSheet, runCreatureStep, buildShotVideoPromptContext, shotPrompts });
+    continuityAgentRef.current = { reviewShotFrameVisually, generateReferenceAngleForYaw, references, renderCharacterSheet, runCreatureStep, buildShotVideoPromptContext, shotPrompts };
     const agentHandlersRef = useRef({ handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, referenceAspectRatio, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline });
     agentHandlersRef.current = { handleGenerateShotImage, handleGenerateShotVideo, regenerateReferenceImage, referenceImageModel, videoModel, referenceAspectRatio, outfitImageModel, resolveOutfitModel, references, generateOutfitImage, buildOutfitRenderPrompt, updateCharacterOutfit, handleGenerateCharacterOutfits, logline: storyBible.logline };
 
@@ -13523,6 +13752,24 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 const reference = continuityAgentRef.current.references.find((ref) => ref.id === referenceId);
                 if (!reference) throw new Error('Unknown reference.');
                 return { url: await continuityAgentRef.current.generateReferenceAngleForYaw(reference, yaw, note) };
+            },
+            generateCharacterSheet: async ({ referenceId, model }) => {
+                const reference = continuityAgentRef.current.references.find((ref) => ref.id === referenceId);
+                if (!reference) throw new Error('Unknown reference.');
+                const url = await continuityAgentRef.current.renderCharacterSheet(reference, model);
+                setReferences((prev) => prev.map((ref) => (ref.id === referenceId
+                    ? { ...ref, characterSheetUrl: url, characterSheetVersions: [...(ref.characterSheetVersions || []), url] }
+                    : ref)));
+                return { url };
+            },
+            getShotVideoPromptContext: ({ shot }) => {
+                const entry = continuityAgentRef.current.shotPrompts.find((item) => item.shot === shot);
+                return entry ? continuityAgentRef.current.buildShotVideoPromptContext(entry) : null;
+            },
+            runCreatureStep: async ({ referenceId, creature, step, materialId }) => {
+                const reference = continuityAgentRef.current.references.find((ref) => ref.id === referenceId);
+                if (!reference) throw new Error('Unknown reference.');
+                return continuityAgentRef.current.runCreatureStep(reference, creature, step, { materialId });
             },
             getStoryboardOptions: () => ({ ...storyboardOptionsRef.current }),
             setStoryboardOptions: ({ autoRefine }) => {
@@ -20857,6 +21104,12 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     angleModel={angleImageModel}
                     onAngleModelChange={setAngleImageModel}
                     angleSameLabel={angleSameLabel}
+                    sheetModel={sheetImageModel}
+                    onSheetModelChange={setSheetImageModel}
+                    onGenerateSheet={handleGenerateCharacterSheet}
+                    clayModel={clayImageModel}
+                    onClayModelChange={setClayImageModel}
+                    onCreatureStep={handleCreatureStep}
                 />
             )}
             {fullResView && (

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, Operation, Chat, FunctionDeclaration, GenerateImagesResponse } from "@google/genai";
+import { SHOT_VIDEO_PROMPT_GUIDE, buildShotVideoPromptRequest, type ShotVideoPromptRequest } from '../utils/shotVideoPrompt';
 import { withModelFallback } from './geminiModelFallback';
 import { isLocalLlmReady, withLocalLlm } from './localLlmService';
 import { MediaItem, ScriptAnalysisResult, StoryBible, ChatMessage, ShotPrompt, ReviewFeedback, ScriptLength, CinematographyCritique, AudioScoreRequest, TimelineClip, ReferenceItem, AudioCue, ScriptQualityReport, ScriptDoctorImprovement, NeurocinematicsAnalysisResult, AudioPsychoacousticsResult, DirectorShot, DirectorTreatment, SubtitleWordTiming, ShotContinuityReview } from '../types';
@@ -3589,7 +3590,22 @@ export const generateMotionPromptForShot = async (
     shotDescription: string,
     stylePrompt?: string,
     aspectRatioGuidance?: string,
+    request?: ShotVideoPromptRequest,
 ): Promise<string> => {
+    // With shot context: block-structured prompt with an ACTING TASK, per Ludwig's Higgsfield/Seedance skills.
+    if (request) {
+        const userText = buildShotVideoPromptRequest({ ...request, style: request.style ?? stylePrompt, framing: request.framing ?? aspectRatioGuidance, script: request.script ?? script });
+        if (shouldUseReplicateForGoogleModels()) {
+            return (await generateTextWithGemini3ProReplicate(`${SHOT_VIDEO_PROMPT_GUIDE}\n\n---\n\n${userText}`)).trim();
+        }
+        const ai = getAiClient();
+        const response: GenerateContentResponse = await withRetry(() => ai.models.generateContent({
+            model: GEMINI_TEXT_MODEL_PRO,
+            contents: userText,
+            config: { systemInstruction: SHOT_VIDEO_PROMPT_GUIDE },
+        }));
+        return (response.text || '').replace(/^```[a-z]*\n?|```$/g, '').trim();
+    }
     const resolvedStyle = stylePrompt?.trim();
     const styleLine = resolvedStyle ? `**Visual Style:** ${resolvedStyle}` : '**Visual Style:** Cinematic, photorealistic';
     const aspectRatioBlock = aspectRatioGuidance?.trim()

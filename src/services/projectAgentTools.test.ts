@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProjectAgentExecutor, describeMediaUrl, mergeWorld, upsertOutfits, upsertReference, upsertShots, withImageVersion, type ProjectAgentState } from './projectAgentTools.ts';
+import type { ShotPrompt } from '../types';
 
 const ids = () => { let n = 0; return () => `ref-${++n}`; };
 
@@ -186,4 +187,12 @@ test('a cancelled background job stops between shots and keeps finished work', a
   const status = await tools.project_job_status({ jobId }) as { jobs: Array<{ status: string }> };
   assert.equal(status.jobs[0].status, 'cancelled');
   assert.ok(rendered.length > 0 && rendered.length < 6);
+});
+
+test('upsertShots: a new video prompt replaces the filming-continuity rewrite', () => {
+  const shots = [{ shot: 1, prompt: 'p', description: 'd', characters: [], environment: null, motionPrompt: 'old', filmingContinuityRefinedPrompt: 'rewritten' }] as ShotPrompt[];
+  const { shots: next } = upsertShots(shots, [{ shot: 1, motionPrompt: 'SCENE CONTEXT: new\nFinal frame: door.', voiceoverText: 'Take it.' }]);
+  assert.equal(next[0].motionPrompt, 'SCENE CONTEXT: new\nFinal frame: door.');
+  assert.equal(next[0].voiceoverText, 'Take it.');
+  assert.equal(next[0].filmingContinuityRefinedPrompt, undefined);
 });
