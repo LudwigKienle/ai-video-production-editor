@@ -125,7 +125,7 @@ export const HIGGSFIELD_VIDEO_PATHS: Record<string, { text?: string; image?: str
 
 export const HIGGSFIELD_IMAGE_MODELS: Array<{ id: string; label: string; path: string; goodFor: string; verified?: boolean; badge?: string }> = [
   { id: 'soul-standard-hf', label: 'Higgsfield Soul (Higgsfield)', path: 'higgsfield-ai/soul/standard', goodFor: 'Fashion / editorial realism, strong aesthetic presets', verified: true },
-  { id: 'soul-2-hf', label: 'Higgsfield Soul 2 (Higgsfield)', path: 'higgsfield-ai/soul/v2/standard', goodFor: 'Soul 2 — newer, sharper realism' },
+  { id: 'soul-2-hf', label: 'Higgsfield Soul 2 (Higgsfield)', path: 'higgsfield-ai/soul/v2/standard', goodFor: 'Soul 2: real skin, faces and real-material close-ups (text only)', verified: true },
   { id: 'soul-cinema-hf', label: 'Higgsfield Soul Cinema (Higgsfield)', path: 'higgsfield-ai/soul/cinema', goodFor: 'Film-still look for storyboard frames', badge: '🎬 Cinematic' },
 ];
 

@@ -1,3 +1,4 @@
+import { generateImageWithHiggsfield } from '../services/higgsfieldService';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CostRate, MediaItem, RecentProject, ReferenceItem, ShotPrompt, DirectorTreatment, DirectorShot } from '../types';
 import type { UIMode } from '../config/uiModes';
@@ -136,6 +137,11 @@ type ImageModelId =
   | 'seedream'
   | 'wan-v27-image-pro-replicate'
   | 'seedream-v5-lite-fal'
+  | 'soul-2-hf'
+  | 'soul-standard-hf'
+  | 'soul-cinema-hf'
+  | 'seedream-v55-fal'
+  | 'seedream-v55-fal-edit'
   | 'seedream-v5-pro-fal'
   | 'seedream-v5-pro-fal-edit'
   | 'krea-2-large-fal'
@@ -190,6 +196,11 @@ const MODEL_OPTIONS: Array<{ id: ImageModelId; label: string; provider: string; 
   { id: 'seedream', label: 'Seedream 4.5', provider: 'Replicate', icon: logoSeedream, goodFor: 'Exceptional cinematic realism and atmospheric depth' },
   { id: 'wan-v27-image-pro-replicate', label: 'WAN 2.7 Image Pro', provider: 'Replicate', icon: logoBytedance, goodFor: '4K-capable cinematic generation and multi-image editing via one model' },
   { id: 'seedream-v5-lite-fal', label: 'Seedream v5 Lite (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Fast cinematic realism and detailed environments' },
+  { id: 'soul-2-hf', label: 'Soul 2 (Higgsfield)', provider: 'Higgsfield', goodFor: 'Fashion/editorial realism: real skin, faces and real-material close-ups. Text only, no reference images' },
+  { id: 'soul-standard-hf', label: 'Soul (Higgsfield)', provider: 'Higgsfield', goodFor: 'The original Soul look with strong aesthetic presets' },
+  { id: 'soul-cinema-hf', label: 'Soul Cinema (Higgsfield)', provider: 'Higgsfield', goodFor: 'Film-still look; best for locations and rooms' },
+  { id: 'seedream-v55-fal', label: 'Seedream 5.5', provider: 'FAL / BytePlus', icon: logoSeedream, goodFor: 'ByteDance\'s newest: complex anatomy, creatures and giants, precise multi-turn edits, transparent PNG' },
+  { id: 'seedream-v55-fal-edit', label: 'Seedream 5.5 Edit', provider: 'FAL / BytePlus', icon: logoSeedream, goodFor: 'Combines up to 10 references, each with its own job (shape, face, materials); keeps the rest intact' },
   { id: 'seedream-v5-pro-fal', label: 'Seedream 5.0 Pro (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Flagship ByteDance realism, dense layouts, and native text in 14 languages' },
   { id: 'seedream-v5-pro-fal-edit', label: 'Seedream 5.0 Pro Edit (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Region-precise edits that keep the rest of the frame intact (up to 10 refs)' },
   { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Painterly, aesthetic-first generation with optional style references' },
@@ -251,6 +262,11 @@ const MODEL_ASPECT_RATIOS: Record<ImageModelId, AspectRatioOption[]> = {
   seedream: [...ASPECT_RATIOS],
   'wan-v27-image-pro-replicate': [...ASPECT_RATIOS],
   'seedream-v5-lite-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'soul-2-hf': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'soul-standard-hf': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'soul-cinema-hf': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'seedream-v55-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  'seedream-v55-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'seedream-v5-pro-fal': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'seedream-v5-pro-fal-edit': ['16:9', '9:16', '1:1', '4:3', '3:4'],
   'krea-2-large-fal': ['16:9', '9:16', '1:1', '4:3', '235:100'],
@@ -307,6 +323,11 @@ const MODEL_REFERENCE_LIMITS: Record<ImageModelId, number> = {
   seedream: 8,
   'wan-v27-image-pro-replicate': 9,
   'seedream-v5-lite-fal': 0,
+  'soul-2-hf': 0,
+  'soul-standard-hf': 0,
+  'soul-cinema-hf': 0,
+  'seedream-v55-fal': 0,
+  'seedream-v55-fal-edit': 10,
   'seedream-v5-pro-fal': 0,
   'seedream-v5-pro-fal-edit': 10,
   'krea-2-large-fal': 3,
@@ -368,6 +389,11 @@ const IMAGE_MODEL_PRICING: Partial<Record<ImageModelId, ImageModelPricing>> = {
   seedream: { provider: 'replicate', kind: 'image', model: 'bytedance/seedream-4.5' },
   'wan-v27-image-pro-replicate': { provider: 'replicate', kind: 'image', model: 'wan-video/wan-2.7-image-pro' },
   'seedream-v5-lite-fal': { provider: 'fal', kind: 'image', model: 'fal-ai/bytedance/seedream/v5/lite/text-to-image' },
+  'soul-2-hf': { provider: 'higgsfield', kind: 'image', model: 'higgsfield-ai/soul/v2/standard' },
+  'soul-standard-hf': { provider: 'higgsfield', kind: 'image', model: 'higgsfield-ai/soul/standard' },
+  'soul-cinema-hf': { provider: 'higgsfield', kind: 'image', model: 'higgsfield-ai/soul/cinema' },
+  'seedream-v55-fal': { provider: 'fal', kind: 'image', model: 'bytedance/seedream/v5.5/text-to-image' },
+  'seedream-v55-fal-edit': { provider: 'fal', kind: 'edit', model: 'bytedance/seedream/v5.5/edit' },
   'seedream-v5-pro-fal': { provider: 'fal', kind: 'image', model: 'bytedance/seedream/v5/pro/text-to-image' },
   'seedream-v5-pro-fal-edit': { provider: 'fal', kind: 'edit', model: 'bytedance/seedream/v5/pro/edit' },
   'krea-2-large-fal': { provider: 'fal', kind: 'image', model: 'krea/v2/large/text-to-image' },
@@ -2491,25 +2517,29 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
         case 'seedream-v5-lite-fal':
           item = await generateImageWithFalSeedreamV5Lite(shapedPrompt, { aspectRatio: qwenMaxAspectRatio });
           break;
+        case 'seedream-v55-fal':
         case 'seedream-v5-pro-fal':
           item = await generateImageWithFalSeedreamV5Pro(shapedPrompt, {
+            version: modelId === 'seedream-v55-fal' ? '5.5' : '5.0-pro',
             aspectRatio: qwenMaxAspectRatio,
             resolution: imageSize === '1K' ? '1K' : '2K',
             outputFormat: 'png',
           });
           break;
+        case 'seedream-v55-fal-edit':
         case 'seedream-v5-pro-fal-edit':
           if (referenceImages.length === 0) {
-            throw new Error('Seedream 5.0 Pro Edit (FAL) requires at least one reference image.');
+            throw new Error(`${modelId === 'seedream-v55-fal-edit' ? 'Seedream 5.5' : 'Seedream 5.0 Pro'} Edit requires at least one reference image.`);
           }
           {
             const edited = await editImageWithFalSeedreamV5Pro(shapedPrompt, referenceImages.slice(0, 10), {
+              version: modelId === 'seedream-v55-fal-edit' ? '5.5' : '5.0-pro',
               aspectRatio: qwenMaxAspectRatio,
               numOutputs: 1,
               outputFormat: 'png',
             });
             if (!edited.length) {
-              throw new Error('Seedream 5.0 Pro Edit (FAL) returned no images.');
+              throw new Error('Seedream Edit returned no images.');
             }
             item = edited[0];
           }
@@ -2711,6 +2741,11 @@ const ImageGenerationWorkspace: React.FC<ImageGenerationWorkspaceProps> = ({
             }
             item = edited[0];
           }
+          break;
+        case 'soul-2-hf':
+        case 'soul-standard-hf':
+        case 'soul-cinema-hf':
+          item = await generateImageWithHiggsfield(modelId, shapedPrompt, { aspectRatio: effectiveAspectRatio, resolution: '1080p' });
           break;
         case 'gpt-image-1-5':
           item = await generateImageWithGptImage15(shapedPrompt, effectiveAspectRatio as any, referenceImages);

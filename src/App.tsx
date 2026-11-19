@@ -530,6 +530,12 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'fal-seedance-25-t2v', provider: 'fal', model: 'bytedance/seedance-2.5/text-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 T2V (720p)' },
     { id: 'fal-seedance-25-i2v', provider: 'fal', model: 'bytedance/seedance-2.5/image-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 I2V (720p)' },
     { id: 'fal-seedance-25-ref', provider: 'fal', model: 'bytedance/seedance-2.5/reference-to-video', kind: 'video', unitCost: withMargin(0.473), unitLabel: 'second', label: 'FAL Seedance 2.5 Reference-to-Video (720p)' },
+    { id: 'byteplus-seedream-55', provider: 'byteplus', model: 'dola-seedream-5-5-261028', kind: 'image', unitCost: withMargin(0.035), unitLabel: 'image', label: 'BytePlus Seedream 5.5' },
+    { id: 'byteplus-seedream-55-edit', provider: 'byteplus', model: 'dola-seedream-5-5-261028', kind: 'edit', unitCost: withMargin(0.045), unitLabel: 'image', label: 'BytePlus Seedream 5.5 Edit' },
+    { id: 'byteplus-seedream-50-pro', provider: 'byteplus', model: 'dola-seedream-5-0-pro-260628', kind: 'image', unitCost: withMargin(0.09), unitLabel: 'image', label: 'BytePlus Seedream 5.0 Pro' },
+    { id: 'byteplus-seedance-25', provider: 'byteplus', model: 'dreamina-seedance-2-5-260628', kind: 'video', unitCost: withMargin(0.23), unitLabel: 'second', label: 'BytePlus Seedance 2.5 (720p; 4K ≈ $0.91/s)' },
+    { id: 'fal-seedream-v55-t2i', provider: 'fal', model: 'bytedance/seedream/v5.5/text-to-image', kind: 'image', unitCost: withMargin(0.0675), unitLabel: 'image', label: 'FAL Seedream 5.5 T2I' },
+    { id: 'fal-seedream-v55-edit', provider: 'fal', model: 'bytedance/seedream/v5.5/edit', kind: 'edit', unitCost: withMargin(0.0675), unitLabel: 'request', label: 'FAL Seedream 5.5 Edit' },
     { id: 'fal-seedream-v5-pro-t2i', provider: 'fal', model: 'bytedance/seedream/v5/pro/text-to-image', kind: 'image', unitCost: withMargin(0.0675), unitLabel: 'image', label: 'FAL Seedream 5.0 Pro T2I' },
     { id: 'fal-seedream-v5-pro-edit', provider: 'fal', model: 'bytedance/seedream/v5/pro/edit', kind: 'edit', unitCost: withMargin(0.0675), unitLabel: 'request', label: 'FAL Seedream 5.0 Pro Edit' },
     { id: 'fal-krea-2-large', provider: 'fal', model: 'krea/v2/large/text-to-image', kind: 'image', unitCost: withMargin(0.05), unitLabel: 'image', label: 'FAL Krea 2 Large T2I' },
@@ -632,6 +638,7 @@ const DEFAULT_MODEL_RATES: CostRate[] = [
     { id: 'replicate-demucs', provider: 'replicate', model: 'facebookresearch/demucs', kind: 'audio', unitCost: withMargin(0.009), unitLabel: 'stem', label: 'Demucs Stem Separation (per stem)' },
 
     // ElevenLabs (kept for manual estimates and invoice parity)
+    { id: 'elevenlabs-tts-v4', provider: 'elevenlabs', model: 'eleven_v4', kind: 'audio', unitCost: withMargin(0.12), unitLabel: 'minute', label: 'ElevenLabs v4' },
     { id: 'elevenlabs-tts', provider: 'elevenlabs', model: 'eleven_multilingual_v2', kind: 'audio', unitCost: withMargin(0.12), unitLabel: 'minute', label: 'ElevenLabs Multilingual v2' },
     { id: 'elevenlabs-turbo', provider: 'elevenlabs', model: 'turbo_v2.5', kind: 'audio', unitCost: withMargin(0.06), unitLabel: 'minute', label: 'ElevenLabs Turbo v2.5' },
 
@@ -8265,7 +8272,7 @@ function App() {
                                 ], defaultValue: 'gemini'
                             },
                             { name: 'voiceId', label: 'ElevenLabs Voice ID', type: 'text', defaultValue: 'JBFqnCBsd6RMkjVDRZzb' },
-                            { name: 'modelId', label: 'ElevenLabs Model ID', type: 'text', defaultValue: 'eleven_multilingual_v2' },
+                            { name: 'modelId', label: 'ElevenLabs Model ID', type: 'text', defaultValue: 'eleven_v4' },
                             { name: 'outputFormat', label: 'ElevenLabs Output Format', type: 'text', defaultValue: 'mp3_44100_128' }
                         ],
                         pricing: {
@@ -8274,7 +8281,7 @@ function App() {
                                 const provider = values.provider === 'elevenlabs' ? 'elevenlabs' : 'gemini';
                                 const model =
                                     provider === 'elevenlabs'
-                                        ? (values.modelId || 'eleven_multilingual_v2')
+                                        ? (values.modelId || 'eleven_v4')
                                         : 'gemini-2.5-flash-preview-tts';
                                 return buildModalPricing({
                                     provider,

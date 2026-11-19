@@ -241,6 +241,8 @@ type ConceptEnvironmentSubtab = 'base_ref' | 'angles' | 'time_of_day';
 type ConceptPropSubtab = 'base_ref' | 'angles' | 'state';
 type ConceptBrandingSubtab = 'base_ref' | 'variations';
 type AspectRatioOption = '16:9' | '9:16' | '4:3' | '3:4' | '1:1' | '21:9' | '2.39:1' | '235:100' | '239:100';
+const seedreamVersionOf = (model: string | null | undefined) => (model || '').startsWith('seedream-v55') ? '5.5' as const : '5.0-pro' as const;
+
 const ASPECT_RATIO_VALUES: AspectRatioOption[] = ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9', '2.39:1', '235:100', '239:100'];
 type ModelAspectRatio = '16:9' | '9:16' | '4:3' | '3:4' | '1:1';
 
@@ -253,6 +255,7 @@ type OutfitImageModel =
     | 'nano-banana-2-fal'
     | 'nano-21'
     | 'nano-banana-21-fal'
+    | 'seedream-v55-edit-fal'
     | 'seedream-v5-pro-edit-fal'
     | 'gpt-image-2-fal'
     | 'gpt-image-25-flare-fal'
@@ -274,6 +277,7 @@ type OutfitImageModel =
 const OUTFIT_MODEL_OPTIONS: Array<{ id: OutfitImageModel; label: string; group: 'Cloud' | 'Local' | '' }> = [
     { id: 'same', label: 'Same as image model', group: '' },
     { id: 'seedream', label: 'Seedream 4.5 (Replicate)', group: 'Cloud' },
+    { id: 'seedream-v55-edit-fal', label: 'Seedream 5.5 Edit', group: 'Cloud' },
     { id: 'seedream-v5-pro-edit-fal', label: 'Seedream 5.0 Pro Edit (FAL)', group: 'Cloud' },
     { id: 'nano-21', label: 'Nano Banana 2.1 (Gemini)', group: 'Cloud' },
     { id: 'nano-banana-21-fal', label: 'Nano Banana 2.1 Edit (FAL) · up to 14 refs', group: 'Cloud' },
@@ -303,6 +307,7 @@ const OUTFIT_MODEL_STORAGE_KEY = 'outfit_image_model_v1';
 const OUTFIT_EDIT_SIBLINGS: Record<string, Exclude<OutfitImageModel, 'same'>> = {
     'seedream-v5-lite-fal': 'seedream-v5-pro-edit-fal',
     'seedream-v5-pro-fal': 'seedream-v5-pro-edit-fal',
+    'seedream-v55-fal': 'seedream-v55-edit-fal',
     'flux-3-fal': 'flux-3-edit-fal',
     'krea-3-fal': 'krea-3-edit-fal',
     'gpt-image-2-fal-t2i': 'gpt-image-2-fal',
@@ -437,7 +442,10 @@ type ReferenceImageModel =
     | 'gpt-image-1.5'
     | 'seedream'
     | 'seedream-v5-lite-fal'
+    | 'seedream-v55-fal'
+    | 'seedream-v55-edit-fal'
     | 'seedream-v5-pro-fal'
+    | 'seedream-v55-edit-fal'
     | 'seedream-v5-pro-edit-fal'
     | 'krea-2-large-fal'
     | 'krea-2-turbo-fal'
@@ -808,6 +816,8 @@ const REFERENCE_MODEL_LABELS: Record<ReferenceImageModel, string> = {
     'gpt-image-1.5': 'GPT Image 1.5',
     seedream: 'Seedream 4.5',
     'seedream-v5-lite-fal': 'Seedream v5 Lite (FAL)',
+    'seedream-v55-fal': 'Seedream 5.5',
+    'seedream-v55-edit-fal': 'Seedream 5.5 Edit',
     'seedream-v5-pro-fal': 'Seedream 5.0 Pro (FAL)',
     'seedream-v5-pro-edit-fal': 'Seedream 5.0 Pro Edit (FAL)',
     'krea-2-large-fal': 'Krea 2 Large (FAL)',
@@ -858,6 +868,8 @@ const REFERENCE_MODEL_OPTIONS: Array<{ id: ReferenceImageModel; label: string; p
     { id: 'gpt-image-1.5', label: 'GPT Image 1.5', provider: 'OpenAI', icon: logoOpenai, goodFor: 'Versatile and highly detailed artistic styles' },
     { id: 'seedream', label: 'Seedream 4.5', provider: 'Seedream', icon: logoSeedream, goodFor: 'Exceptional cinematic realism and depth' },
     { id: 'seedream-v5-lite-fal', label: 'Seedream v5 Lite (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Fast cinematic realism and detailed environments', badge: '⭐ Recommended' },
+    { id: 'seedream-v55-fal', label: 'Seedream 5.5', provider: 'FAL / BytePlus', icon: logoSeedream, goodFor: 'Newest Seedream: complex anatomy, creatures and giants; clay-to-creature combines' },
+    { id: 'seedream-v55-edit-fal', label: 'Seedream 5.5 Edit', provider: 'FAL / BytePlus', icon: logoSeedream, goodFor: 'Up to 10 references with a job each (shape, face, materials); keeps identity' },
     { id: 'seedream-v5-pro-fal', label: 'Seedream 5.0 Pro (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Flagship realism, dense layouts and native text', badge: '⭐ Recommended' },
     { id: 'seedream-v5-pro-edit-fal', label: 'Seedream 5.0 Pro Edit (FAL)', provider: 'FAL', icon: logoSeedream, goodFor: 'Reference-aware storyboard continuity, keeps the rest of the frame intact' },
     { id: 'krea-2-large-fal', label: 'Krea 2 Large (FAL)', provider: 'FAL', goodFor: 'Aesthetic-first concept art with film-stock looks' },
@@ -7068,18 +7080,18 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 quality: 'high',
                 outputFormat: 'png',
             });
-        } else if (selectedReferenceModel === 'seedream-v5-pro-fal') {
-            image = await generateImageWithFalSeedreamV5Pro(prompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
-        } else if (selectedReferenceModel === 'seedream-v5-pro-edit-fal') {
+        } else if (selectedReferenceModel === 'seedream-v5-pro-fal' || selectedReferenceModel === 'seedream-v55-fal') {
+            image = await generateImageWithFalSeedreamV5Pro(prompt, { version: seedreamVersionOf(selectedReferenceModel), aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+        } else if (selectedReferenceModel === 'seedream-v5-pro-edit-fal' || selectedReferenceModel === 'seedream-v55-edit-fal') {
             const refs = await buildMoodboardReferences(baseImageUrl);
             if (refs.length > 0) {
-                const edited = await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+                const edited = await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { version: seedreamVersionOf(selectedReferenceModel), aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
                 if (!edited.length) {
-                    throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                    throw new Error('Seedream Edit returned no images.');
                 }
                 image = edited[0];
             } else {
-                image = await generateImageWithFalSeedreamV5Pro(prompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+                image = await generateImageWithFalSeedreamV5Pro(prompt, { version: seedreamVersionOf(selectedReferenceModel), aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
             }
         } else if (selectedReferenceModel === 'krea-2-large-fal' || selectedReferenceModel === 'krea-2-turbo-fal') {
             const kreaAspect = modelAspectRatio === '3:4' ? '4:5' : modelAspectRatio;
@@ -7395,15 +7407,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
             });
         }
 
-        if (marketingImageModel === 'seedream-v5-pro-fal' || marketingImageModel === 'seedream-v5-pro-edit-fal') {
-            if (marketingImageModel === 'seedream-v5-pro-edit-fal' && refs.length > 0) {
-                const edited = await editImageWithFalSeedreamV5Pro(enrichedPrompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+        if (marketingImageModel === 'seedream-v5-pro-fal' || marketingImageModel === 'seedream-v5-pro-edit-fal' || marketingImageModel === 'seedream-v55-fal' || marketingImageModel === 'seedream-v55-edit-fal') {
+            if ((marketingImageModel === 'seedream-v5-pro-edit-fal' || marketingImageModel === 'seedream-v55-edit-fal') && refs.length > 0) {
+                const edited = await editImageWithFalSeedreamV5Pro(enrichedPrompt, refs.slice(0, 10), { version: seedreamVersionOf(marketingImageModel), aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
                 if (!edited.length) {
-                    throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                    throw new Error('Seedream Edit returned no images.');
                 }
                 return edited[0];
             }
-            return generateImageWithFalSeedreamV5Pro(enrichedPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+            return generateImageWithFalSeedreamV5Pro(enrichedPrompt, { version: seedreamVersionOf(marketingImageModel), aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
         }
 
         if (marketingImageModel === 'krea-2-large-fal' || marketingImageModel === 'krea-2-turbo-fal') {
@@ -9891,8 +9903,9 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                 return renderQwenImage21(prompt, refs, modelAspectRatio);
             case 'machgen-flux2-dev':
                 return renderMachgenImage(model, prompt, refs, modelAspectRatio);
+            case 'seedream-v55-edit-fal':
             case 'seedream-v5-pro-edit-fal':
-                return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), 'FAL Seedream 5.0 Pro Edit');
+                return firstEdit(await editImageWithFalSeedreamV5Pro(prompt, refs.slice(0, 10), { version: seedreamVersionOf(model), aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' }), model === 'seedream-v55-edit-fal' ? 'Seedream 5.5 Edit' : 'FAL Seedream 5.0 Pro Edit');
             case 'gpt-image-2-fal':
                 return firstEdit(await editImageWithFalGptImage2(prompt, refs.slice(0, 8), { aspectRatio: modelAspectRatio, numOutputs: 1 }), 'FAL GPT Image 2 Edit');
             case 'gpt-image-25-flare-fal':
@@ -11489,15 +11502,15 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                     imageMedia = await generateImageWithFalQwenImageMax(fullPrompt, { aspectRatio: modelAspectRatio });
                 } else if (activeReferenceModel === 'seedream-v5-lite-fal') {
                     imageMedia = await generateImageWithFalSeedreamV5Lite(fullPrompt, { aspectRatio: modelAspectRatio });
-                } else if (activeReferenceModel === 'seedream-v5-pro-fal') {
-                    imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
-                } else if (activeReferenceModel === 'seedream-v5-pro-edit-fal') {
+                } else if (activeReferenceModel === 'seedream-v5-pro-fal' || activeReferenceModel === 'seedream-v55-fal') {
+                    imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { version: seedreamVersionOf(activeReferenceModel), aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+                } else if (activeReferenceModel === 'seedream-v5-pro-edit-fal' || activeReferenceModel === 'seedream-v55-edit-fal') {
                     if (gptInputs.length === 0) {
-                        imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
+                        imageMedia = await generateImageWithFalSeedreamV5Pro(fullPrompt, { version: seedreamVersionOf(activeReferenceModel), aspectRatio: modelAspectRatio, resolution: imageSize === '1K' ? '1K' : '2K', outputFormat: 'png' });
                     } else {
-                        const edited = await editImageWithFalSeedreamV5Pro(gptImage2Prompt, gptInputs.slice(0, 10), { aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
+                        const edited = await editImageWithFalSeedreamV5Pro(gptImage2Prompt, gptInputs.slice(0, 10), { version: seedreamVersionOf(activeReferenceModel), aspectRatio: modelAspectRatio, numOutputs: 1, outputFormat: 'png' });
                         if (!edited.length) {
-                            throw new Error('FAL Seedream 5.0 Pro Edit returned no images.');
+                            throw new Error('Seedream Edit returned no images.');
                         }
                         imageMedia = edited[0];
                     }
@@ -16784,7 +16797,7 @@ const ProjectHubWorkspace: React.FC<ProjectHubWorkspaceProps> = ({
                                                                 <input
                                                                     value={ref.elevenLabsModelId || ''}
                                                                     onChange={(e) => setReferences(prev => prev.map(r => r.id === ref.id ? { ...r, elevenLabsModelId: e.target.value } : r))}
-                                                                    placeholder="ElevenLabs Model ID (e.g. eleven_multilingual_v2)"
+                                                                    placeholder="ElevenLabs Model ID (default eleven_v4)"
                                                                     className="w-full bg-gray-900 text-white text-xs p-2 rounded border border-gray-600 focus:border-indigo-500"
                                                                 />
                                                                 <input

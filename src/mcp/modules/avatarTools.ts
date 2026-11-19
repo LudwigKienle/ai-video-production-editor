@@ -27,7 +27,7 @@ export const avatarServices = createServiceLoader<AvatarServices>(async () => {
 });
 
 const MODES = AVATAR_MODEL_MODES.map((mode) => mode.id);
-const VOICE_MODELS = ['eleven_multilingual_v2', 'eleven_turbo_v2_5', 'eleven_monolingual_v1'];
+const VOICE_MODELS = ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3', 'eleven_multilingual_v2', 'eleven_flash_v2_5'];
 const VOICE_FORMATS = ['mp3_44100_128', 'mp3_22050_32', 'pcm_16000', 'ulaw_8000'];
 
 const avatarsOf = (ctx: StudioToolContext): AvatarProfile[] => getExtra(ctx, 'avatars') ?? [];

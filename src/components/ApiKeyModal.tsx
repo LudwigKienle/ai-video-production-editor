@@ -11,6 +11,7 @@ import { isLocalAgentsAvailable, listLocalAgents, openLocalAgentLogin, stopLocal
 import StudioConnectPanel from './StudioConnectPanel';
 import SplashSettingsSection from '../splash/SplashSettingsSection';
 import { MACHGEN_API_KEY_STORAGE_KEY } from '../services/machgenService';
+import { BYTEPLUS_API_KEY_STORAGE_KEY, getByteDanceProviderPreference, setByteDanceProviderPreference, type ByteDanceProviderPreference } from '../services/byteplusService';
 import { HIGGSFIELD_API_KEY_STORAGE_KEY, getVideoProviderPreference, setVideoProviderPreference, type VideoProviderPreference } from '../services/higgsfieldService';
 
 type AutosaveSettings = {
@@ -65,6 +66,9 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     const [unsplashKey, setUnsplashKey] = useState('');
     const [higgsfieldKey, setHiggsfieldKey] = useState('');
     const [higgsfieldSaved, setHiggsfieldSaved] = useState(false);
+    const [byteplusKey, setByteplusKey] = useState('');
+    const [byteplusSaved, setByteplusSaved] = useState(false);
+    const [byteDanceProvider, setByteDanceProvider] = useState<ByteDanceProviderPreference>(() => getByteDanceProviderPreference());
     const [machgenKey, setMachgenKey] = useState('');
     const [machgenSaved, setMachgenSaved] = useState(false);
     const [videoProvider, setVideoProvider] = useState<VideoProviderPreference>(() => getVideoProviderPreference());
@@ -158,6 +162,11 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         if (storedHiggsfield) {
             setHiggsfieldKey(storedHiggsfield);
             setHiggsfieldSaved(true);
+        }
+        const storedByteplus = localStorage.getItem(BYTEPLUS_API_KEY_STORAGE_KEY);
+        if (storedByteplus) {
+            setByteplusKey(storedByteplus);
+            setByteplusSaved(true);
         }
         const storedMachgen = localStorage.getItem(MACHGEN_API_KEY_STORAGE_KEY);
         if (storedMachgen) {
@@ -336,6 +345,15 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         }
         setVideoProviderPreference(videoProvider);
 
+        if (byteplusKey.trim()) {
+            localStorage.setItem(BYTEPLUS_API_KEY_STORAGE_KEY, byteplusKey.trim());
+            setByteplusSaved(true);
+        } else {
+            localStorage.removeItem(BYTEPLUS_API_KEY_STORAGE_KEY);
+            setByteplusSaved(false);
+        }
+        setByteDanceProviderPreference(byteDanceProvider);
+
         if (machgenKey.trim()) {
             localStorage.setItem(MACHGEN_API_KEY_STORAGE_KEY, machgenKey.trim());
             setMachgenSaved(true);
@@ -426,6 +444,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         { id: 'worldlabs', label: 'World Labs', value: worldLabsKey, setValue: setWorldLabsKey, saved: worldLabsSaved, setSaved: setWorldLabsSaved, placeholder: 'WLT-…', usedFor: '3D world generation (Marble).', href: 'https://platform.worldlabs.ai/', hrefLabel: 'platform.worldlabs.ai' },
         { id: 'brave', label: 'Brave Search', value: braveSearchKey, setValue: setBraveSearchKey, saved: braveSearchSaved, setSaved: setBraveSearchSaved, placeholder: 'BSA_…', usedFor: 'Web, news and image research for the Studio Agent.', href: 'https://api-dashboard.search.brave.com/', hrefLabel: 'api-dashboard.search.brave.com' },
         { id: 'higgsfield', label: 'Higgsfield', value: higgsfieldKey, setValue: setHiggsfieldKey, saved: higgsfieldSaved, setSaved: setHiggsfieldSaved, placeholder: 'KEY_ID:KEY_SECRET', usedFor: 'Soul / Soul Cinema / DoP, and a second host for Kling 3, MiniMax, Wan 3, LTX 2.5, PixVerse.', href: 'https://console.higgsfield.ai', hrefLabel: 'console.higgsfield.ai' },
+        { id: 'byteplus', label: 'BytePlus ModelArk', value: byteplusKey, setValue: setByteplusKey, saved: byteplusSaved, setSaved: setByteplusSaved, placeholder: 'ModelArk API key', usedFor: 'ByteDance\'s own API for Seedream 5.5 / 5.0 Pro and Seedance 2.5, including Seedance in 4K. Activate each model once in the ModelArk console.', href: 'https://ai.byteplus.com/ark/region:ap-southeast-1/apiKey', hrefLabel: 'ai.byteplus.com' },
         { id: 'machgen', label: 'MachGen', value: machgenKey, setValue: setMachgenKey, saved: machgenSaved, setSaved: setMachgenSaved, placeholder: 'MGA_<key_id>:<secret>', usedFor: 'MiniMax H3 Turbo (fast, cheap video with audio), MiniMax H3, LTX-2.3 Pro, Vidu Q3 Turbo, Wan 2.2, FLUX.2 dev, HiDream O1.', href: 'https://www.machgen.ai/profile/api-keys', hrefLabel: 'machgen.ai' },
         { id: 'unsplash', label: 'Unsplash', value: unsplashKey, setValue: setUnsplashKey, saved: unsplashSaved, setSaved: setUnsplashSaved, placeholder: 'Unsplash Access Key', usedFor: 'Stock library search. Access Key only, never the Secret Key.', href: 'https://unsplash.com/developers', hrefLabel: 'unsplash.com/developers' },
     ];
@@ -470,6 +489,17 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                             ))}
                         </div>
                         <span className="pk-hint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>Auto uses fal when a fal key is set, otherwise Higgsfield. Applies to Kling 3, MiniMax, Wan 3, LTX 2.5 and PixVerse.</span>
+                    </div>
+                )}
+                {row.id === 'byteplus' && (
+                    <div className="pk-field settings-provider__extra">
+                        <span>Host for Seedream and Seedance 2.5</span>
+                        <div className="pk-seg" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                            {(['auto', 'fal', 'byteplus'] as ByteDanceProviderPreference[]).map((option) => (
+                                <button key={option} type="button" aria-pressed={byteDanceProvider === option} onClick={() => setByteDanceProvider(option)}>{option === 'auto' ? 'Auto' : option === 'fal' ? 'fal.ai' : 'BytePlus'}</button>
+                            ))}
+                        </div>
+                        <span className="pk-hint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>Auto uses fal when a fal key is set, otherwise BytePlus. Seedance 2.5 in 4K always runs on BytePlus.</span>
                     </div>
                 )}
                 {row.id === 'google' && (
