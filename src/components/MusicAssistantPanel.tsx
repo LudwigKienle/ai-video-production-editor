@@ -28,7 +28,7 @@ const MusicAssistantPanel: React.FC<MusicAssistantPanelProps> = ({ timelineClips
   const [isGenerating, setIsGenerating] = useState<'music' | 'voice' | null>(null);
   const [status, setStatus] = useState<{ tone: 'ok' | 'danger' | 'info'; text: string } | null>(null);
   const [voiceId, setVoiceId] = useState('JBFqnCBsd6RMkjVDRZzb');
-  const [modelId, setModelId] = useState('eleven_multilingual_v2');
+  const [modelId, setModelId] = useState('eleven_v4');
   const [outputFormat, setOutputFormat] = useState('mp3_44100_128');
 
   const sequenceDuration = timelineClips.reduce((max, clip) => Math.max(max, clip.end), 0);

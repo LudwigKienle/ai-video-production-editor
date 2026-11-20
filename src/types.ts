@@ -1254,6 +1254,34 @@ export type StyleReference = {
   source: 'moodboard' | 'upload' | 'library';
 };
 
+export type CreatureMaterial = {
+  id: string;
+  /** Body part or costume piece, e.g. "shoulder skulls". */
+  part: string;
+  /** Real material to copy, e.g. "weathered cattle skull bone". */
+  material: string;
+  url?: string;
+};
+
+export type CreatureWorkshop = {
+  /** One-line concept, e.g. "demon king, half bear half wolf, boar tusks, draped in trophies". */
+  concept?: string;
+  /** Sculpted features to lock by name. */
+  shapeDetails?: string;
+  clayUrl?: string;
+  claySheetUrl?: string;
+  /** Real face to borrow, e.g. "an American black bear". */
+  faceSource?: string;
+  faceUrl?: string;
+  materials?: CreatureMaterial[];
+  /** Body covering described in words only, e.g. "grey-brown grizzly fur". */
+  bodyCovering?: string;
+  /** Pieces that were never sculpted (armour, props). */
+  extraParts?: string;
+  photoStyle?: 'makeup-test' | 'phone-flash';
+  finalUrl?: string;
+};
+
 export type ReferenceItem = {
   id: string;
   type: 'character' | 'environment' | 'product' | 'prop';
@@ -1314,6 +1342,13 @@ export type ReferenceItem = {
   turnaroundUrls?: { front?: string; side?: string; back?: string };
   expressionSet?: Array<{ id: string; label: string; url: string }>;
   materialSwatches?: Array<{ id: string; label: string; url: string }>;
+  /** Three-view sheet (full-body front with hidden face, full-body back, front close-up); preferred identity reference for renders. */
+  characterSheetUrl?: string;
+  characterSheetVersions?: string[];
+  isGeneratingSheet?: boolean;
+  /** Creature workshop: clay → real face → material swatches → combined makeup-test photo. */
+  creature?: CreatureWorkshop;
+  creatureBusyStep?: string | null;
   scaleReferenceUrl?: string;
   scaleReferenceNote?: string;
   swimsuitBaseUrl?: string;
@@ -1876,7 +1911,7 @@ export type ShotAnnotation = {
   updatedAt?: string;
 };
 
-export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'higgsfield' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local' | 'runway' | 'machgen';
+export type UsageProvider = 'gemini' | 'replicate' | 'fal' | 'higgsfield' | 'byteplus' | 'ltx' | 'elevenlabs' | 'worldlabs' | 'xai' | 'sonauto' | 'sonilo' | 'local' | 'runway' | 'machgen';
 export type UsageKind = 'image' | 'video' | 'audio' | 'edit' | 'analysis' | '3d-world' | 'other';
 export type UsageUnit = 'image' | 'second' | 'minute' | 'request' | 'clip' | 'stem';
 

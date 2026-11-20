@@ -14,9 +14,11 @@ interface AvatarWorkspaceProps {
 type ModelMode = AvatarModelMode;
 
 const VOICE_MODEL_OPTIONS = [
+  { id: 'eleven_v4', label: 'Eleven v4 (most expressive)' },
+  { id: 'eleven_v4_turbo', label: 'Eleven v4 Turbo (real-time)' },
+  { id: 'eleven_v3', label: 'Eleven v3' },
   { id: 'eleven_multilingual_v2', label: 'Multilingual v2' },
-  { id: 'eleven_turbo_v2_5', label: 'Turbo v2.5' },
-  { id: 'eleven_monolingual_v1', label: 'Monolingual v1' },
+  { id: 'eleven_flash_v2_5', label: 'Flash v2.5 (fast, cheap)' },
 ];
 
 const VOICE_OUTPUT_FORMATS = [
@@ -57,7 +59,7 @@ const AvatarWorkspace: React.FC<AvatarWorkspaceProps> = ({ avatars, onUpdateAvat
   const [voiceStatus, setVoiceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>('');
-  const [voiceModelId, setVoiceModelId] = useState(VOICE_MODEL_OPTIONS[0]?.id || 'eleven_multilingual_v2');
+  const [voiceModelId, setVoiceModelId] = useState(VOICE_MODEL_OPTIONS[0]?.id || 'eleven_v4');
   const [voiceOutputFormat, setVoiceOutputFormat] = useState(VOICE_OUTPUT_FORMATS[0]?.id || 'mp3_44100_128');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [startImageFile, setStartImageFile] = useState<File | null>(null);

@@ -196,7 +196,7 @@ const MODEL_OPTIONS: ModelOption[] = [
 const isSeedanceI2V = (modelId: VideoModelId) => modelId === 'seedance-2-fal' || modelId === 'seedance-25-i2v-fal';
 const isSeedanceOmni = (modelId: VideoModelId) => modelId === 'seedance-2-omni-fal' || modelId === 'seedance-25-ref-fal';
 const isSeedance25 = (modelId: VideoModelId) => modelId === 'seedance-25-t2v-fal' || modelId === 'seedance-25-i2v-fal' || modelId === 'seedance-25-ref-fal';
-type SeedanceResolution = '480p' | '720p' | '1080p';
+type SeedanceResolution = '480p' | '720p' | '1080p' | '4k';
 const SEEDANCE_25_DURATIONS = Array.from({ length: 27 }, (_, index) => index + 4);
 
 const VIDEO_WORKSPACE_UI_PREFS_KEY = 'video_workspace_ui_prefs_v1';
@@ -1550,7 +1550,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
       pVideoDraftMode: { value: pVideoDraftMode, set: setPVideoDraftMode, type: 'boolean' },
       pVideoPromptUpsampling: { value: pVideoPromptUpsampling, set: setPVideoPromptUpsampling, type: 'boolean' },
       seedanceGenerateAudio: { value: seedanceGenerateAudio, set: setSeedanceGenerateAudio, type: 'boolean' },
-      seedanceResolution: { value: seedanceResolution, set: setSeedanceResolution, type: 'string', options: ['480p', '720p', '1080p'] },
+      seedanceResolution: { value: seedanceResolution, set: setSeedanceResolution, type: 'string', options: ['480p', '720p', '1080p', '4k'] },
       seedanceOmniGenerateAudio: { value: seedanceOmniGenerateAudio, set: setSeedanceOmniGenerateAudio, type: 'boolean' },
       pixverseGenerateAudio: { value: pixverseGenerateAudio, set: setPixverseGenerateAudio, type: 'boolean' },
       klingGenerateAudio: { value: klingGenerateAudio, set: setKlingGenerateAudio, type: 'boolean' },
@@ -2152,6 +2152,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                     <option value="480p">480p</option>
                     <option value="720p">720p</option>
                     <option value="1080p">1080p</option>
+                    <option value="4k">4K (BytePlus)</option>
                   </select>
                 </label>
                 <p className="text-[11px] text-gray-500">
@@ -2182,12 +2183,13 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                       <option value="480p">480p</option>
                       <option value="720p">720p</option>
                       <option value="1080p">1080p</option>
+                      <option value="4k">4K (BytePlus)</option>
                     </select>
                   </label>
                 )}
                 <p className="text-[11px] text-gray-500">
                   {isSeedance25(modelId)
-                    ? 'FAL Seedance 2.5 image-to-video: start frame, optional end frame, 4-30s single shot with synced audio, up to 1080p.'
+                    ? 'FAL Seedance 2.5 image-to-video: start frame, optional end frame, 4-30s single shot with synced audio, up to 1080p (4K via BytePlus).'
                     : 'Uses FAL Seedance 2.0 image-to-video with start frame, optional end frame, 4-15s duration, and fixed 720p output.'}
                 </p>
               </div>
@@ -2215,6 +2217,7 @@ const VideoGenerationWorkspace: React.FC<VideoGenerationWorkspaceProps> = ({
                       <option value="480p">480p</option>
                       <option value="720p">720p</option>
                       <option value="1080p">1080p</option>
+                      <option value="4k">4K (BytePlus)</option>
                     </select>
                   </label>
                 )}

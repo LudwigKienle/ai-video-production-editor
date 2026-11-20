@@ -159,7 +159,7 @@ const tools: StudioTool[] = [
         text: { type: 'string', description: 'Was die Stimme sagt' },
         provider: { type: 'string', enum: ['elevenlabs', 'minimax'], description: 'Standard: elevenlabs' },
         voiceId: { type: 'string', description: 'ElevenLabs: Voice-ID' },
-        modelId: { type: 'string', description: 'ElevenLabs: Modell (Standard eleven_multilingual_v2)' },
+        modelId: { type: 'string', description: 'ElevenLabs: Modell (Standard eleven_v4; auch eleven_v4_turbo, eleven_v3, eleven_multilingual_v2, eleven_flash_v2_5)' },
         outputFormat: { type: 'string', description: 'ElevenLabs: z. B. mp3_44100_128' },
         voice: { type: 'string', description: 'MiniMax: Stimme' },
         speed: { type: 'number', minimum: 0.5, maximum: 1.5, description: 'MiniMax: Tempo' },

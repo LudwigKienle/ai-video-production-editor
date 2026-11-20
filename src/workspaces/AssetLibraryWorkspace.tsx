@@ -21,6 +21,7 @@ import {
   type UnsplashOrientation,
   type UnsplashStockAsset,
 } from '../services/unsplashService';
+import { LocalLibraryPanel } from '../components/LocalLibraryPanel';
 import { BoxIcon, ImageIcon, VideoIcon, MusicNoteIcon, TagIcon, SearchIcon, DownloadIcon, EditIcon, UploadIcon, XIcon, GridIcon, ListIcon } from '../components/icons';
 
 /**
@@ -67,7 +68,7 @@ interface AssetLibraryWorkspaceProps {
   onAddStockImage?: (item: MediaItem) => void;
 }
 
-type Collection = 'all' | 'image' | 'video' | 'audio' | 'reference' | 'shots' | 'generated' | 'stock' | 'packs';
+type Collection = 'all' | 'image' | 'video' | 'audio' | 'reference' | 'shots' | 'generated' | 'stock' | 'packs' | 'local';
 type Density = 'small' | 'medium' | 'large';
 type Sort = 'recent' | 'name' | 'project';
 
@@ -254,7 +255,7 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
     const list = allAssets.filter((asset) => {
       if (collection === 'shots') { if (asset.category !== 'shot') return false; }
       else if (collection === 'generated') { if (!(asset.source === 'generated' || asset.generatedBy)) return false; }
-      else if (collection !== 'all' && collection !== 'stock' && collection !== 'packs' && asset.kind !== collection) return false;
+      else if (collection !== 'all' && collection !== 'stock' && collection !== 'packs' && collection !== 'local' && asset.kind !== collection) return false;
       if (!term) return true;
       return asset.name.toLowerCase().includes(term) || asset.projectName.toLowerCase().includes(term) || (asset.detail || '').toLowerCase().includes(term) || (asset.generatedBy || '').toLowerCase().includes(term);
     });
@@ -513,6 +514,7 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
         </ul>
         <div className="lib-sidebar__label">Sources</div>
         <ul className="lib-sidebar__list" role="list">
+          <li><button type="button" className={`lib-sidebar__item ${collection === 'local' ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection('local')}><SearchIcon className="lib-sidebar__icon" /><span className="lib-sidebar__text">Local library · KI-Suche</span></button></li>
           <li><button type="button" className={`lib-sidebar__item ${collection === 'stock' ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection('stock')}><SearchIcon className="lib-sidebar__icon" /><span className="lib-sidebar__text">Unsplash stock</span></button></li>
           <li><button type="button" className={`lib-sidebar__item ${collection === 'packs' ? 'lib-sidebar__item--active' : ''}`} onClick={() => setCollection('packs')}><BoxIcon className="lib-sidebar__icon" /><span className="lib-sidebar__text">Asset packs</span><span className="lib-sidebar__count">{assetPacks.length}</span></button></li>
         </ul>
@@ -526,11 +528,11 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
       <div className="lib-main">
         <div className="lib-toolbar">
           <div className="lib-toolbar__title">
-            {collection === 'stock' ? 'Unsplash stock' : collection === 'packs' ? 'Asset packs' : collections.find((c) => c.id === collection)?.label}
-            <span className="lib-toolbar__count">{collection === 'stock' ? stockResults.length : collection === 'packs' ? assetPacks.length : filteredAssets.length}</span>
+            {collection === 'local' ? 'Local library' : collection === 'stock' ? 'Unsplash stock' : collection === 'packs' ? 'Asset packs' : collections.find((c) => c.id === collection)?.label}
+            <span className="lib-toolbar__count">{collection === 'local' ? '' : collection === 'stock' ? stockResults.length : collection === 'packs' ? assetPacks.length : filteredAssets.length}</span>
           </div>
           <div className="lib-toolbar__controls">
-            {collection !== 'stock' && collection !== 'packs' && (
+            {collection !== 'stock' && collection !== 'packs' && collection !== 'local' && (
               <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="app-select app-select--compact" aria-label="Sort">
                 <option value="recent">Recent first</option>
                 <option value="name">Name</option>
@@ -548,7 +550,7 @@ const AssetLibraryWorkspace: React.FC<AssetLibraryWorkspaceProps> = ({
         </div>
 
         <div className="lib-content" ref={gridRef} tabIndex={0}>
-          {collection === 'stock' ? renderStock() : collection === 'packs' ? renderPacks() : (
+          {collection === 'local' ? <LocalLibraryPanel density={density} onAdd={onAddStockImage} /> : collection === 'stock' ? renderStock() : collection === 'packs' ? renderPacks() : (
             <>
               {filteredAssets.length === 0 ? (
                 <div className="lib-empty">

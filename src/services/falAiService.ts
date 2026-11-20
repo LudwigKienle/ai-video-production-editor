@@ -4,6 +4,7 @@ import { recordUsage } from '../utils/usageTracker';
 import { getFalVideoCatalogEntry, pickCatalogAspect, pickCatalogDuration } from './falVideoCatalog';
 import { byokProxyJson, shouldUseByokProxy } from './byokProxyClient';
 import { startTask, type TaskKind } from './taskCenter';
+import { generateImageWithBytePlusSeedream, generateVideoWithBytePlusSeedance25, shouldUseBytePlus } from './byteplusService';
 
 const MODELS = {
     GROK_IMAGINE_IMAGE_T2I: 'xai/grok-imagine-image',
@@ -17,6 +18,10 @@ const MODELS = {
     GPT_IMAGE_25_FLARE_EDIT: 'openai/gpt-image-2.5/flare/edit',
     GPT_IMAGE_25_SUNBURST_T2I: 'openai/gpt-image-2.5/sunburst/text-to-image',
     GPT_IMAGE_25_SUNBURST_EDIT: 'openai/gpt-image-2.5/sunburst/edit',
+    GPT_IMAGE_26_FLARE_T2I: 'openai/gpt-image-2.6/flare/text-to-image',
+    GPT_IMAGE_26_FLARE_EDIT: 'openai/gpt-image-2.6/flare/edit',
+    GPT_IMAGE_26_SUNBURST_T2I: 'openai/gpt-image-2.6/sunburst/text-to-image',
+    GPT_IMAGE_26_SUNBURST_EDIT: 'openai/gpt-image-2.6/sunburst/edit',
     NANO_BANANA_2_T2I: 'fal-ai/nano-banana-2',
     NANO_BANANA_2_EDIT: 'fal-ai/nano-banana-2/edit',
     NANO_BANANA_21_T2I: 'google/nano-banana-2.1',
@@ -47,6 +52,8 @@ const MODELS = {
     MINIMAX_H3_REFERENCE: 'minimax/h3/reference-to-video',
     SEEDREAM_V5_PRO_T2I: 'bytedance/seedream/v5/pro/text-to-image',
     SEEDREAM_V5_PRO_EDIT: 'bytedance/seedream/v5/pro/edit',
+    SEEDREAM_V55_T2I: 'bytedance/seedream/v5.5/text-to-image',
+    SEEDREAM_V55_EDIT: 'bytedance/seedream/v5.5/edit',
     KREA_2_LARGE_T2I: 'krea/v2/large/text-to-image',
     KREA_2_TURBO_T2I: 'fal-ai/krea-2/turbo',
     KREA_3_T2I: 'krea/v3/text-to-image',
@@ -2146,8 +2153,16 @@ export const generateVideoWithFalHappyHorseImage = async (
 // Seedance 2.5 (ByteDance) - text / image / reference to video, 4-30s, up to 1080p
 // ---------------------------------------------------------------------------
 
-export type FalSeedance25Resolution = '480p' | '720p' | '1080p';
+// '4k' exists only on BytePlus; those requests are routed there.
+export type FalSeedance25Resolution = '480p' | '720p' | '1080p' | '4k';
 export type FalSeedance25AspectRatio = FalSeedanceVideoAspectRatio;
+
+const seedance25OnBytePlus = (resolution?: FalSeedance25Resolution) => {
+    if (resolution === '4k' && !shouldUseBytePlus({ needs4k: true })) {
+        throw new Error('Seedance 2.5 in 4K runs on BytePlus. Add a BytePlus API key in Settings → API keys, or pick 1080p.');
+    }
+    return shouldUseBytePlus({ needs4k: resolution === '4k' });
+};
 
 const normalizeFalSeedance25Duration = (value: number | 'auto' | undefined): 'auto' | string => {
     if (value === 'auto' || value === undefined) return 'auto';
@@ -2205,6 +2220,9 @@ export const generateVideoWithFalSeedance25Text = async (
         highBitrate?: boolean;
     }
 ): Promise<MediaItem> => {
+    if (seedance25OnBytePlus(opts?.resolution)) {
+        return generateVideoWithBytePlusSeedance25(prompt, { duration: opts?.duration, aspectRatio: opts?.aspectRatio, resolution: opts?.resolution, generateAudio: opts?.generateAudio });
+    }
     const duration = normalizeFalSeedance25Duration(opts?.duration);
     const input: Record<string, any> = {
         prompt,
@@ -2229,6 +2247,9 @@ export const generateVideoWithFalSeedance25Image = async (
         highBitrate?: boolean;
     }
 ): Promise<MediaItem> => {
+    if (seedance25OnBytePlus(opts?.resolution)) {
+        return generateVideoWithBytePlusSeedance25(prompt, { image, endImage: opts?.endImage, duration: opts?.duration, resolution: opts?.resolution, generateAudio: opts?.generateAudio });
+    }
     const duration = normalizeFalSeedance25Duration(opts?.duration);
     const input: Record<string, any> = {
         prompt,
@@ -2264,6 +2285,10 @@ export const generateVideoWithFalSeedance25Reference = async (
     const audios = Array.isArray(opts?.audios) ? opts.audios.slice(0, 10) : [];
     if (images.length === 0 && videos.length === 0) {
         throw new Error('Seedance 2.5 reference mode needs at least one image or video reference.');
+    }
+    // BytePlus only takes video/audio references as hosted URLs, so those stay on fal.
+    if (videos.length === 0 && audios.length === 0 && seedance25OnBytePlus(opts?.resolution)) {
+        return generateVideoWithBytePlusSeedance25(prompt, { referenceImages: images, duration: opts?.duration, aspectRatio: opts?.aspectRatio, resolution: opts?.resolution, generateAudio: opts?.generateAudio });
     }
     const duration = normalizeFalSeedance25Duration(opts?.duration);
     const input: Record<string, any> = {
@@ -2368,28 +2393,44 @@ const finalizeFalImages = (
     }));
 };
 
+// Seedream 5.5 shares the 5.0 Pro request shape on fal; `version` picks the endpoint.
+export type SeedreamVersion = '5.0-pro' | '5.5';
+const seedreamEndpoint = (version: SeedreamVersion | undefined, mode: 't2i' | 'edit') =>
+    version === '5.5'
+        ? { model: mode === 'edit' ? MODELS.SEEDREAM_V55_EDIT : MODELS.SEEDREAM_V55_T2I, label: 'Seedream 5.5', tag: 'fal-seedream-v55' }
+        : { model: mode === 'edit' ? MODELS.SEEDREAM_V5_PRO_EDIT : MODELS.SEEDREAM_V5_PRO_T2I, label: 'Seedream 5.0 Pro', tag: 'fal-seedream-v5-pro' };
+
 export const generateImageWithFalSeedreamV5Pro = async (
     prompt: string,
-    opts?: { aspectRatio?: FalStandardImageAspectRatio; resolution?: '1K' | '2K'; numOutputs?: number; outputFormat?: 'png' | 'jpeg' }
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; resolution?: '1K' | '2K'; numOutputs?: number; outputFormat?: 'png' | 'jpeg'; version?: SeedreamVersion }
 ): Promise<MediaItem> => {
+    if (shouldUseBytePlus()) {
+        const [item] = await generateImageWithBytePlusSeedream(prompt, { version: opts?.version === '5.5' ? '5.5' : '5.0-pro', aspectRatio: opts?.aspectRatio, resolution: opts?.resolution });
+        return item;
+    }
+    const endpoint = seedreamEndpoint(opts?.version, 't2i');
     const input: Record<string, any> = {
         prompt,
         image_size: opts?.aspectRatio ? mapStandardImageSizePreset(opts.aspectRatio) : (opts?.resolution === '1K' ? 'auto_1K' : 'auto_2K'),
         num_images: opts?.numOutputs || 1,
         output_format: opts?.outputFormat || 'png',
     };
-    const output = await runFalQueue(MODELS.SEEDREAM_V5_PRO_T2I, input, { pollIntervalMs: 2500, maxChecks: 120 });
-    return finalizeFalImages(output, MODELS.SEEDREAM_V5_PRO_T2I, prompt, 'Seedream 5.0 Pro text-to-image', 'fal-seedream-v5-pro-t2i')[0];
+    const output = await runFalQueue(endpoint.model, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, endpoint.model, prompt, `${endpoint.label} text-to-image`, `${endpoint.tag}-t2i`)[0];
 };
 
 export const editImageWithFalSeedreamV5Pro = async (
     prompt: string,
     images: Array<{ base64: string; mimeType: string }>,
-    opts?: { aspectRatio?: FalStandardImageAspectRatio; numOutputs?: number; outputFormat?: 'png' | 'jpeg' }
+    opts?: { aspectRatio?: FalStandardImageAspectRatio; numOutputs?: number; outputFormat?: 'png' | 'jpeg'; version?: SeedreamVersion }
 ): Promise<MediaItem[]> => {
+    const endpoint = seedreamEndpoint(opts?.version, 'edit');
     const refs = images.slice(0, 10);
     if (refs.length === 0) {
-        throw new Error('Seedream 5.0 Pro Edit needs at least one reference image.');
+        throw new Error(`${endpoint.label} Edit needs at least one reference image.`);
+    }
+    if (shouldUseBytePlus()) {
+        return generateImageWithBytePlusSeedream(prompt, { version: opts?.version === '5.5' ? '5.5' : '5.0-pro', images: refs, aspectRatio: opts?.aspectRatio });
     }
     const input: Record<string, any> = {
         prompt,
@@ -2398,8 +2439,8 @@ export const editImageWithFalSeedreamV5Pro = async (
         num_images: opts?.numOutputs || 1,
         output_format: opts?.outputFormat || 'png',
     };
-    const output = await runFalQueue(MODELS.SEEDREAM_V5_PRO_EDIT, input, { pollIntervalMs: 2500, maxChecks: 120 });
-    return finalizeFalImages(output, MODELS.SEEDREAM_V5_PRO_EDIT, prompt, 'Seedream 5.0 Pro edit', 'fal-seedream-v5-pro-edit');
+    const output = await runFalQueue(endpoint.model, input, { pollIntervalMs: 2500, maxChecks: 120 });
+    return finalizeFalImages(output, endpoint.model, prompt, `${endpoint.label} edit`, `${endpoint.tag}-edit`);
 };
 
 export type FalKrea2Variant = 'large' | 'turbo';
@@ -2736,12 +2777,19 @@ export const generate3dWithFalRodinV25 = async (
     return finalizeFalMesh(output, 'rodin-v2.5', MODELS.RODIN_V25_IMAGE_TO_3D, 'Rodin 2.5 image-to-3D', opts?.name || 'rodin_blockout');
 };
 
-/* ─── GPT Image 2.5 (Flare / Sunburst) ─── */
+/* ─── GPT Image 2.5 / 2.6 (Flare / Sunburst) ─── */
 
 export type FalGptImage25Variant = 'flare' | 'sunburst';
 export type FalGptImage25Quality = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type FalGptImageFlareVersion = '2.5' | '2.6';
+// 2.6 only: how long the model plans the image before rendering.
+export type FalGptImage26ReasoningEffort = 'low' | 'medium' | 'high';
 
-const gptImage25Endpoint = (variant: FalGptImage25Variant, mode: 't2i' | 'edit') => {
+const gptImage25Endpoint = (variant: FalGptImage25Variant, mode: 't2i' | 'edit', version: FalGptImageFlareVersion = '2.5') => {
+    if (version === '2.6') {
+        if (variant === 'sunburst') return mode === 'edit' ? MODELS.GPT_IMAGE_26_SUNBURST_EDIT : MODELS.GPT_IMAGE_26_SUNBURST_T2I;
+        return mode === 'edit' ? MODELS.GPT_IMAGE_26_FLARE_EDIT : MODELS.GPT_IMAGE_26_FLARE_T2I;
+    }
     if (variant === 'sunburst') return mode === 'edit' ? MODELS.GPT_IMAGE_25_SUNBURST_EDIT : MODELS.GPT_IMAGE_25_SUNBURST_T2I;
     return mode === 'edit' ? MODELS.GPT_IMAGE_25_FLARE_EDIT : MODELS.GPT_IMAGE_25_FLARE_T2I;
 };
@@ -2750,6 +2798,8 @@ export const generateImageWithFalGptImage25 = async (
     prompt: string,
     opts?: {
         variant?: FalGptImage25Variant;
+        version?: FalGptImageFlareVersion;
+        reasoningEffort?: FalGptImage26ReasoningEffort;
         aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
         numOutputs?: number;
         quality?: FalGptImage25Quality;
@@ -2758,7 +2808,9 @@ export const generateImageWithFalGptImage25 = async (
     }
 ): Promise<MediaItem> => {
     const variant = opts?.variant || 'flare';
-    const endpoint = gptImage25Endpoint(variant, 't2i');
+    const version = opts?.version || '2.5';
+    const tag = version.replace('.', '');
+    const endpoint = gptImage25Endpoint(variant, 't2i', version);
     const input: Record<string, any> = {
         prompt,
         image_size: mapQwenMaxImageSize(opts?.aspectRatio),
@@ -2767,11 +2819,12 @@ export const generateImageWithFalGptImage25 = async (
     };
     if (opts?.background) input.background = opts.background;
     if (opts?.numOutputs) input.num_images = opts.numOutputs;
+    if (version === '2.6' && opts?.reasoningEffort) input.reasoning_effort = opts.reasoningEffort;
 
     const output = await runFalQueue(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
     if (urls.length === 0) {
-        throw new Error(`FAL GPT Image 2.5 ${variant} text-to-image returned no images.`);
+        throw new Error(`FAL GPT Image ${version} ${variant} text-to-image returned no images.`);
     }
 
     recordUsage({
@@ -2780,12 +2833,12 @@ export const generateImageWithFalGptImage25 = async (
         kind: 'image',
         units: 1,
         unitLabel: 'image',
-        note: `FAL GPT Image 2.5 ${variant} text-to-image`,
+        note: `FAL GPT Image ${version} ${variant} text-to-image`,
     });
 
     return {
-        id: `fal-gpt-image-25-${variant}-t2i-${Date.now()}`,
-        name: `fal_gpt_image_25_${variant}_${prompt.slice(0, 16) || 'image'}.png`,
+        id: `fal-gpt-image-${tag}-${variant}-t2i-${Date.now()}`,
+        name: `fal_gpt_image_${tag}_${variant}_${prompt.slice(0, 16) || 'image'}.png`,
         type: 'image',
         url: urls[0],
         source: 'generated',
@@ -2797,6 +2850,8 @@ export const editImageWithFalGptImage25 = async (
     image: { base64: string; mimeType: string } | Array<{ base64: string; mimeType: string }>,
     opts?: {
         variant?: FalGptImage25Variant;
+        version?: FalGptImageFlareVersion;
+        reasoningEffort?: FalGptImage26ReasoningEffort;
         aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
         numOutputs?: number;
         quality?: FalGptImage25Quality;
@@ -2806,11 +2861,13 @@ export const editImageWithFalGptImage25 = async (
     }
 ): Promise<MediaItem[]> => {
     const variant = opts?.variant || 'flare';
-    const endpoint = gptImage25Endpoint(variant, 'edit');
+    const version = opts?.version || '2.5';
+    const tag = version.replace('.', '');
+    const endpoint = gptImage25Endpoint(variant, 'edit', version);
     const images = Array.isArray(image) ? image : [image];
     const imageUrls = images.filter((item) => !!item?.base64).map((item) => toDataUri(item)).slice(0, 16);
     if (imageUrls.length === 0) {
-        throw new Error('FAL GPT Image 2.5 Edit requires at least one reference image.');
+        throw new Error(`FAL GPT Image ${version} Edit requires at least one reference image.`);
     }
 
     const input: Record<string, any> = {
@@ -2823,11 +2880,12 @@ export const editImageWithFalGptImage25 = async (
     if (opts?.background) input.background = opts.background;
     if (opts?.numOutputs) input.num_images = opts.numOutputs;
     if (opts?.mask) input.mask_url = toDataUri(opts.mask);
+    if (version === '2.6' && opts?.reasoningEffort) input.reasoning_effort = opts.reasoningEffort;
 
     const output = await runFalQueue(endpoint, input);
     const urls = Array.from(new Set(collectFalImageUrls(output)));
     if (urls.length === 0) {
-        throw new Error(`FAL GPT Image 2.5 ${variant} edit returned no images.`);
+        throw new Error(`FAL GPT Image ${version} ${variant} edit returned no images.`);
     }
 
     recordUsage({
@@ -2836,12 +2894,12 @@ export const editImageWithFalGptImage25 = async (
         kind: 'edit',
         units: 1,
         unitLabel: 'request',
-        note: `FAL GPT Image 2.5 ${variant} edit`,
+        note: `FAL GPT Image ${version} ${variant} edit`,
     });
 
     return urls.map((url, index) => ({
-        id: `fal-gpt-image-25-${variant}-edit-${Date.now()}-${index}`,
-        name: `fal_gpt_image_25_${variant}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
+        id: `fal-gpt-image-${tag}-${variant}-edit-${Date.now()}-${index}`,
+        name: `fal_gpt_image_${tag}_${variant}_edit_${prompt.slice(0, 10)}_${index + 1}.png`,
         type: 'image',
         url,
         source: 'generated',

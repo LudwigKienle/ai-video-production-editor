@@ -63,7 +63,7 @@ const SoundBrowser: React.FC<SoundBrowserProps> = (props) => {
   const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('elevenlabs');
   const [voiceText, setVoiceText] = useState('');
   const [voiceId, setVoiceId] = useState('JBFqnCBsd6RMkjVDRZzb');
-  const [voiceModelId, setVoiceModelId] = useState('eleven_multilingual_v2');
+  const [voiceModelId, setVoiceModelId] = useState('eleven_v4');
   const [voiceOutputFormat, setVoiceOutputFormat] = useState('mp3_44100_128');
   const [minimaxVoice, setMinimaxVoice] = useState('');
   const [minimaxSpeed, setMinimaxSpeed] = useState(1);

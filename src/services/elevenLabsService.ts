@@ -5,7 +5,8 @@ import { byokProxyBinaryUrl, byokProxyJson, shouldUseByokProxy } from './byokPro
 
 const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io/v1';
 const DEFAULT_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
-const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
+// Eleven v4: the most expressive model, 90+ languages, up to 10k characters per request.
+const DEFAULT_MODEL_ID = 'eleven_v4';
 const DEFAULT_OUTPUT_FORMAT = 'mp3_44100_128';
 
 const getElevenLabsKeyOptional = () => localStorage.getItem('elevenlabs_api_key');
