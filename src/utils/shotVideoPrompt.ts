@@ -57,7 +57,7 @@ FIGHTS: beats of 1–2 s (position → strike with limb, surface and target → 
 export type ShotPromptIssue = { rule: string; severity: 'high' | 'medium' | 'low'; message: string };
 
 const MOOD_WORDS = /\b(epic|cinematic masterpiece|masterpiece|stunning|breathtaking|beautiful|gorgeous|ultra[- ]?realistic|hyper[- ]?realistic|award[- ]winning|8k|4k uhd|dramatic(?:ally)?)\b/gi;
-const BRANDS = /\b(arri|alexa|red komodo|red v-raptor|sony venice|panavision|cooke|zeiss|kodak|portra|fujifilm|leica|canon eos|blackmagic|imax|spielberg|kubrick|fincher|villeneuve|deakins|wes anderson|nolan)\b/gi;
+const BRANDS = /\b(arri|alexa|red komodo|red v-raptor|sony venice|panavision|cooke|zeiss|kodak|portra|fujifilm|leica|canon eos|blackmagic|imax|spielberg|kubrick|fincher|villeneuve|deakins|nolan)\b/gi;
 const EMOTION_ADVERBS = /\b(sadly|nervously|angrily|happily|anxiously|fearfully|tearfully|joyfully|lovingly|bitterly|desperately)\b/gi;
 const FACE_CHOREO = /\b(brows? (?:lift|rise|raise|furrow)s?|eyebrows? (?:lift|rise|raise)s?|lip trembles|lips tremble|jaw tightens|nostrils flare|eyes widen)\b/gi;
 const CONTEXT_LEAK = /\b(as above|same as before|continues from|previous shot|next shot|scene \d+|shot \d+|INT\.|EXT\.)/g;
