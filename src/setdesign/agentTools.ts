@@ -13,6 +13,9 @@ import { findSceneObject, getActiveCamera, outlinerItems } from './sceneModel.ts
 import { CAMERA_MOVE_PRESETS, DEFAULT_CAMERA_PATH, exportCameraPath, sortKeyframes } from './cameraPath.ts';
 import { buildBlenderScript } from './blenderExport.ts';
 import { toBlenderLocation } from './coords.ts';
+import { querySpatial } from './spatial.ts';
+import { describeSceneForAgents } from './sceneDescription.ts';
+import { BUILDER_GUIDE } from './builderGuide.ts';
 import { BUILTIN_ASSET_PACKS, buildAssetPackManifest, getAssetPackItemsByType, getDownloadableAssetPacks } from '../data/assetPacks.ts';
 
 export type CapturePass = 'beauty' | 'clay' | 'depth';
@@ -41,14 +44,21 @@ export type SetDesignAgentDeps = {
   openWorkspace?: () => void | Promise<void>;
 };
 
+/** JSON schema of one parameter (nested objects and array items included). */
+const paramSchema = (spec: ParamSpec | { type: string }): Record<string, unknown> => {
+  const full = spec as ParamSpec;
+  return {
+    type: full.anyType ? ['string', 'number'] : full.type,
+    ...(full.description ? { description: full.description } : {}),
+    ...(full.enum ? { enum: full.enum } : {}),
+    ...(full.items ? { items: paramSchema(full.items) } : {}),
+    ...(full.properties ? { properties: Object.fromEntries(Object.entries(full.properties).map(([key, child]) => [key, paramSchema(child)])) } : {}),
+  };
+};
+
 const toSchema = (params: Record<string, ParamSpec> | undefined, required?: string[]) => ({
   type: 'object',
-  properties: Object.fromEntries(Object.entries(params || {}).map(([key, spec]) => [key, {
-    type: spec.type,
-    description: spec.description,
-    ...(spec.enum ? { enum: spec.enum } : {}),
-    ...(spec.items ? { items: spec.items } : {}),
-  }])),
+  properties: Object.fromEntries(Object.entries(params || {}).map(([key, spec]) => [key, paramSchema(spec)])),
   ...(required && required.length ? { required } : {}),
 });
 
@@ -85,14 +95,30 @@ export const SET_DESIGN_TOOL_COMMANDS: Record<string, string> = {
   setdesign_seek_camera_path: 'cameraPath.seek',
   setdesign_camera_from_shot: 'camera.from_shot',
   setdesign_apply_material_preset: 'material.preset',
+  setdesign_set_material: 'material.set',
+  setdesign_batch: 'scene.batch',
+  setdesign_group_objects: 'group.create',
+  setdesign_ungroup: 'group.ungroup',
+  setdesign_parent_objects: 'object.parent',
+  setdesign_drop_to_floor: 'object.drop_to_floor',
+  setdesign_align_objects: 'object.align',
+  setdesign_place_on: 'object.place_on',
+  setdesign_build_room: 'build.room',
+  setdesign_build_array: 'build.array',
+  setdesign_build_scatter: 'build.scatter',
+  setdesign_build_stairs: 'build.stairs',
+  setdesign_build_furniture: 'build.furniture',
 };
+
+/** Description of a command-backed tool: a short lead plus the command's own description. */
+const fromCommand = (id: string, lead: string) => `${PREFIX}${lead} ${SET_DESIGN_COMMANDS.find((entry) => entry.id === id)?.description || ''}`.trim();
 
 const PREFIX = 'Set Design (3D set/location blocking, Blender-style; coordinates Z up, metres, degrees): ';
 
 export const SET_DESIGN_TOOL_DECLARATIONS = [
   {
     name: 'setdesign_get_scene',
-    description: `${PREFIX}read the whole set: objects (meshes, models, cameras, lights) with ids, names, location/rotation/scale, camera lens and sensor, light power, the active camera with a plain-language set-up line for prompts, output size, shading, selection and undo history. Call this first.`,
+    description: `${PREFIX}read the whole set: objects (meshes, models, groups, cameras, lights) with ids, names, parent, location/rotation/scale (relative to the parent), primitive dimensions, camera lens and sensor, light power, the active camera with a plain-language set-up line for prompts, output size, shading, selection and undo history. Call this first. Building a set: read setdesign_builder_guide once, plan in metres, build with setdesign_batch, check with setdesign_query (floating, overlaps, what the camera sees), look with setdesign_capture_frame, then correct.`,
     parameters: { type: 'object', properties: {} },
   },
   {
@@ -155,6 +181,43 @@ export const SET_DESIGN_TOOL_DECLARATIONS = [
   { name: 'setdesign_camera_from_shot', description: `${PREFIX}set the view (or the active camera) from a storyboard shot's lens, yaw and pitch.`, parameters: commandSchema('camera.from_shot') },
   { name: 'setdesign_apply_material_preset', description: `${PREFIX}apply a built-in material preset to meshes.`, parameters: commandSchema('material.preset') },
   {
+    name: 'setdesign_builder_guide',
+    description: `${PREFIX}the 3D builder guide: conventions (Z up, metres, degrees, pivots of every primitive, floor at z = 0, front = -Y), the build workflow (plan → setdesign_batch → setdesign_query → setdesign_capture_frame → correct), real-world sizes (doors, tables, chairs, rooms, people …) and which tool does what. Read it once before building a set.`,
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'setdesign_describe_scene',
+    description: `${PREFIX}a compact, structured description of the set for planning and checking: the group/object hierarchy with sizes in metres, world positions and materials, lights, cameras, what the active camera sees, and problems (floating objects, objects stuck in the floor, overlaps), plus a short paragraph in plain language. Cheaper to read than setdesign_get_scene for big sets.`,
+    parameters: toSchema({
+      maxObjects: { type: 'number', description: 'Maximum objects listed in the hierarchy (default 200; groups count once).' },
+    }),
+  },
+  {
+    name: 'setdesign_query',
+    description: `${PREFIX}measure the set. Per object: world bounding box (min/max [x, y, z] in metres, Blender convention), centre, dimensions, origin location, floor contact (zMin; status on_floor, supported (resting on/attached to something lower, with supportedBy), floating (with gap), sunk (sticking into the floor) or ground). Primitives are exact; models use their loaded geometry when known, otherwise a marked 1 × 1 × 1 m estimate (boundsSource "estimate"). Also: pairwise overlaps of axis-aligned boxes (depth per axis, volume in m³), distances (gap between boxes and between centres) for pairs or from one object to all, and for the active camera (or camera) which objects are in frame with their approximate share of the frame in %, left/center/right, top/middle/bottom, cropped and distance. Use it after every build step.`,
+    parameters: toSchema({
+      objects: { type: 'array', description: 'Only these objects (ids or names) in the list and the overlap/camera check (default: all).', items: { type: 'string' } },
+      camera: { type: 'string', description: 'Camera id/name for the frame check (default: the active camera); "none" skips it.' },
+      pairs: { type: 'array', description: 'Distances between pairs: [["Sofa", "Table"], …].', items: { type: 'array', description: 'Two object ids or names.', items: { type: 'string' } } },
+      distanceFrom: { type: 'string', description: 'Distances from this object to every other object, nearest first.' },
+      includeHidden: { type: 'boolean', description: 'Include hidden objects (default false).' },
+      tolerance: { type: 'number', description: 'Contact/overlap tolerance in metres (default 0.01).' },
+    }),
+  },
+  { name: 'setdesign_set_material', description: fromCommand('material.set', 'set a PBR material (colour, roughness, metalness, opacity, emission, texture maps with tiling, credit) on objects or whole groups.'), parameters: commandSchema('material.set') },
+  { name: 'setdesign_batch', description: fromCommand('scene.batch', 'build many things in one atomic, undoable step (preferred for building sets).'), parameters: commandSchema('scene.batch') },
+  { name: 'setdesign_group_objects', description: fromCommand('group.create', 'group objects.'), parameters: commandSchema('group.create') },
+  { name: 'setdesign_ungroup', description: fromCommand('group.ungroup', 'dissolve groups.'), parameters: commandSchema('group.ungroup') },
+  { name: 'setdesign_parent_objects', description: fromCommand('object.parent', 'set or clear parents.'), parameters: commandSchema('object.parent') },
+  { name: 'setdesign_drop_to_floor', description: fromCommand('object.drop_to_floor', 'put objects on the floor or on the surface below them.'), parameters: commandSchema('object.drop_to_floor') },
+  { name: 'setdesign_align_objects', description: fromCommand('object.align', 'align objects to another object or a coordinate.'), parameters: commandSchema('object.align') },
+  { name: 'setdesign_place_on', description: fromCommand('object.place_on', 'stand an object on top of another.'), parameters: commandSchema('object.place_on') },
+  { name: 'setdesign_build_room', description: fromCommand('build.room', 'build a room with real door/window openings.'), parameters: commandSchema('build.room') },
+  { name: 'setdesign_build_array', description: fromCommand('build.array', 'repeat an object in a row/arc.'), parameters: commandSchema('build.array') },
+  { name: 'setdesign_build_scatter', description: fromCommand('build.scatter', 'scatter copies deterministically.'), parameters: commandSchema('build.scatter') },
+  { name: 'setdesign_build_stairs', description: fromCommand('build.stairs', 'build stairs.'), parameters: commandSchema('build.stairs') },
+  { name: 'setdesign_build_furniture', description: fromCommand('build.furniture', 'add blockout furniture at real size.'), parameters: commandSchema('build.furniture') },
+  {
     name: 'setdesign_list_presets',
     description: `${PREFIX}built-in presets and packs: HDRI environments, render presets (classic page), material presets, camera move presets and downloadable asset packs (with licence and source).`,
     parameters: { type: 'object', properties: {} },
@@ -176,7 +239,7 @@ export const SET_DESIGN_TOOL_DECLARATIONS = [
   },
   {
     name: 'setdesign_capture_frame',
-    description: `${PREFIX}render a reference frame through a camera (default: the active one) without overlays and return it as an image. pass: beauty (current shading), clay (neutral grey, good for edit models) or depth (white = near). Optionally add it to the project media, to a storyboard shot (as a new frame version) and/or to a reference such as a location (Concept). The reply includes a sober camera set-up line for prompts.`,
+    description: `${PREFIX}render a reference frame through a camera (default: the active one) without overlays and return it as an image. pass: beauty (current shading; use material or rendered shading to see materials and textures), clay (neutral grey, good for edit models) or depth (white = near). Optionally add it to the project media, to a storyboard shot (as a new frame version) and/or to a reference such as a location (Concept). The reply includes a sober camera set-up line for prompts. In the build workflow (see setdesign_builder_guide) look at a frame after each batch and after setdesign_query, then correct; pass addToMedia: false for such check frames.`,
     parameters: toSchema({
       camera: { type: 'string', description: 'Camera id or name (default: active camera).' },
       pass: { type: 'string', description: 'Render pass.', enum: ['beauty', 'clay', 'depth'] },
@@ -219,8 +282,46 @@ export const sceneOverview = (bus: SetDesignBus) => {
 
 export const createSetDesignAgentExecutor = (deps: SetDesignAgentDeps): Record<string, (args: Record<string, unknown>) => Promise<unknown>> => {
   const { bus } = deps;
+  /** Let the app load models whose geometry is still unknown, so queries use real bounds (best effort, max 15 s). */
+  const measureModels = async () => {
+    if (!bus.hasAction('measureModels')) return;
+    const services = bus.getServices();
+    const missing = bus.getScene().assets.filter((asset) => asset.kind === 'model' && asset.url && !services.modelBounds?.(asset));
+    if (!missing.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([bus.callAction('measureModels', { assets: missing }), new Promise((resolve) => { timer = setTimeout(resolve, 15000); })]);
+    } catch { /* estimates stay marked */ } finally { if (timer) clearTimeout(timer); }
+  };
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     setdesign_get_scene: async () => sceneOverview(bus),
+    setdesign_builder_guide: async () => ({ guide: BUILDER_GUIDE }),
+    setdesign_describe_scene: async (args) => {
+      await measureModels();
+      return describeSceneForAgents(bus.getScene(), bus.getServices(), { maxObjects: typeof args.maxObjects === 'number' ? args.maxObjects : undefined });
+    },
+    setdesign_query: async (args) => {
+      await measureModels();
+      const list = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && !!entry.trim()) : undefined);
+      const camera = asString(args.camera);
+      const pairs = Array.isArray(args.pairs) ? (args.pairs as unknown[]).filter((pair): pair is [string, string] => Array.isArray(pair) && pair.length === 2 && pair.every((entry) => typeof entry === 'string')) : undefined;
+      const result = querySpatial(bus.getScene(), bus.getServices(), {
+        objects: list(args.objects),
+        camera: camera && ['none', 'false', 'off'].includes(camera.toLowerCase()) ? null : camera,
+        pairs,
+        distanceFrom: asString(args.distanceFrom),
+        includeHidden: args.includeHidden === true,
+        tolerance: typeof args.tolerance === 'number' && args.tolerance >= 0 ? args.tolerance : undefined,
+      });
+      return {
+        units: 'metres, Blender convention (Z up, X right, Y into the scene); boxes are world axis-aligned [x, y, z]',
+        ...result,
+        notes: [
+          ...(result.estimated.length ? [`Bounds of ${result.estimated.join(', ')} are estimates (model geometry not measured yet; open the set design workspace or capture a frame to load it).`] : []),
+          'Camera frame shares come from screen-space bounding boxes and ignore occlusion.',
+        ],
+      };
+    },
     setdesign_list_commands: async () => ({ commands: [...listCommands(), { id: 'edit.undo', label: 'Rückgängig', shortcut: 'Strg+Z' }, { id: 'edit.redo', label: 'Wiederholen', shortcut: 'Strg+Shift+Z' }] }),
     setdesign_run_command: async (args) => {
       const id = asString(args.command);

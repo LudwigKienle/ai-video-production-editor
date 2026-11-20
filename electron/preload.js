@@ -30,6 +30,11 @@ contextBridge.exposeInMainWorld('electron', {
     bakeVideoFrame: (payload) => ipcRenderer.invoke('fx:bakeVideoFrame', payload),
     bakeVideoEnd: (payload) => ipcRenderer.invoke('fx:bakeVideoEnd', payload),
   },
+  library3d: {
+    fetchJson: (payload) => ipcRenderer.invoke('library3d:fetchJson', payload),
+    fetchBytes: (payload) => ipcRenderer.invoke('library3d:fetchBytes', payload),
+    cacheDir: () => ipcRenderer.invoke('library3d:cacheDir'),
+  },
   mediaBrowse: {
     listDir: (dirPath) => ipcRenderer.invoke('media:listDir', dirPath),
     places: () => ipcRenderer.invoke('media:places'),

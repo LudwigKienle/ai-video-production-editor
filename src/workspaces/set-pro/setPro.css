@@ -126,6 +126,9 @@
 .sdx-row__toggle { width: 20px; height: 18px; border: none; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--sdx-dim); border-radius: 3px; }
 .sdx-row__toggle:hover { color: var(--sdx-text); background: rgb(255 255 255 / 0.08); }
 .sdx-row__toggle.is-on { color: var(--sdx-active); }
+.sdx-row__twisty { width: 14px; height: 18px; flex: none; border: none; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0; color: var(--sdx-dim); cursor: pointer; }
+.sdx-row__count { margin-left: 6px; font-size: 10px; color: var(--sdx-faint); }
+.sdx-row.is-drop, .sdx-outliner__collection.is-drop { outline: 1px dashed var(--sdx-active); outline-offset: -1px; }
 
 /* Properties editor */
 .sdx-props { flex: 1; min-height: 0; display: flex; background: var(--sdx-panel); }

@@ -33,6 +33,10 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
   const realFetch = g.fetch;
   g.fetch = (async (input: string) => {
     fetched.push(String(input));
+    if (String(input).endsWith('.glb')) return new Response(new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 12, 0, 0, 0]), { status: 200, headers: { 'Content-Type': 'model/gltf-binary' } });
+    if (/\/models\/abc123$/.test(String(input))) {
+      return new Response(JSON.stringify({ uid: 'abc123', name: 'Stool', isDownloadable: true, user: { displayName: 'Jane', username: 'jane' }, license: { label: 'CC-BY', slug: 'by' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     const body = String(input).includes('/download')
       ? { glb: { url: 'https://example.com/stool.glb' } }
       : { results: [{ uid: 'abc123', name: 'Stool', user: { displayName: 'Jane', username: 'jane' }, license: { label: 'CC-BY' }, faceCount: 900, likeCount: 4, thumbnails: { images: [{ url: 'https://example.com/t.jpg', width: 256, height: 144 }] } }] };
@@ -43,6 +47,10 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
   const { BUILTIN_ASSET_PACKS, getAssetPackItemsByType } = await import('../../data/assetPacks.ts');
   const materialId = getAssetPackItemsByType(BUILTIN_ASSET_PACKS, 'material').filter((item) => item.metadata)[0].id;
   const { ctx, state } = createTestContext();
+  // Sketchfab import goes through the 3D library importer: files are written into a fake project folder.
+  const written: string[] = [];
+  const { overrideLibraryToolDeps } = await import('./setdesignLibraryTools.ts');
+  overrideLibraryToolDeps({ projectPath: '/tmp/fake-project', writeFile: async (_folder, rel) => { written.push(rel); return true; }, statFile: async () => null });
   const mcp = await createMcpHarness(ctx);
   try {
     const listed = mcp.list().filter((tool) => tool.name.startsWith('setdesign_'));
@@ -88,6 +96,27 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
       ['setdesign_remove_camera_keyframes', { ids: ['__FIRST_KEYFRAME__'] }],
       ['setdesign_camera_from_shot', { shotNumber: 1 }],
       ['setdesign_apply_material_preset', { preset: '__FIRST_MATERIAL__', objects: ['Rückwand'] }],
+      // Agentic 3D builder.
+      ['setdesign_builder_guide', {}],
+      ['setdesign_build_room', { name: 'Bar', width: 5, depth: 4, openings: [{ wall: 'south', type: 'door' }, { wall: 'north', type: 'window', offset: 1 }] }],
+      ['setdesign_build_furniture', { type: 'table', name: 'Bartisch', parent: 'Bar' }],
+      ['setdesign_build_furniture', { type: 'chair', name: 'Hocker', location: [1.2, -1, 0] }],
+      ['setdesign_build_array', { object: 'Hocker', count: 3, offset: [0.6, 0, 0] }],
+      ['setdesign_build_scatter', { primitive: 'box', dimensions: [0.1, 0.1, 0.2], area: { onObject: 'Bartisch' }, count: 4, seed: 2, minDistance: 0.2 }],
+      ['setdesign_build_stairs', { steps: 4, location: [-4, 0, 0] }],
+      ['setdesign_set_material', { objects: ['Bar'], color: '#d0c8b8', maps: { baseColor: 'https://example.com/plaster.jpg' }, repeat: [2, 2], name: 'Plaster' }],
+      ['setdesign_group_objects', { objects: ['Bartisch'], name: 'Tischgruppe' }],
+      ['setdesign_ungroup', { objects: ['Tischgruppe'] }],
+      ['setdesign_parent_objects', { objects: ['Hocker Array'], parent: 'Bar' }],
+      ['setdesign_batch', { label: 'Kiste', commands: [
+        { command: 'object.add_primitive', args: { primitive: 'box', name: 'Kiste', dimensions: [0.4, 0.4, 0.4], location: [0, 0, 2] }, as: 'kiste' },
+        { command: 'material.set', args: { objects: ['$kiste'], color: '#8a6f55' } },
+      ] }],
+      ['setdesign_drop_to_floor', { objects: ['Kiste'] }],
+      ['setdesign_place_on', { object: 'Kiste', target: 'Bartisch' }],
+      ['setdesign_align_objects', { objects: ['Kiste'], to: 'Bartisch', axis: 'x', side: 'min' }],
+      ['setdesign_query', { objects: ['Kiste', 'Bartisch'] }],
+      ['setdesign_describe_scene', {}],
       ['setdesign_list_presets', {}],
       ['setdesign_get_pack_manifest', {}],
       ['setdesign_export_blender_script', {}],
@@ -118,7 +147,8 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
       called.add(name);
     }
     assert.deepEqual(liveCalls.sort(), ['setdesign.classic.aiDirector', 'setdesign.classic.playback', 'setdesign.classic.record', 'setdesign.classic.renderPreset', 'setdesign.classic.renderSettings', 'setdesign.libraryModels']);
-    assert.equal(fetched.filter((url) => url.includes('sketchfab')).length, 2);
+    assert.ok(fetched.filter((url) => url.includes('sketchfab')).length >= 3, 'search, model details and download link');
+    assert.ok(written.some((rel) => rel.endsWith('abc123.glb')), 'GLB stored in the project, not the expiring link');
     assert.ok(stored!.assets.some((asset) => asset.attribution?.author === 'Jane'), 'Sketchfab credit kept');
     const paid = listed.filter((tool) => tool.description.startsWith('[KOSTET CREDITS]')).map((tool) => tool.name).sort();
     assert.deepEqual(paid, ['setdesign_ai_director', 'setdesign_generate_blockout', 'setdesign_generate_world']);
@@ -127,6 +157,25 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
     assert.equal(state.mediaItems.length, 1);
     assert.deepEqual(shots, [2]);
     assert.equal(stored!.shading, 'rendered');
+    // Builder results through MCP.
+    const query = await mcp.call('setdesign_query', { objects: ['Kiste'], camera: 'none' });
+    const kiste = (query.objects as Array<{ name: string; zMin: number; floor: { status: string; supportedBy?: string } }>)[0];
+    assert.equal(kiste.zMin, 0.75);
+    assert.equal(kiste.floor.status, 'supported');
+    assert.equal(kiste.floor.supportedBy, 'Bartisch/Top');
+    const described = await mcp.call('setdesign_describe_scene');
+    assert.match(String(described.summary), /The set has \d+ objects/);
+    assert.ok((described.hierarchy as Array<{ name: string }>).some((node) => node.name === 'Bar'));
+    const guide = await mcp.call('setdesign_builder_guide');
+    assert.match(String(guide.guide), /Z is up/);
+    for (const name of ['setdesign_query', 'setdesign_describe_scene', 'setdesign_builder_guide']) assert.doesNotMatch(listed.find((tool) => tool.name === name)!.description, /changes the project/, name);
+    const batchSchema = listed.find((tool) => tool.name === 'setdesign_batch')!.inputSchema as { properties: { commands: { items: { properties: Record<string, unknown> } } } };
+    assert.deepEqual(Object.keys(batchSchema.properties.commands.items.properties).sort(), ['args', 'as', 'command']);
+    const failed = await mcp.call('setdesign_batch', { commands: [{ command: 'object.add_primitive', args: { primitive: 'box', name: 'Nie' } }, { command: 'object.delete', args: { objects: ['Gibtsnicht'] } }] });
+    assert.equal(failed.ok, false);
+    assert.match(String(failed.message), /Step 2 \(object\.delete\) failed/);
+    assert.equal(stored!.assets.some((asset) => asset.name === 'Nie'), false);
+    assert.ok(stored!.assets.find((asset) => asset.name === 'Bar/Floor')!.material!.maps!.baseColor);
     const scene = await mcp.call('setdesign_get_scene');
     assert.equal((scene.activeCamera as { name: string }).name, 'Totale');
     const bad = await mcp.call('setdesign_add_primitive', { primitive: 'teapot' });
@@ -138,5 +187,6 @@ test('setdesign tools are published over the MCP bridge and every one answers', 
     detachHost();
     disposeLive();
     g.fetch = realFetch;
+    overrideLibraryToolDeps(null);
   }
 });

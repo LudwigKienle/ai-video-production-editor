@@ -25,7 +25,7 @@ export type KeyIntent =
   | { type: 'orbit'; yaw: number; pitch: number }
   | { type: 'zoom'; factor: number }
   | { type: 'menu'; menu: 'add' | 'delete' | 'shading' | 'context' }
-  | { type: 'ui'; action: 'rename' | 'toggleSidebar' | 'toggleToolbar' | 'maximize' | 'walk' | 'cameraFromSelection' | 'capture' };
+  | { type: 'ui'; action: 'rename' | 'toggleSidebar' | 'toggleToolbar' | 'maximize' | 'walk' | 'cameraFromSelection' | 'capture' | 'parentToActive' };
 
 const NUMPAD_FROM_DIGIT: Record<string, string> = {
   Digit0: 'Numpad0', Digit1: 'Numpad1', Digit2: 'Numpad2', Digit3: 'Numpad3', Digit4: 'Numpad4',
@@ -68,6 +68,9 @@ export const resolveKey = (event: KeyInput, context: KeyContext): KeyIntent | nu
   }
   if (key === 'Home') return { type: 'command', command: 'view.frame', args: { what: 'all' } };
 
+  // Groups and parents (Blender: Ctrl+G collection, Ctrl+P parent, Alt+P clear parent).
+  if (mod && (key === 'g' || event.code === 'KeyG')) return context.hasSelection ? { type: 'command', command: alt ? 'group.ungroup' : 'group.create' } : null;
+  if (mod && (key === 'p' || event.code === 'KeyP') && !alt) return context.hasSelection ? { type: 'ui', action: 'parentToActive' } : null;
   if (mod && key === ' ') return { type: 'ui', action: 'maximize' };
   if (mod && key === 'F12') return { type: 'ui', action: 'capture' };
   if (key === 'F12') return { type: 'ui', action: 'capture' };
@@ -83,6 +86,7 @@ export const resolveKey = (event: KeyInput, context: KeyContext): KeyIntent | nu
     if (key === 'r' || event.code === 'KeyR') return context.hasSelection ? { type: 'clear', what: 'rotation' } : null;
     if (key === 's' || event.code === 'KeyS') return context.hasSelection ? { type: 'clear', what: 'scale' } : null;
     if (key === 'h' || event.code === 'KeyH') return { type: 'command', command: 'object.hide', args: { unhideAll: true } };
+    if (key === 'p' || event.code === 'KeyP') return context.hasSelection ? { type: 'command', command: 'object.parent', args: { parent: null } } : null;
     if (key === 'a' || event.code === 'KeyA') return { type: 'command', command: 'select.all', args: { deselect: true } };
     return null;
   }

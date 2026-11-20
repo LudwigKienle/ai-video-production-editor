@@ -27,11 +27,19 @@ import {
   findSceneObject,
   getActiveCamera,
   getObjectTransform,
+  primitiveDimensions,
   removeSceneObjects,
   replaceSceneObject,
+  scaleForDimensions,
   uniqueName,
   type SceneObjectRef,
 } from './sceneModel.ts';
+import { OBJECT_PARAM, asBool, asNumber, asString, asVec, ids, requireObject, targetIds, vecParam } from './commandArgs.ts';
+import { assetMap, descendantIds, localFromWorld, localMatrix as localMatrixOf, parentOf, topLevelOf, transformFromMatrix, translateWorld, worldMatrix } from './hierarchy.ts';
+import { worldBoxes, worldCenter } from './spatial.ts';
+import { BUILDER_COMMANDS, cloneSubtree } from './builderCommands.ts';
+
+export { asVec };
 
 export type ViewPreset = 'user' | 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom';
 export type TransformTool = 'select' | 'move' | 'rotate' | 'scale' | 'transform';
@@ -82,6 +90,12 @@ export type Bounds = { min: SetDesignTransform; max: SetDesignTransform };
 export type CommandServices = {
   /** Real world-space bounds of objects (three.js space); null when unknown. */
   bounds?: (ids: string[] | null) => Bounds | null;
+  /**
+   * Bounds of a model's loaded geometry in the model's own frame (three.js space, before the
+   * asset's position/rotation/scale); null while unknown. Provided by the app (sceneBuilder fills
+   * a cache whenever a viewport, a frame capture or measureModels loads a model).
+   */
+  modelBounds?: (asset: SetDesignAsset) => Bounds | null;
   /** Viewport aspect ratio (width / height). */
   viewportAspect?: () => number;
   /** Storyboard shots of the open project (for camera.from_shot). */
@@ -101,6 +115,8 @@ export type CommandOutcome = {
   result?: unknown;
   /** Defaults to true when the scene changed. View changes are not undo steps. */
   undoable?: boolean;
+  /** Undo label instead of the command label (scene.batch). */
+  label?: string;
 };
 
 export type ParamSpec = {
@@ -109,6 +125,8 @@ export type ParamSpec = {
   enum?: string[];
   items?: ParamSpec | { type: string };
   properties?: Record<string, ParamSpec>;
+  /** Accept several JSON types (e.g. a name or a number). */
+  anyType?: boolean;
 };
 
 export type SetDesignCommand = {
@@ -127,51 +145,6 @@ export type SetDesignCommand = {
 // ---------------------------------------------------------------------------
 // Argument helpers
 
-const asString = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
-const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : typeof value === 'string' && value.trim() && Number.isFinite(Number(value)) ? Number(value) : undefined);
-const asBool = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
-
-/** Accepts {x,y,z}, [x,y,z] or a single number (uniform). Missing axes come from `fallback`. */
-export const asVec = (value: unknown, fallback?: SetDesignTransform): SetDesignTransform | undefined => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'number' && Number.isFinite(value)) return { x: value, y: value, z: value };
-  if (Array.isArray(value)) {
-    const [x, y, z] = value.map((entry) => asNumber(entry));
-    if (x === undefined && y === undefined && z === undefined) return undefined;
-    return { x: x ?? fallback?.x ?? 0, y: y ?? fallback?.y ?? 0, z: z ?? fallback?.z ?? 0 };
-  }
-  if (typeof value === 'object') {
-    const v = value as Record<string, unknown>;
-    const x = asNumber(v.x); const y = asNumber(v.y); const z = asNumber(v.z);
-    if (x === undefined && y === undefined && z === undefined) return undefined;
-    return { x: x ?? fallback?.x ?? 0, y: y ?? fallback?.y ?? 0, z: z ?? fallback?.z ?? 0 };
-  }
-  return undefined;
-};
-
-const ids = (value: unknown): string[] => {
-  if (typeof value === 'string' && value.trim()) return [value.trim()];
-  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string' && !!entry.trim()).map((entry) => entry.trim());
-  return [];
-};
-
-const requireObject = (ctx: CommandContext, key: unknown): SceneObjectRef => {
-  const name = asString(key);
-  const ref = name ? findSceneObject(ctx.scene, name) : (ctx.ui.activeId ? findSceneObject(ctx.scene, ctx.ui.activeId) : null);
-  if (!ref) throw new Error(name ? `No object "${name}" in the set. Call setdesign_get_scene for ids and names.` : 'No object given and nothing is selected.');
-  return ref;
-};
-
-const targetIds = (ctx: CommandContext, value: unknown) => {
-  const given = ids(value);
-  const list = given.length ? given : ctx.ui.selectedIds;
-  return list.map((key) => {
-    const ref = findSceneObject(ctx.scene, key);
-    if (!ref) throw new Error(`No object "${key}" in the set.`);
-    return ref.object.id;
-  });
-};
-
 const rotationKind = (ref: SceneObjectRef): RotationKind => (ref.kind === 'asset' ? 'mesh' : ref.kind);
 
 /** Blender-convention description of one object for agents. */
@@ -185,10 +158,16 @@ export const describeObject = (scene: SetDesignState, ref: SceneObjectRef) => {
   };
   if (ref.kind === 'asset') {
     const a = ref.object;
+    const map = assetMap(scene);
+    const parent = parentOf(scene, a, map);
+    const children = scene.assets.filter((child) => child.parentId === a.id).length;
     return {
       ...base,
-      type: a.kind === 'model' ? 'model' : a.primitive || 'box',
+      type: a.kind === 'model' ? 'model' : a.kind === 'group' ? 'group' : a.primitive || 'box',
+      ...(parent ? { parent: parent.name, parentId: parent.id } : {}),
+      ...(children ? { children } : {}),
       scale: { x: a.scale.x, y: a.scale.z, z: a.scale.y },
+      ...(a.kind === 'primitive' ? { dimensions: primitiveDimensions(a) } : {}),
       ...(a.url ? { url: a.url.startsWith('data:') ? '(embedded)' : a.url } : {}),
       ...(a.material ? { material: a.material } : {}),
       hidden: !!a.hidden,
@@ -251,7 +230,7 @@ const applyObjectPatch = (ref: SceneObjectRef, args: Record<string, unknown>) =>
     const roughness = asNumber(args.roughness); if (roughness !== undefined) material.roughness = Math.min(1, Math.max(0, roughness));
     const metalness = asNumber(args.metalness); if (metalness !== undefined) material.metalness = Math.min(1, Math.max(0, metalness));
     const opacity = asNumber(args.opacity); if (opacity !== undefined) { material.opacity = Math.min(1, Math.max(0, opacity)); material.transparent = material.opacity < 1; }
-    if (Object.keys(material).length) a.material = material;
+    if (Object.keys(material).length && a.kind !== 'group') a.material = material;
     return a;
   }
   if (ref.kind === 'camera') {
@@ -302,8 +281,6 @@ const applyObjectPatch = (ref: SceneObjectRef, args: Record<string, unknown>) =>
   return l;
 };
 
-const vecParam = (description: string): ParamSpec => ({ type: 'array', description: `${description} [x, y, z]`, items: { type: 'number' } });
-const OBJECT_PARAM: ParamSpec = { type: 'string', description: 'Object id or name (default: the active/selected object).' };
 
 const VIEW_DIRECTIONS: Record<Exclude<ViewPreset, 'user'>, SetDesignTransform> = {
   // Direction from target to eye, three.js space (Blender front view looks along +Y_b = -Z_three).
@@ -315,15 +292,15 @@ const VIEW_DIRECTIONS: Record<Exclude<ViewPreset, 'user'>, SetDesignTransform> =
   bottom: { x: 0, y: -1, z: 0.0001 },
 };
 
-const approxBounds = (scene: SetDesignState, onlyIds: string[] | null): Bounds | null => {
+const approxBounds = (scene: SetDesignState, onlyIds: string[] | null, services: CommandServices = {}): Bounds | null => {
   const points: SetDesignTransform[] = [];
   const consider = (id: string) => !onlyIds || onlyIds.includes(id);
+  const boxes = worldBoxes(scene, services);
   for (const asset of scene.assets) {
     if (!consider(asset.id) || asset.hidden) continue;
-    const def = PRIMITIVES.find((entry) => entry.id === asset.primitive);
-    const half = { x: ((def?.size.x ?? 1) * asset.scale.x) / 2, y: ((def?.size.y || 1) * asset.scale.y) / 2, z: ((def?.size.z ?? 1) * asset.scale.z) / 2 };
-    points.push({ x: asset.position.x - half.x, y: asset.position.y - half.y, z: asset.position.z - half.z });
-    points.push({ x: asset.position.x + half.x, y: asset.position.y + half.y, z: asset.position.z + half.z });
+    const entry = boxes.get(asset.id);
+    if (!entry) continue;
+    points.push(entry.box.min, entry.box.max);
   }
   for (const camera of scene.cameras || []) if (consider(camera.id)) points.push(camera.position);
   for (const light of scene.lights) if (consider(light.id) && light.position) points.push(light.position);
@@ -355,28 +332,36 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
     label: 'Grundkörper hinzufügen',
     menu: ['Hinzufügen', 'Mesh'],
     shortcut: 'Shift+A',
-    description: 'Add a primitive: box, plane, sphere, cylinder, cone, torus, wall (4 × 2.6 m) or person (1.75 m stand-in). It stands on the floor unless a location is given.',
+    description: `Add a primitive. Base sizes (pivot = centre of its box): ${PRIMITIVES.map((p) => `${p.id} ${p.hint}`).join('; ')}. Give real sizes with dimensions [x, y, z] in metres (x width, y depth, z height; overrides scale). Without location it stands on the floor at the origin (location is the centre, so a 1 m box at z 0.5 touches the floor). With parent, location/rotation are relative to the parent.`,
     params: {
       primitive: { type: 'string', description: 'Primitive type.', enum: PRIMITIVES.map((entry) => entry.id) },
       name: { type: 'string', description: 'Object name (default: German type name, made unique).' },
-      location: vecParam('Location in metres, Blender convention (Z up).'),
+      location: vecParam('Centre of the object in metres, Blender convention (Z up). Default: standing on the floor at the origin (or the parent origin).'),
       rotation: vecParam('Rotation in degrees, Blender Euler XYZ.'),
-      scale: vecParam('Scale factors.'),
+      scale: vecParam('Scale factors (prefer dimensions).'),
+      dimensions: vecParam('Real size in metres [x width, y depth, z height]; converted to scale. Plane: z is ignored.'),
       color: { type: 'string', description: 'Material colour, e.g. #a0a0a0.' },
+      parent: { type: 'string', description: 'Parent object/group id or name (location is then relative to it).' },
     },
     required: ['primitive'],
     run: (ctx, args) => {
       const primitive = asString(args.primitive) as SetDesignPrimitive | undefined;
       const def = PRIMITIVES.find((entry) => entry.id === primitive);
       if (!def) throw new Error(`primitive must be one of ${PRIMITIVES.map((entry) => entry.id).join(', ')}.`);
-      const scale = fromBlenderScale(asVec(args.scale, { x: 1, y: 1, z: 1 }) || { x: 1, y: 1, z: 1 });
+      const dimensions = asVec(args.dimensions);
+      if (dimensions && [dimensions.x, dimensions.y, def.id === 'plane' ? 1 : dimensions.z].some((value) => !(value > 0))) throw new Error('dimensions must be three positive sizes in metres [x, y, z].');
+      const scale = dimensions ? scaleForDimensions(def.id, dimensions) : fromBlenderScale(asVec(args.scale, { x: 1, y: 1, z: 1 }) || { x: 1, y: 1, z: 1 });
       const location = asVec(args.location);
+      const parentKey = asString(args.parent);
+      const parent = parentKey ? requireObject(ctx, parentKey) : null;
+      if (parent && parent.kind !== 'asset') throw new Error(`${parent.object.name} is a ${parent.kind}; only meshes, models and groups can be parents.`);
       const position = location ? fromBlenderLocation(location) : { x: 0, y: placeOnFloor(def.id, scale), z: 0 };
       const asset: SetDesignAsset = {
         id: ctx.makeId('obj'),
         name: uniqueName(ctx.scene, asString(args.name) || def.label),
         kind: 'primitive',
         primitive: def.id,
+        ...(parent ? { parentId: parent.object.id } : {}),
         position,
         rotation: fromBlenderRotation(asVec(args.rotation) || { x: 0, y: 0, z: 0 }, 'mesh'),
         scale,
@@ -400,6 +385,7 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       name: { type: 'string', description: 'Object name.' },
       format: { type: 'string', description: 'glb, gltf, obj or fbx (default: from the file extension).', enum: ['glb', 'gltf', 'obj', 'fbx'] },
       mediaId: { type: 'string', description: 'Project media item that holds the file (keeps imported files with the project).' },
+      parent: { type: 'string', description: 'Parent object/group id or name (location is then relative to it).' },
       attribution: { type: 'object', description: 'Credit for downloaded models: { author, license, url }.' },
       location: vecParam('Location in metres, Blender convention (Z up).'),
       rotation: vecParam('Rotation in degrees, Blender Euler XYZ.'),
@@ -411,10 +397,14 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       const extension = (asString(args.format) || url.split('?')[0].split('#')[0].split('.').pop() || '').toLowerCase();
       if (!['glb', 'gltf', 'obj', 'fbx'].includes(extension)) throw new Error('Supported formats: glb, gltf, obj, fbx. Pass format when the URL has no extension.');
       const fileName = decodeURIComponent(url.split('?')[0].split('/').pop() || 'Modell').replace(/\.[a-z0-9]+$/i, '');
+      const parentKey = asString(args.parent);
+      const parent = parentKey ? requireObject(ctx, parentKey) : null;
+      if (parent && parent.kind !== 'asset') throw new Error(`${parent.object.name} is a ${parent.kind}; only meshes, models and groups can be parents.`);
       const asset: SetDesignAsset = {
         id: ctx.makeId('obj'),
         name: uniqueName(ctx.scene, asString(args.name) || fileName || 'Modell'),
         kind: 'model',
+        ...(parent ? { parentId: parent.object.id } : {}),
         format: extension as SetDesignAsset['format'],
         url,
         ...(asString(args.mediaId) ? { mediaId: asString(args.mediaId) } : {}),
@@ -527,33 +517,52 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
     label: 'Transformieren',
     menu: ['Objekt', 'Transformieren'],
     shortcut: 'G / R / S',
-    description: 'Set location, rotation and/or scale of an object (Blender convention: Z up, metres, degrees). With relative=true the values are added (location, rotation) or multiplied (scale).',
+    description: 'Set location, rotation and/or scale of an object (Blender convention: Z up, metres, degrees). Values of objects inside a group/parent are relative to the parent unless space="world". With relative=true the values are added (location, rotation) or multiplied (scale). Primitives also take dimensions [x, y, z] in metres (real size, sets the scale).',
     params: {
       object: OBJECT_PARAM,
-      location: vecParam('Location in metres.'),
+      location: vecParam('Location in metres (centre of a primitive, origin of a model/group).'),
       rotation: vecParam('Rotation in degrees, Euler XYZ.'),
-      scale: vecParam('Scale factors (meshes and models only).'),
+      scale: vecParam('Scale factors (meshes, models, groups).'),
+      dimensions: vecParam('Primitives only: real size in metres [x width, y depth, z height] (converted to scale).'),
       relative: { type: 'boolean', description: 'Add/multiply instead of set.' },
+      space: { type: 'string', description: 'local (default: relative to the parent; same as world for top-level objects) or world.', enum: ['local', 'world'] },
     },
     run: (ctx, args) => {
       const ref = requireObject(ctx, args.object);
       if ('locked' in ref.object && ref.object.locked) throw new Error(`${ref.object.name} is locked.`);
       const kind = rotationKind(ref);
-      const t = getObjectTransform(ref);
+      const space = asString(args.space) || 'local';
+      if (space !== 'local' && space !== 'world') throw new Error('space must be local or world.');
+      const parentId = ref.kind === 'asset' ? parentOf(ctx.scene, ref.object)?.id || null : null;
+      const useWorld = space === 'world' && !!parentId;
+      const t = useWorld ? transformFromMatrix(worldMatrix(ctx.scene, ref.object.id)) : getObjectTransform(ref);
       const relative = asBool(args.relative) ?? false;
       const currentLoc = toBlenderLocation(t.position);
       const currentRot = toBlenderRotation(t.rotation, kind);
       const currentScale = { x: t.scale.x, y: t.scale.z, z: t.scale.y };
       const loc = asVec(args.location, relative ? { x: 0, y: 0, z: 0 } : currentLoc);
       const rot = asVec(args.rotation, relative ? { x: 0, y: 0, z: 0 } : currentRot);
-      const scl = asVec(args.scale, relative ? { x: 1, y: 1, z: 1 } : currentScale);
-      if (!loc && !rot && !scl) throw new Error('Pass location, rotation or scale.');
+      let scl = asVec(args.scale, relative ? { x: 1, y: 1, z: 1 } : currentScale);
+      const dimensions = asVec(args.dimensions);
+      if (dimensions) {
+        if (ref.kind !== 'asset' || ref.object.kind !== 'primitive') throw new Error('dimensions work on primitives only; scale models and groups with scale.');
+        const s3 = scaleForDimensions(ref.object.primitive, dimensions);
+        scl = { x: s3.x, y: s3.z, z: s3.y };
+      }
+      if (!loc && !rot && !scl) throw new Error('Pass location, rotation, scale or dimensions.');
       const next: Record<string, unknown> = { ...ref.object };
-      if (loc) next.position = fromBlenderLocation(relative ? { x: currentLoc.x + loc.x, y: currentLoc.y + loc.y, z: currentLoc.z + loc.z } : loc);
-      if (rot) next.rotation = fromBlenderRotation(relative ? { x: currentRot.x + rot.x, y: currentRot.y + rot.y, z: currentRot.z + rot.z } : rot, kind);
+      const position = loc ? fromBlenderLocation(relative ? { x: currentLoc.x + loc.x, y: currentLoc.y + loc.y, z: currentLoc.z + loc.z } : loc) : t.position;
+      const rotation = rot ? fromBlenderRotation(relative ? { x: currentRot.x + rot.x, y: currentRot.y + rot.y, z: currentRot.z + rot.z } : rot, kind) : t.rotation;
+      let scale = t.scale;
       if (scl) {
         if (ref.kind !== 'asset') throw new Error('Only meshes and models have a scale. Change lensMm (cameras) or size/power (lights) instead.');
-        next.scale = fromBlenderScale(relative ? { x: currentScale.x * scl.x, y: currentScale.y * scl.y, z: currentScale.z * scl.z } : scl);
+        scale = fromBlenderScale(relative && !dimensions ? { x: currentScale.x * scl.x, y: currentScale.y * scl.y, z: currentScale.z * scl.z } : scl);
+      }
+      if (useWorld) Object.assign(next, localFromWorld(ctx.scene, parentId, localMatrixOf({ position, rotation, scale })));
+      else {
+        if (loc) next.position = position;
+        if (rot) next.rotation = rotation;
+        if (scl) next.scale = scale;
       }
       const scene = replaceSceneObject(ctx.scene, ref, next as never);
       return { scene, result: describeObject(scene, findSceneObject(scene, ref.object.id)!) };
@@ -598,7 +607,13 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       const patch = { ...args };
       if (patch.name) patch.name = uniqueName({ ...ctx.scene, assets: ctx.scene.assets.filter((a) => a.id !== ref.object.id), cameras: (ctx.scene.cameras || []).filter((c) => c.id !== ref.object.id), lights: ctx.scene.lights.filter((l) => l.id !== ref.object.id) }, String(patch.name));
       const next = applyObjectPatch(ref, patch);
-      const scene = replaceSceneObject(ctx.scene, ref, next);
+      let scene = replaceSceneObject(ctx.scene, ref, next);
+      // A group passes material values on to everything inside it.
+      if (ref.kind === 'asset' && ref.object.kind === 'group' && ['color', 'roughness', 'metalness', 'opacity'].some((key) => args[key] !== undefined)) {
+        const materialArgs = { color: args.color, roughness: args.roughness, metalness: args.metalness, opacity: args.opacity };
+        const inside = new Set(descendantIds(scene, ref.object.id));
+        scene = { ...scene, assets: scene.assets.map((asset) => (inside.has(asset.id) && asset.kind !== 'group' ? applyObjectPatch({ kind: 'asset', index: -1, object: asset }, materialArgs) as SetDesignAsset : asset)) };
+      }
       const hiddenNow = 'hidden' in next && next.hidden;
       return {
         scene,
@@ -612,7 +627,7 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
     label: 'Duplizieren',
     menu: ['Objekt'],
     shortcut: 'Shift+D',
-    description: 'Duplicate objects (default: the selection). The copies are offset by `offset` (Blender convention, default [0.5, 0.5, 0]) and become the selection.',
+    description: 'Duplicate objects (default: the selection), groups and parents with everything inside them. The copies are offset by `offset` (world metres, Blender convention, default [0.5, 0.5, 0]), keep their parent and become the selection.',
     params: {
       objects: { type: 'array', description: 'Object ids or names.', items: { type: 'string' } },
       offset: vecParam('Offset in metres.'),
@@ -623,17 +638,23 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       const offset = fromBlenderLocation(asVec(args.offset) || { x: 0.5, y: 0.5, z: 0 });
       let scene = ctx.scene;
       const created: Array<{ id: string; name: string }> = [];
-      for (const id of list) {
+      for (const id of topLevelOf(ctx.scene, list)) {
         const ref = findSceneObject(scene, id)!;
-        const copyId = ctx.makeId(ref.kind === 'asset' ? 'obj' : ref.kind === 'camera' ? 'cam' : 'light');
+        if (ref.kind === 'asset') {
+          const copies = cloneSubtree(scene, id, ctx.makeId);
+          copies[0] = translateWorld({ ...scene, assets: [...scene.assets, copies[0]] }, copies[0], offset);
+          scene = { ...scene, assets: [...scene.assets, ...copies] };
+          created.push({ id: copies[0].id, name: copies[0].name });
+          continue;
+        }
+        const copyId = ctx.makeId(ref.kind === 'camera' ? 'cam' : 'light');
         const position = ref.object.position || { x: 0, y: 0, z: 0 };
         const copy = { ...ref.object, id: copyId, name: uniqueName(scene, ref.object.name || 'Objekt'), position: { x: position.x + offset.x, y: position.y + offset.y, z: position.z + offset.z } };
-        if (ref.kind === 'asset') scene = { ...scene, assets: [...scene.assets, copy as SetDesignAsset] };
-        else if (ref.kind === 'camera') scene = { ...scene, cameras: [...(scene.cameras || []), copy as SetDesignCameraObject] };
+        if (ref.kind === 'camera') scene = { ...scene, cameras: [...(scene.cameras || []), copy as SetDesignCameraObject] };
         else scene = { ...scene, lights: [...scene.lights, copy as SetDesignLight] };
         created.push({ id: copyId, name: copy.name || copyId });
       }
-      return { scene, ui: { selectedIds: created.map((c) => c.id), activeId: created[created.length - 1].id }, result: { created } };
+      return { scene, ui: { selectedIds: created.map((c) => c.id), activeId: created[created.length - 1].id }, result: { id: created[0].id, created } };
     },
   },
   {
@@ -641,10 +662,11 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
     label: 'Löschen',
     menu: ['Objekt'],
     shortcut: 'X / Entf',
-    description: 'Delete objects (default: the selection). The last camera cannot be deleted.',
+    description: 'Delete objects (default: the selection); groups and parents are deleted with everything inside them (use group.ungroup to keep the contents). The last camera cannot be deleted.',
     params: { objects: { type: 'array', description: 'Object ids or names.', items: { type: 'string' } } },
     run: (ctx, args) => {
-      const list = targetIds(ctx, args.objects);
+      const given = targetIds(ctx, args.objects);
+      const list = [...new Set([...given, ...given.flatMap((id) => descendantIds(ctx.scene, id))])];
       if (!list.length) throw new Error('Nothing to delete: pass objects or select something.');
       const cameras = (ctx.scene.cameras || []).filter((camera) => !list.includes(camera.id));
       if ((ctx.scene.cameras || []).length > 0 && cameras.length === 0) throw new Error('The set needs at least one camera.');
@@ -831,7 +853,7 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       const selected = asString(args.what) === 'selected';
       const only = selected ? ctx.ui.selectedIds : null;
       if (selected && !only?.length) throw new Error('Nothing selected.');
-      const bounds = ctx.services.bounds?.(only) || approxBounds(ctx.scene, only) || { min: { x: -2, y: 0, z: -2 }, max: { x: 2, y: 2, z: 2 } };
+      const bounds = ctx.services.bounds?.(only) || approxBounds(ctx.scene, only, ctx.services) || { min: { x: -2, y: 0, z: -2 }, max: { x: 2, y: 2, z: 2 } };
       return { scene: { ...ctx.scene, camera: frameBounds(ctx.scene, bounds) }, ui: { lookThroughCamera: false }, undoable: false, result: { framed: selected ? 'selected' : 'all' } };
     },
   },
@@ -1099,7 +1121,9 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       const item = presets.find((entry) => entry.id === asString(args.preset) || entry.label.toLowerCase() === String(args.preset).toLowerCase());
       if (!item) throw new Error(`Unknown material preset. Use one of: ${presets.map((p) => p.id).join(', ')}.`);
       const meta = item.metadata as Record<string, unknown>;
-      const list = targetIds(ctx, args.objects).filter((id) => findSceneObject(ctx.scene, id)?.kind === 'asset');
+      const picked = targetIds(ctx, args.objects).filter((id) => findSceneObject(ctx.scene, id)?.kind === 'asset');
+      const map = assetMap(ctx.scene);
+      const list = [...new Set(picked.flatMap((id) => (map.get(id)?.kind === 'group' ? descendantIds(ctx.scene, id) : [id])))].filter((id) => map.get(id)?.kind !== 'group');
       if (!list.length) throw new Error('Select or pass meshes/models.');
       const scene = { ...ctx.scene, assets: ctx.scene.assets.map((asset) => (list.includes(asset.id) ? { ...asset, material: { ...asset.material, ...(typeof meta.color === 'string' ? { color: meta.color } : {}), ...(typeof meta.roughness === 'number' ? { roughness: meta.roughness } : {}), ...(typeof meta.metalness === 'number' ? { metalness: meta.metalness } : {}) } } : asset)) };
       return { scene, result: { preset: item.label, objects: list.length } };
@@ -1160,6 +1184,90 @@ export const SET_DESIGN_COMMANDS: SetDesignCommand[] = [
       return { ui: { workspaceTab: tab }, undoable: false, result: { tab } };
     },
   },
+  ...BUILDER_COMMANDS,
+  {
+    id: 'scene.batch',
+    label: 'Mehrere Schritte',
+    menu: ['Bearbeiten'],
+    description: 'Run several commands as one atomic step: either all succeed or nothing changes, and the whole batch is one undo step. Each entry is { command: "<command id>", args: {…}, as?: "alias" }. Later commands can name objects created earlier by their name, by "$alias", or by "$N" (the id created by step N, counting from 1). Returns every step\'s result including new ids. Example: [{ command: "build.room", args: { name: "Kitchen", width: 4, depth: 3 }, as: "room" }, { command: "build.furniture", args: { type: "table", parent: "$room" } }, { command: "object.drop_to_floor", args: { objects: ["Table"] } }].',
+    params: {
+      commands: {
+        type: 'array',
+        description: 'Steps in order: [{ command, args, as }]. Any command from setdesign_list_commands except edit.undo/edit.redo.',
+        items: {
+          type: 'object',
+          description: 'One step.',
+          properties: {
+            command: { type: 'string', description: 'Command id, e.g. object.add_primitive, material.set, build.room.' },
+            args: { type: 'object', description: 'Arguments of that command.' },
+            as: { type: 'string', description: 'Alias for the id this step creates; refer to it later as "$alias".' },
+          },
+        },
+      },
+      label: { type: 'string', description: 'Name of the undo step (default "Mehrere Schritte").' },
+    },
+    required: ['commands'],
+    run: (ctx, args) => {
+      const steps = Array.isArray(args.commands) ? args.commands as Array<Record<string, unknown>> : null;
+      if (!steps || !steps.length) throw new Error('commands must be a non-empty array of { command, args }.');
+      if (steps.length > 1000) throw new Error('A batch takes at most 1000 commands.');
+      let scene = ctx.scene;
+      let ui = ctx.ui;
+      const aliases = new Map<string, string>();
+      let undoable = false;
+      const results: Array<{ step: number; command: string; id?: string; result: unknown }> = [];
+      const substitute = (value: unknown): unknown => {
+        if (typeof value === 'string' && value.startsWith('$')) {
+          const key = value.slice(1);
+          if (aliases.has(key)) return aliases.get(key);
+          if (/^\d+$/.test(key)) {
+            const step = results[Number(key) - 1];
+            if (!step || !step.id) throw new Error(`${value} refers to step ${key}, which ${step ? 'created no object' : 'has not run yet'}.`);
+            return step.id;
+          }
+          throw new Error(`Unknown reference ${value}. Define it with "as" on an earlier step.`);
+        }
+        if (Array.isArray(value)) return value.map(substitute);
+        if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, substitute(v)]));
+        return value;
+      };
+      steps.forEach((step, index) => {
+        const id = asString(step?.command);
+        const where = `Step ${index + 1}${id ? ` (${id})` : ''}`;
+        try {
+          if (!id) throw new Error('needs command.');
+          if (id === 'edit.undo' || id === 'edit.redo') throw new Error('undo/redo cannot run inside a batch.');
+          const command = getCommand(id);
+          if (!command) throw new Error('unknown command. Use setdesign_list_commands.');
+          const stepArgs = substitute(step.args && typeof step.args === 'object' ? step.args : {}) as Record<string, unknown>;
+          for (const key of command.required || []) {
+            if (stepArgs[key] === undefined || stepArgs[key] === null || stepArgs[key] === '') throw new Error(`needs ${key}.`);
+          }
+          const outcome = command.run({ scene, ui, makeId: ctx.makeId, services: ctx.services }, stepArgs);
+          if (outcome.scene && outcome.scene !== scene) { scene = outcome.scene; if (outcome.undoable !== false) undoable = true; }
+          if (outcome.ui) ui = { ...ui, ...outcome.ui };
+          const result = outcome.result ?? { ok: true };
+          const r = result as Record<string, unknown>;
+          const createdId = typeof r?.id === 'string' ? r.id : Array.isArray(r?.created) && typeof (r.created as Array<{ id?: string }>)[0]?.id === 'string' ? (r.created as Array<{ id: string }>)[0].id : undefined;
+          results.push({ step: index + 1, command: id, ...(createdId ? { id: createdId } : {}), result });
+          const alias = asString(step.as);
+          if (alias) {
+            if (!createdId) throw new Error(`"as": "${alias}" needs a step that creates an object.`);
+            aliases.set(alias.replace(/^\$/, ''), createdId);
+          }
+        } catch (error) {
+          throw new Error(`${where} failed: ${error instanceof Error ? error.message : String(error)} Nothing was changed (the batch is all-or-nothing).`);
+        }
+      });
+      return {
+        scene: scene !== ctx.scene ? scene : undefined,
+        ui: ui !== ctx.ui ? ui : undefined,
+        undoable,
+        label: asString(args.label),
+        result: { steps: results.length, label: asString(args.label) || 'Mehrere Schritte', created: Object.fromEntries(aliases), results },
+      };
+    },
+  },
 ];
 
 /** Pose for a camera move keyframe from args (explicit), the active camera or the free view. */
@@ -1191,7 +1299,8 @@ function resolveAimTarget(ctx: CommandContext, args: Record<string, unknown>): S
   if (objectKey) {
     const ref = findSceneObject(ctx.scene, objectKey);
     if (!ref) throw new Error(`No object "${objectKey}" to aim at.`);
-    // Primitives are centred on their position, so this aims at their middle.
+    // Aim at the middle of the object's world box (primitives: their centre; groups: their contents).
+    if (ref.kind === 'asset') return worldCenter(ctx.scene, ref.object.id, ctx.services) || { ...ref.object.position };
     return { ...(ref.object.position || { x: 0, y: 0, z: 0 }) };
   }
   const point = asVec(args.lookAtPoint);

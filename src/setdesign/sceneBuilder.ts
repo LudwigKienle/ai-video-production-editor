@@ -16,8 +16,10 @@ import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLigh
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
-import type { SetDesignAsset, SetDesignCameraObject, SetDesignLight, SetDesignShading, SetDesignState } from '../types';
+import type { SetDesignAsset, SetDesignCameraObject, SetDesignLight, SetDesignMaterialMaps, SetDesignShading, SetDesignState } from '../types';
 import { verticalFovDeg, viewOffsetForShift } from './cameraMath.ts';
+import { rememberModelBounds } from './modelBoundsCache.ts';
+import type { Bounds } from './commands.ts';
 
 const DEG = Math.PI / 180;
 
@@ -51,7 +53,11 @@ const primitiveGeometry = (primitive: SetDesignAsset['primitive']): THREE.Buffer
   }
 };
 
-/** A neutral 1.75 m stand-in figure centred on its position (like the other primitives). */
+/**
+ * A neutral 1.75 m stand-in figure centred on its position (like the other primitives). It fills
+ * its nominal 0.5 × 0.3 × 1.75 m box exactly (feet on the bottom, head at the top), so analytic
+ * bounds and floor contact are exact.
+ */
 const buildPerson = (material: THREE.Material) => {
   const group = new THREE.Group();
   const add = (geometry: THREE.BufferGeometry, x: number, y: number, z = 0) => {
@@ -59,21 +65,35 @@ const buildPerson = (material: THREE.Material) => {
     mesh.position.set(x, y - 0.875, z);
     group.add(mesh);
   };
-  add(new THREE.SphereGeometry(0.11, 24, 16), 0, 1.62);
-  add(new THREE.CapsuleGeometry(0.17, 0.42, 6, 16), 0, 1.2);
-  add(new THREE.CapsuleGeometry(0.075, 0.68, 4, 12), -0.1, 0.45);
-  add(new THREE.CapsuleGeometry(0.075, 0.68, 4, 12), 0.1, 0.45);
-  add(new THREE.CapsuleGeometry(0.05, 0.52, 4, 12), -0.25, 1.15);
-  add(new THREE.CapsuleGeometry(0.05, 0.52, 4, 12), 0.25, 1.15);
+  add(new THREE.SphereGeometry(0.11, 24, 16), 0, 1.64);
+  add(new THREE.CapsuleGeometry(0.15, 0.42, 6, 16), 0, 1.2);
+  add(new THREE.CapsuleGeometry(0.075, 0.68, 4, 12), -0.1, 0.415);
+  add(new THREE.CapsuleGeometry(0.075, 0.68, 4, 12), 0.1, 0.415);
+  add(new THREE.CapsuleGeometry(0.05, 0.52, 4, 12), -0.2, 1.15);
+  add(new THREE.CapsuleGeometry(0.05, 0.52, 4, 12), 0.2, 1.15);
   // Nose marks the facing direction (Blender front: -Y, i.e. +Z in three.js).
-  add(new THREE.ConeGeometry(0.025, 0.06, 8).rotateX(Math.PI / 2), 0, 1.62, 0.12);
+  add(new THREE.ConeGeometry(0.025, 0.06, 8).rotateX(Math.PI / 2), 0, 1.64, 0.12);
   return group;
 };
 
-/** Mesh (or group) for a primitive, as the set design viewport draws it. */
+/** Mesh (or group) for a primitive, as the set design viewport draws it (without texture maps). */
 export const buildPrimitiveObject = (asset: SetDesignAsset): THREE.Object3D => {
   const material = assetMaterial(asset);
   return asset.primitive === 'person' ? buildPerson(material) : new THREE.Mesh(primitiveGeometry(asset.primitive), material);
+};
+
+const boundsOf = (object: THREE.Object3D): Bounds | null => {
+  object.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(object);
+  return box.isEmpty() ? null : { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
+};
+
+/** Load a model and measure its geometry in its own frame (fills the model bounds cache). */
+export const measureModelBounds = async (asset: SetDesignAsset): Promise<Bounds | null> => {
+  const object = await loadModel(asset);
+  const bounds = boundsOf(object);
+  if (bounds) rememberModelBounds(asset, bounds);
+  return bounds;
 };
 
 const modelCache = new Map<string, Promise<THREE.Object3D>>();
@@ -106,16 +126,71 @@ const depthMaterial = () => new THREE.ShaderMaterial({
   fragmentShader: 'uniform float near; uniform float far; varying float vDepth; void main() { float d = clamp((vDepth - near) / max(far - near, 1e-4), 0.0, 1.0); gl_FragColor = vec4(vec3(1.0 - d), 1.0); }',
 });
 
-const assetMaterial = (asset: SetDesignAsset) => new THREE.MeshStandardMaterial({
-  color: new THREE.Color(asset.material?.color || '#b4b4b8'),
-  roughness: asset.material?.roughness ?? 0.8,
-  metalness: asset.material?.metalness ?? 0,
-  transparent: (asset.material?.opacity ?? 1) < 1,
-  opacity: asset.material?.opacity ?? 1,
-});
+/** Texture slots of MeshStandardMaterial per map, and whether the map holds colour (sRGB). */
+export const MAP_SLOTS: Record<keyof SetDesignMaterialMaps, { slot: 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'aoMap' | 'displacementMap' | 'emissiveMap'; srgb: boolean }> = {
+  baseColor: { slot: 'map', srgb: true },
+  normal: { slot: 'normalMap', srgb: false },
+  roughness: { slot: 'roughnessMap', srgb: false },
+  metalness: { slot: 'metalnessMap', srgb: false },
+  ao: { slot: 'aoMap', srgb: false },
+  displacement: { slot: 'displacementMap', srgb: false },
+  emissive: { slot: 'emissiveMap', srgb: true },
+};
 
-/** Signature of everything that requires rebuilding an asset's meshes. */
-const assetSignature = (asset: SetDesignAsset) => JSON.stringify([asset.kind, asset.primitive, asset.url, asset.format, asset.material]);
+export type TextureLoaderFn = (url: string) => Promise<THREE.Texture>;
+const defaultTextureLoader: TextureLoaderFn = (url) => new THREE.TextureLoader().loadAsync(url);
+const textureCache = new Map<string, Promise<THREE.Texture>>();
+
+/** Material of an asset. With `textures` its maps are loaded and attached when ready (failures are reported, not fatal). */
+const assetMaterial = (asset: SetDesignAsset, textures?: { load: TextureLoaderFn; onReady: () => void; onError: (url: string, error: unknown) => void }) => {
+  const m = asset.material || {};
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(m.color || (m.maps?.baseColor ? '#ffffff' : '#b4b4b8')),
+    roughness: m.roughness ?? (m.maps?.roughness ? 1 : 0.8),
+    metalness: m.metalness ?? (m.maps?.metalness ? 1 : 0),
+    transparent: (m.opacity ?? 1) < 1,
+    opacity: m.opacity ?? 1,
+    emissive: new THREE.Color(m.emissive || (m.maps?.emissive ? '#ffffff' : '#000000')),
+    emissiveIntensity: m.emissiveIntensity ?? 1,
+    displacementScale: m.displacementScale ?? 0,
+  });
+  if (textures && m.maps) {
+    const [ru, rv] = m.repeat || [1, 1];
+    for (const [key, url] of Object.entries(m.maps) as Array<[keyof SetDesignMaterialMaps, string]>) {
+      const slot = MAP_SLOTS[key];
+      if (!slot || !url) continue;
+      let promise = textureCache.get(url);
+      if (!promise) {
+        promise = textures.load(url);
+        textureCache.set(url, promise);
+        promise.catch(() => textureCache.delete(url));
+      }
+      promise.then((base) => {
+        if (material.userData.disposed) return;
+        const texture = base.clone();
+        texture.colorSpace = slot.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(ru, rv);
+        texture.needsUpdate = true;
+        (material as unknown as Record<string, THREE.Texture | null>)[slot.slot] = texture;
+        material.needsUpdate = true;
+        textures.onReady();
+      }).catch((error) => textures.onError(url, error));
+    }
+  }
+  return material;
+};
+
+const disposeMaterial = (material: THREE.Material | undefined) => {
+  if (!material) return;
+  material.userData.disposed = true;
+  for (const { slot } of Object.values(MAP_SLOTS)) (material as unknown as Record<string, THREE.Texture | null>)[slot]?.dispose?.();
+  material.dispose();
+};
+
+/** Signature of everything that requires rebuilding an asset's meshes (materials are restyled in place). */
+const assetSignature = (asset: SetDesignAsset) => JSON.stringify([asset.kind, asset.primitive, asset.url, asset.format]);
 
 // ---------------------------------------------------------------------------
 // Overlays (viewport only)
@@ -196,12 +271,16 @@ const setOverlayColor = (object: THREE.Object3D, color: number) => {
 // ---------------------------------------------------------------------------
 // The scene graph
 
-type Entry = { root: THREE.Group; content: THREE.Object3D | null; signature: string; loading?: boolean; gizmo?: THREE.Object3D; light?: THREE.Light; target?: THREE.Object3D };
+type Entry = { root: THREE.Group; content: THREE.Object3D | null; signature: string; loading?: boolean; gizmo?: THREE.Object3D; light?: THREE.Light; target?: THREE.Object3D; localBounds?: Bounds | null };
 
 export type SetSceneOptions = {
   mode: BuildMode;
   onModelError?: (asset: SetDesignAsset, error: unknown) => void;
+  /** A texture map could not be loaded (the material is used without it). */
+  onTextureError?: (asset: SetDesignAsset, url: string, error: unknown) => void;
   onChange?: () => void;
+  /** Texture loader (default THREE.TextureLoader); tests inject one. */
+  loadTexture?: TextureLoaderFn;
 };
 
 let rectLightsReady = false;
@@ -271,14 +350,15 @@ export const createSetScene = (options: SetSceneOptions) => {
       const original = mesh.userData.originalMaterial as THREE.Material | THREE.Material[];
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      const baseColor = asset.kind === 'primitive'
+      const own = asset.kind === 'primitive' || !!asset.material?.replaceModelMaterials;
+      const baseColor = own
         ? asset.material?.color || '#b4b4b8'
         : `#${(((Array.isArray(original) ? original[0] : original) as THREE.MeshStandardMaterial)?.color || new THREE.Color('#b4b4b8')).getHexString()}`;
-      const key = `${pass}|${shading}|${baseColor}|${asset.kind === 'primitive' ? JSON.stringify(asset.material || {}) : ''}`;
+      const key = `${pass}|${shading}|${baseColor}|${own ? JSON.stringify(asset.material || {}) : ''}`;
       if (mesh.userData.styleKey === key) continue;
       mesh.userData.styleKey = key;
       const previous = mesh.userData.styledMaterial as THREE.Material | undefined;
-      previous?.dispose();
+      disposeMaterial(previous);
       mesh.userData.styledMaterial = undefined;
       if (pass === 'depth') mesh.material = depth;
       else if (pass === 'clay') mesh.material = CLAY;
@@ -288,26 +368,39 @@ export const createSetScene = (options: SetSceneOptions) => {
       } else if (shading === 'solid') {
         mesh.userData.styledMaterial = new THREE.MeshStandardMaterial({ color: new THREE.Color(baseColor), roughness: 0.9, metalness: 0 });
         mesh.material = mesh.userData.styledMaterial;
-      } else if (asset.kind === 'primitive') {
-        mesh.userData.styledMaterial = assetMaterial(asset);
+      } else if (own) {
+        // Material preview / rendered: the asset's PBR material with its texture maps.
+        mesh.userData.styledMaterial = assetMaterial(asset, textureHooks(asset));
         mesh.material = mesh.userData.styledMaterial;
       } else mesh.material = original;
     }
   };
 
-  const disposeObject = (object: THREE.Object3D) => {
-    object.traverse((child) => {
+  const textureHooks = (asset: SetDesignAsset) => ({
+    load: options.loadTexture || defaultTextureLoader,
+    onReady: () => options.onChange?.(),
+    onError: (url: string, error: unknown) => options.onTextureError?.(asset, url, error),
+  });
+
+  const disposeObject = (object: THREE.Object3D | null | undefined) => {
+    object?.traverse((child) => {
       const mesh = child as THREE.Mesh;
       mesh.geometry?.dispose?.();
+      disposeMaterial(mesh.userData?.styledMaterial as THREE.Material | undefined);
     });
   };
 
   const removeEntry = (id: string) => {
     const entry = entries.get(id);
     if (!entry) return;
-    scene.remove(entry.root);
+    // Children of other entries survive (the parenting pass re-attaches them).
+    for (const child of [...entry.root.children]) {
+      if (child.userData.objectId && child.userData.objectId !== id) scene.add(child);
+    }
+    entry.root.removeFromParent();
     if (entry.target) scene.remove(entry.target);
-    disposeObject(entry.root);
+    disposeObject(entry.content);
+    if (entry.gizmo) disposeObject(entry.gizmo);
     entries.delete(id);
   };
 
@@ -321,7 +414,10 @@ export const createSetScene = (options: SetSceneOptions) => {
       entry = { root, content: null, signature };
       entries.set(asset.id, entry);
       scene.add(root);
-      if (asset.kind === 'primitive') {
+      if (asset.kind === 'group') {
+        // An empty: no geometry, only a transform for its children.
+        root.userData.isGroup = true;
+      } else if (asset.kind === 'primitive') {
         const material = assetMaterial(asset);
         const content = asset.primitive === 'person' ? buildPerson(material) : new THREE.Mesh(primitiveGeometry(asset.primitive), material);
         entry.content = content;
@@ -333,6 +429,8 @@ export const createSetScene = (options: SetSceneOptions) => {
           if (entries.get(asset.id) !== current) return;
           current.loading = false;
           current.content = content;
+          current.localBounds = boundsOf(content);
+          if (current.localBounds) rememberModelBounds(asset, current.localBounds);
           current.root.add(content);
           styleAsset(asset, content);
           options.onChange?.();
@@ -493,6 +591,26 @@ export const createSetScene = (options: SetSceneOptions) => {
       for (const camera of state.cameras || []) { keep.add(camera.id); ensureCamera(camera, aspect, camera.id === state.activeCameraId); }
       for (const light of state.lights) { keep.add(light.id); ensureLight(light); }
       for (const id of [...entries.keys()]) if (!keep.has(id)) removeEntry(id);
+      // Scene graph: nest asset roots under their parent's root (transforms are parent-relative).
+      const byId = new Map(state.assets.map((asset) => [asset.id, asset]));
+      const validParent = (asset: SetDesignAsset) => {
+        const seen = new Set([asset.id]);
+        let cursor = asset.parentId ? byId.get(asset.parentId) : undefined;
+        while (cursor) {
+          if (seen.has(cursor.id)) return null;
+          seen.add(cursor.id);
+          cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+        }
+        return asset.parentId && byId.has(asset.parentId) ? asset.parentId : null;
+      };
+      for (const asset of state.assets) {
+        const entry = entries.get(asset.id);
+        if (!entry) continue;
+        const parentId = validParent(asset);
+        const desired = (parentId && entries.get(parentId)?.root) || scene;
+        if (entry.root.parent !== desired) desired.add(entry.root);
+      }
+      scene.updateMatrixWorld(true);
       applyLighting(state);
       api.setSelection([...selection.ids], selection.active);
     },
@@ -518,16 +636,20 @@ export const createSetScene = (options: SetSceneOptions) => {
     /** World bounds of objects (all visible assets when ids is null). */
     bounds(ids: string[] | null) {
       const box = new THREE.Box3();
+      scene.updateMatrixWorld(true);
+      const shown = (object: THREE.Object3D) => { for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false; return true; };
       for (const [id, entry] of entries) {
         if (ids && !ids.includes(id)) continue;
-        if (!entry.root.visible) continue;
+        if (!shown(entry.root)) continue;
         if (!ids && !entry.content) continue;
-        entry.root.updateMatrixWorld(true);
         if (entry.content) box.expandByObject(entry.content);
-        else box.expandByPoint(entry.root.position);
+        else if (entry.root.userData.isGroup && entry.root.children.length) box.expandByObject(entry.root);
+        else box.expandByPoint(entry.root.getWorldPosition(new THREE.Vector3()));
       }
       return box.isEmpty() ? null : { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
     },
+    /** Measured bounds of a loaded model in its own frame (null while loading or for primitives). */
+    localBounds: (id: string) => entries.get(id)?.localBounds || null,
     /** Resolves when all models are loaded (or failed). */
     async whenLoaded(timeoutMs = 20000) {
       const start = Date.now();

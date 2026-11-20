@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import {
   Box, ChevronDown, ChevronRight, Circle, Cone, Cylinder, Donut, Lamp, Lightbulb, Package,
-  RectangleHorizontal, Square, Sun, User, Video, BrickWall,
+  RectangleHorizontal, Square, Sun, User, Video, BrickWall, Boxes,
 } from 'lucide-react';
 import { setDesignBus } from '../../setdesign/bus.ts';
 
@@ -48,6 +48,7 @@ export const ObjectIcon = ({ type, size = 14 }: { type: string; size?: number })
     case 'torus': return <Donut {...props} color="#f0a66a" />;
     case 'wall': return <BrickWall {...props} color="#f0a66a" />;
     case 'person': return <User {...props} color="#f0a66a" />;
+    case 'group': return <Boxes {...props} color="#9ad19a" />;
     default: return <Box {...props} color="#f0a66a" />;
   }
 };

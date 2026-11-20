@@ -9,6 +9,7 @@ const { renderTimeline, prepareVideoProxy, resolveSourcePath, ffmpegBinaryPath }
 const { registerFxBakeIpc } = require('./fx-bake');
 const { registerOfxIpc } = require('./ofx/registerOfxIpc');
 const { registerMediaBrowseIpc } = require('./media-browse');
+const { registerLibrary3dIpc } = require('./library-download');
 const {
   ensureAudioMasteringEnvironment,
   probeAudioMasteringEnvironment,
@@ -444,6 +445,8 @@ const ofxIpc = registerOfxIpc(ipcMain, { getFfmpegPath: () => ffmpegBinaryPath }
 app.on('will-quit', () => ofxIpc.dispose());
 // Read-only folder browsing for the Media (import) page.
 registerMediaBrowseIpc(ipcMain, { getPath: (name) => app.getPath(name) });
+// 3D libraries (Poly Haven, ambientCG, Sketchfab, Smithsonian): downloads with an app User-Agent, cache without a project.
+registerLibrary3dIpc(ipcMain, { getPath: (name) => app.getPath(name), version: app.getVersion() });
 
 ipcMain.handle('project:exportVideo', async (event, { folderPath, project, settings }) => {
   try {

@@ -508,6 +508,10 @@ const SetDesignWorkspace: React.FC<SetDesignWorkspaceProps> = ({
     if (asset.kind === 'primitive') {
       return createPrimitive(asset);
     }
+    // Groups (from the pro workspace) have no geometry here; the classic page does not nest children.
+    if (asset.kind === 'group') {
+      return new THREE.Group();
+    }
     if (!asset.url) {
       throw new Error('Missing asset URL.');
     }

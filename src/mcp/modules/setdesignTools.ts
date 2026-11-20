@@ -25,6 +25,7 @@ const READ_ONLY = new Set([
   'setdesign_get_scene', 'setdesign_list_commands', 'setdesign_open_workspace', 'setdesign_set_view', 'setdesign_select_objects', 'setdesign_set_overlays',
   'setdesign_get_camera_path', 'setdesign_seek_camera_path', 'setdesign_list_presets', 'setdesign_get_pack_manifest', 'setdesign_export_blender_script',
   'setdesign_search_sketchfab', 'setdesign_list_library_assets', 'setdesign_play_camera_path',
+  'setdesign_query', 'setdesign_describe_scene', 'setdesign_builder_guide',
 ]);
 
 const PREFIX = 'Set Design (3D set/location blocking, Blender-style; coordinates Z up, metres, degrees): ';
@@ -200,7 +201,7 @@ const EXTRA_TOOLS: StudioTool[] = [
   },
   {
     name: 'setdesign_import_sketchfab',
-    description: `${PREFIX}download a Sketchfab model (uid from setdesign_search_sketchfab) as GLB and place it in the set with author and licence credit. Needs a Sketchfab API token in Settings.`,
+    description: `${PREFIX}download a Sketchfab model (uid from setdesign_search_sketchfab or library_search) into the project and place it in the set with author and licence credit (same as library_import_model with provider "sketchfab"). Needs a Sketchfab API token in Settings.`,
     writes: true,
     parameters: {
       type: 'object',
@@ -213,22 +214,14 @@ const EXTRA_TOOLS: StudioTool[] = [
       },
       required: ['uid'],
     },
-    handler: async (args) => {
+    handler: async (args, ctx) => {
       const uid = asString(args.uid);
       if (!uid) throw new Error('Pass uid.');
-      const token = readSketchfabToken();
-      if (!token) throw new Error('Add a Sketchfab API token in Settings (Set Design › Klassisch) to download models.');
-      const { getSketchfabDownloadUrl } = await import('../../services/sketchfabService.ts');
-      const url = await getSketchfabDownloadUrl(uid, token);
-      if (!url) throw new Error('Sketchfab offers no GLB/glTF for this model.');
-      const result = setDesignBus.run('object.add_model', {
-        url,
-        format: 'glb',
-        name: asString(args.name) || 'Sketchfab-Modell',
-        location: args.location,
-        attribution: { author: asString(args.author) || 'Sketchfab', license: asString(args.license) || 'see Sketchfab', url: `https://sketchfab.com/3d-models/${uid}` },
-      });
-      return { object: result };
+      // Same path as library_import_model: the files are stored in the project (Sketchfab download URLs expire).
+      const { SETDESIGN_LIBRARY_TOOLS } = await import('./setdesignLibraryTools.ts');
+      const tool = SETDESIGN_LIBRARY_TOOLS.find((entry) => entry.name === 'library_import_model');
+      if (!tool) throw new Error('3D library import is not available in this build.');
+      return tool.handler({ provider: 'sketchfab', id: uid, name: asString(args.name), position: args.location }, ctx);
     },
   },
   {

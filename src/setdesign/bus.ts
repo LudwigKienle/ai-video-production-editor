@@ -94,13 +94,20 @@ export const createSetDesignBus = (options: { makeId?: (prefix: string) => strin
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    /** Capabilities currently provided (viewport bounds, model bounds, shots …). */
+    getServices: (): CommandServices => services,
     /** Called by the mounted viewport; returns a detach function. */
     provideServices(next: CommandServices) {
+      const previous = { ...services };
       services = { ...services, ...next };
       return () => {
+        // Restore what was provided before (e.g. the app's model bounds after the viewport unmounts).
+        const restored = { ...services } as Record<string, unknown>;
         for (const key of Object.keys(next) as Array<keyof CommandServices>) {
-          if (services[key] === next[key]) delete services[key];
+          if (services[key] !== next[key]) continue;
+          if (previous[key]) restored[key] = previous[key]; else delete restored[key];
         }
+        services = restored as CommandServices;
       };
     },
     provideAction(name: string, fn: (args: Record<string, unknown>) => Promise<unknown>) {
@@ -130,7 +137,7 @@ export const createSetDesignBus = (options: { makeId?: (prefix: string) => strin
       const outcome = command.run({ scene: before, ui, makeId, services }, args || {});
       if (outcome.scene && outcome.scene !== before) {
         // Inside an interaction (slider drag) the whole gesture is one undo step.
-        if (outcome.undoable !== false && !interaction) pushUndo({ label: command.label, scene: before });
+        if (outcome.undoable !== false && !interaction) pushUndo({ label: outcome.label || command.label, scene: before });
         writeScene(outcome.scene);
       }
       if (outcome.ui) ui = { ...ui, ...outcome.ui };

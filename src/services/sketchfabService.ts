@@ -32,6 +32,13 @@ export interface SketchfabSearchResponse {
 
 const SKETCHFAB_API_BASE = 'https://api.sketchfab.com/v3';
 
+/** localStorage key of the user's Sketchfab API token (Set Design classic page, Settings › 3D libraries). */
+export const SKETCHFAB_TOKEN_STORAGE_KEY = 'sketchfab_token';
+
+export const readSketchfabToken = (): string => {
+    try { return localStorage.getItem(SKETCHFAB_TOKEN_STORAGE_KEY) || ''; } catch { return ''; }
+};
+
 export const searchSketchfabModels = async (
     query: string,
     apiToken?: string
